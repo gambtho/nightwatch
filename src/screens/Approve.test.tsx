@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Approve from "./Approve";
+import { AUTO_PAUSE_THRESHOLD } from "../lib/grading";
 
 test("shows the workflow name and its schedule label", () => {
   render(<Approve onApproved={() => {}} />);
@@ -25,4 +26,11 @@ test("approving reports up", async () => {
   render(<Approve onApproved={onApproved} />);
   await userEvent.click(screen.getByRole("button", { name: "Approve & schedule" }));
   expect(onApproved).toHaveBeenCalledOnce();
+});
+
+test("the auto-pause note is derived from AUTO_PAUSE_THRESHOLD, not a hardcoded digit", () => {
+  render(<Approve onApproved={() => {}} />);
+  expect(
+    screen.getByText(new RegExp(`It stops after ${AUTO_PAUSE_THRESHOLD} bad runs`)),
+  ).toBeInTheDocument();
 });

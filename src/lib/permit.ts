@@ -30,3 +30,7 @@ export function writes(permit: Permit): Capability[] {
 export function permitCounts(permit: Permit): { reads: number; writes: number } {
   return { reads: reads(permit).length, writes: writes(permit).length };
 }
+
+export function maxCostLabel(permit: Permit): string {
+  return `max $${(permit.maxCostCents / 100).toFixed(2)} / run`;
+}

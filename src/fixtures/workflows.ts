@@ -28,9 +28,10 @@ export const supportDigest: Workflow = {
   paused: false,
 };
 
-// The same workflow as `supportDigest`, three weeks later, after the source
-// data quietly changed underneath it. Home never shows this one — it exists
-// so Alert can derive its story from graded data instead of hardcoding it.
+// The same workflow as `supportDigest`, in the weeks that follow, after the
+// source data quietly changed underneath it. Home never shows this one — it
+// exists so Alert can derive its story from graded data instead of
+// hardcoding it.
 export const supportDigestDegraded: Workflow = {
   id: "wf-digest",
   name: "Weekly support digest",
@@ -45,7 +46,7 @@ export const supportDigestDegraded: Workflow = {
   runs: [
     {
       id: "r1",
-      at: "2026-08-10T09:00:00Z",
+      at: "2026-08-31T09:00:00Z",
       status: "ok",
       costCents: 41,
       ruleResults: [
@@ -57,7 +58,7 @@ export const supportDigestDegraded: Workflow = {
     },
     {
       id: "r2",
-      at: "2026-08-17T09:00:00Z",
+      at: "2026-09-07T09:00:00Z",
       status: "ok",
       costCents: 41,
       ruleResults: [
@@ -69,7 +70,7 @@ export const supportDigestDegraded: Workflow = {
     },
     {
       id: "r3",
-      at: "2026-08-24T09:00:00Z",
+      at: "2026-09-14T09:00:00Z",
       status: "paused",
       costCents: 41,
       ruleResults: [

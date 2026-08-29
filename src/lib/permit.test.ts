@@ -2,6 +2,7 @@ import {
   DENIED_BY_DEFAULT,
   emptyPermit,
   grant,
+  maxCostLabel,
   permitCounts,
   reads,
   writes,
@@ -59,4 +60,10 @@ test("each permit gets its own denied list", () => {
   expect(a.denied).toEqual(b.denied);
   expect(a.denied).not.toBe(b.denied);
   expect(a.denied).not.toBe(DENIED_BY_DEFAULT);
+});
+
+test("maxCostLabel formats cents as a dollar-per-run label", () => {
+  expect(maxCostLabel(emptyPermit(200))).toBe("max $2.00 / run");
+  expect(maxCostLabel(emptyPermit(100))).toBe("max $1.00 / run");
+  expect(maxCostLabel(emptyPermit(50))).toBe("max $0.50 / run");
 });

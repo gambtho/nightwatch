@@ -2,6 +2,7 @@ import { useState } from "react";
 import Chat from "../components/Chat";
 import PermitDiagram from "../components/PermitDiagram";
 import { buildScript, permitAfter } from "../fixtures/conversation";
+import { maxCostLabel } from "../lib/permit";
 import "./screens.css";
 
 export default function Build({ onApprove }: { onApprove: () => void }) {
@@ -31,7 +32,7 @@ export default function Build({ onApprove }: { onApprove: () => void }) {
         <PermitDiagram
           permit={permit}
           highlightIds={highlightIds}
-          maxCostLabel="max $2.00 / run"
+          maxCostLabel={maxCostLabel(permit)}
         />
       </div>
     </div>
