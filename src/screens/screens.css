@@ -94,3 +94,33 @@
 .block-access {
   border-left-color: var(--accent);
 }
+
+.build {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.chat {
+  margin: 10px 0 14px;
+}
+
+.bubble {
+  border-radius: 12px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  font-size: 0.87rem;
+  max-width: 88%;
+}
+
+.bubble-user {
+  background: rgb(99 102 241 / 0.16);
+  margin-left: auto;
+  border-bottom-right-radius: 4px;
+}
+
+.bubble-nightshift {
+  background: var(--surface-2);
+  border-bottom-left-radius: 4px;
+}
