@@ -51,7 +51,7 @@
 ### Task 1: Scaffold, test harness, and design tokens
 
 **Files:**
-- Create: `package.json`, `vite.config.ts`, `tsconfig.json`, `tsconfig.node.json`, `.prettierrc`, `index.html`
+- Create: `package.json`, `vite.config.ts`, `tsconfig.json`, `.prettierrc`, `index.html`
 - Create: `src/main.tsx`, `src/App.tsx`, `src/setupTests.ts`, `src/styles/tokens.css`
 - Test: `src/App.test.tsx`
 
@@ -99,7 +99,7 @@
 `vite.config.ts`:
 
 ```typescript
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -540,7 +540,7 @@ test("marks highlighted capabilities as just added", () => {
   expect(screen.getByTestId("cap-slack-support-read")).not.toHaveClass("just-added");
 });
 
-test("renders an empty permit without crashing", () => {
+test("an empty permit shows an empty state on both sides", () => {
   render(
     <PermitDiagram
       permit={emptyPermit(200)}
@@ -548,7 +548,7 @@ test("renders an empty permit without crashing", () => {
       maxCostLabel="$2.00 / run"
     />,
   );
-  expect(screen.getByText("Nothing yet")).toBeInTheDocument();
+  expect(screen.getAllByText("Nothing yet")).toHaveLength(2);
 });
 ```
 
@@ -601,7 +601,6 @@ function CapabilityList({
 export default function PermitDiagram({ permit, highlightIds, maxCostLabel }: Props) {
   const readItems = reads(permit);
   const writeItems = writes(permit);
-  const allEmpty = readItems.length === 0 && writeItems.length === 0;
 
   return (
     <div className="permit">
@@ -610,11 +609,7 @@ export default function PermitDiagram({ permit, highlightIds, maxCostLabel }: Pr
         <div className="permit-row">
           <div className="permit-col">
             <div className="label read-label">Can read</div>
-            {allEmpty ? (
-              <div className="cap-empty">Nothing yet</div>
-            ) : (
-              <CapabilityList items={readItems} highlightIds={highlightIds} />
-            )}
+            <CapabilityList items={readItems} highlightIds={highlightIds} />
           </div>
 
           <div className="permit-arrow">→</div>
@@ -1263,7 +1258,7 @@ test("starts with only the first turn and an empty permit", () => {
   expect(
     screen.getByText(/Every Monday, look at last week's support tickets/),
   ).toBeInTheDocument();
-  expect(screen.getByText("Nothing yet")).toBeInTheDocument();
+  expect(screen.getAllByText("Nothing yet")).toHaveLength(2);
 });
 
 test("advancing the conversation grows the permit", async () => {
