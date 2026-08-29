@@ -1,0 +1,96 @@
+.screen {
+  padding: 28px 24px;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+.screen-narrow {
+  max-width: 620px;
+}
+
+.intake-head {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.intake-moon {
+  font-size: 2rem;
+}
+
+.intake-box {
+  width: 100%;
+  background: rgb(99 102 241 / 0.06);
+  border: 2px solid rgb(99 102 241 / 0.45);
+  border-radius: 12px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.95rem;
+  padding: 12px;
+  resize: vertical;
+}
+
+.starters-label {
+  margin-top: 18px;
+}
+
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.starter,
+.btn {
+  font-family: var(--font);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.starter {
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+}
+
+.btn {
+  margin-top: 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 0.9rem;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  margin-left: 8px;
+}
+
+.intake-foot {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 0.8rem;
+}
+
+.block {
+  border-left: 3px solid var(--border);
+  padding: 8px 0 8px 12px;
+  margin: 14px 0;
+}
+
+.block-can {
+  border-left-color: var(--read);
+}
+
+.block-cannot {
+  border-left-color: var(--write);
+  background: rgb(217 119 6 / 0.06);
+}
+
+.block-access {
+  border-left-color: var(--accent);
+}
