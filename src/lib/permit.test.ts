@@ -1,4 +1,11 @@
-import { emptyPermit, grant, permitCounts, reads, writes } from "./permit";
+import {
+  DENIED_BY_DEFAULT,
+  emptyPermit,
+  grant,
+  permitCounts,
+  reads,
+  writes,
+} from "./permit";
 import type { Capability } from "./types";
 
 const supportRead: Capability = {
@@ -44,4 +51,12 @@ test("reads and writes are separated by access", () => {
 test("permitCounts summarizes both sides", () => {
   const permit = grant(grant(emptyPermit(200), supportRead), digestWrite);
   expect(permitCounts(permit)).toEqual({ reads: 1, writes: 1 });
+});
+
+test("each permit gets its own denied list", () => {
+  const a = emptyPermit(200);
+  const b = emptyPermit(200);
+  expect(a.denied).toEqual(b.denied);
+  expect(a.denied).not.toBe(b.denied);
+  expect(a.denied).not.toBe(DENIED_BY_DEFAULT);
 });

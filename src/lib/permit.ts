@@ -9,7 +9,7 @@ export const DENIED_BY_DEFAULT = [
 ];
 
 export function emptyPermit(maxCostCents: number): Permit {
-  return { capabilities: [], denied: DENIED_BY_DEFAULT, maxCostCents };
+  return { capabilities: [], denied: [...DENIED_BY_DEFAULT], maxCostCents };
 }
 
 export function grant(permit: Permit, capability: Capability): Permit {
