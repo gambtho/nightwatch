@@ -124,3 +124,8 @@
   background: var(--surface-2);
   border-bottom-left-radius: 4px;
 }
+
+.approve-note {
+  font-size: 0.83rem;
+  margin-top: 16px;
+}
