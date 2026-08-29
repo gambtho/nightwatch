@@ -129,3 +129,41 @@
   font-size: 0.83rem;
   margin-top: 16px;
 }
+
+.wf-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  margin-bottom: 9px;
+}
+
+.wf-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.wf-ok {
+  color: var(--read);
+  font-size: 0.78rem;
+}
+
+.wf-card-line {
+  font-size: 0.79rem;
+}
+
+.home-foot {
+  text-align: center;
+  border-top: 1px solid var(--border);
+  padding-top: 13px;
+  margin-top: 16px;
+  font-size: 0.83rem;
+}
+
+.alert-channel {
+  background: rgb(217 119 6 / 0.1);
+  border: 1px solid rgb(217 119 6 / 0.45);
+  border-radius: 9px;
+  padding: 8px 11px;
+  font-size: 0.78rem;
+}
