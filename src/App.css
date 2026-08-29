@@ -1,0 +1,31 @@
+.demo-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.demo-nav-title {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-right: 10px;
+}
+
+.demo-nav-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.75rem;
+  padding: 3px 11px;
+}
+
+.demo-nav-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
