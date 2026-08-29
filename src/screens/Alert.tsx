@@ -1,6 +1,15 @@
+import { consecutiveFailures, failingRules, shouldAutoPause } from "../lib/grading";
+import { supportDigestDegraded } from "../fixtures/workflows";
 import "./screens.css";
 
 export default function Alert() {
+  const workflow = supportDigestDegraded;
+  const failing = failingRules(workflow);
+  const rule = failing[0];
+  const streak = consecutiveFailures(workflow, rule.id);
+  const otherRulesCount = workflow.rubric.length - failing.length;
+  const paused = shouldAutoPause(workflow);
+
   return (
     <div className="screen screen-narrow">
       <p className="dim alert-channel">
@@ -14,9 +23,10 @@ export default function Alert() {
 
       <div className="block block-cannot">
         <div className="label">THE RULE IT'S MISSING</div>
-        <div>"Flags anything security-related separately"</div>
+        <div>"{rule.text}"</div>
         <p className="dim">
-          Failed 3 Mondays running. Your other 2 rules are still fine.
+          Failed {streak} Mondays running. Your other {otherRulesCount} rules are still
+          fine.
         </p>
       </div>
 
@@ -29,15 +39,17 @@ export default function Alert() {
         </div>
       </div>
 
-      <div className="block block-can">
-        <div className="label">WHAT I DID ABOUT IT</div>
-        <div>
-          Paused it. It won't run again until you decide — I'd rather stop than keep
-          sending you something you trust and shouldn't.
+      {paused && (
+        <div className="block block-can">
+          <div className="label">WHAT I DID ABOUT IT</div>
+          <div>
+            Paused it. It won't run again until you decide — I'd rather stop than keep
+            sending you something you trust and shouldn't.
+          </div>
         </div>
-      </div>
+      )}
 
-      <button className="btn">Show me the 3 runs</button>
+      <button className="btn">Show me the {streak} runs</button>
       <button className="btn btn-secondary">Let's fix it</button>
       <button className="btn btn-secondary">It's fine, resume</button>
     </div>

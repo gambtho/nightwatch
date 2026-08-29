@@ -1,4 +1,5 @@
 import { consecutiveFailures, failingRules, shouldAutoPause } from "./grading";
+import { supportDigest, supportDigestDegraded } from "../fixtures/workflows";
 import type { Run, Workflow } from "./types";
 
 function run(id: string, securityPassed: boolean): Run {
@@ -59,4 +60,14 @@ test("auto-pause fires at three consecutive failures", () => {
 
 test("a workflow with no runs is not paused", () => {
   expect(shouldAutoPause(workflowWith([]))).toBe(false);
+});
+
+test("the healthy support digest fixture (shown on Home) has no failing streak", () => {
+  expect(consecutiveFailures(supportDigest, "security")).toBe(0);
+  expect(shouldAutoPause(supportDigest)).toBe(false);
+});
+
+test("the degraded support digest fixture (shown on Alert) has failed security 3 times running", () => {
+  expect(consecutiveFailures(supportDigestDegraded, "security")).toBe(3);
+  expect(shouldAutoPause(supportDigestDegraded)).toBe(true);
 });
