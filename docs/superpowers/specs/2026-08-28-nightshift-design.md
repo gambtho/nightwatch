@@ -78,8 +78,8 @@ hearing and sort it.
 | Artifact | In the user's words | What it becomes |
 |---|---|---|
 | **Steps** | "summarize last week's tickets" | Agent system prompt + kickoff message |
-| **Permit** | "only our support channel, don't let it email anyone" | Toolset + networking + vault + budget config |
-| **Rubric** | "never miss a security issue, keep it under a page" | Outcome definition enforced by a separate grader |
+| **Permit** | "only our support channel, don't let it email anyone" | Egress-proxy allowlist + credential grants + spend cap |
+| **Rubric** | "never miss a security issue, keep it under a page" | Gradeable criteria scored per run by a separate grader |
 
 The **rubric is what makes the alerting honest** (see [The four
 surfaces](#4-the-alert)). Without it, "something looks off" is guesswork. With it, the
@@ -144,10 +144,11 @@ the primary model).
 
 #### Why there is no runtime approval gate
 
-The substrate offers `always_ask`, which pauses a session until a human confirms a tool
-call. On a scheduled 3AM run that is a **stall, not a safeguard** — the session goes idle
-and waits. Approve-once is therefore correct for unattended work, and the design commits
-to it. Everything the user needs to judge must be legible on the approval screen.
+A runtime approval gate — pausing a run until a human confirms a tool call — is a
+**stall, not a safeguard** on a scheduled 3AM run: the workflow goes idle and waits for
+someone who is asleep. Approve-once is therefore correct for unattended work, and the
+design commits to it. Everything the user needs to judge must be legible on the approval
+screen.
 
 Consequence: **declared blast radius is content of the approval screen**, not a separate
 runtime mechanism.
@@ -175,32 +176,42 @@ better failure mode than continuing to send output the user trusts and shouldn't
 
 ## Substrate
 
-Nightshift is a UX layer over the **Managed Agents** API. It does not implement
-scheduling, sandboxing, credential storage, or spend enforcement itself.
+> **Superseded 2026-08-30.** This section originally described Nightshift as "a UX layer
+> over the Managed Agents API" and mapped ten governance primitives onto CMA features.
+> That is no longer the plan — see
+> [`2026-08-30-nightshift-platform-design.md`](./2026-08-30-nightshift-platform-design.md).
 
-> **Verification status:** the mapping below was read from the bundled `claude-api`
-> skill documentation (`shared/managed-agents-*.md`) on 2026-08-28, not from a live API.
-> Re-verify against current docs before implementing against the real substrate.
+Nightshift runs on a **hosted, multi-tenant platform we operate**, built on
+[Agent Substrate](https://github.com/agent-substrate/substrate) for compute. Substrate
+supplies actor isolation (gVisor/microVM), lifecycle, and sub-second suspend/resume with
+memory and filesystem preserved, and multiplexes many idle actors onto few workers —
+which is what makes hosting many mostly-idle scheduled workflows economic.
 
-| Nightshift concept | Substrate primitive |
+Substrate supplies **isolation and lifecycle only**. It is deliberately harness-agnostic
+and has no notion of budgets, credentials, scheduling, versioning, or grading. So
+everything this design treats as a governance guarantee is **ours to build**:
+
+| Nightshift concept | Where it is enforced |
 |---|---|
-| Which tools it may use | Toolset `default_config.enabled: false`, opt in per tool |
-| What it may reach on the network | Environment `networking: limited` + `allowed_hosts` |
-| Which sites it may search/fetch | Per-tool `allowed_domains` / `blocked_domains` |
-| Spend cap | `budget.max_list_cost` — platform-enforced; **pauses, not kills** |
-| Credentials | Vaults — substituted at egress, never visible in the sandbox |
-| Isolation | Fresh per-session container |
-| Schedule | Scheduled deployments — cron + IANA timezone |
-| Proof it ran | `deployment_runs` — one record per firing, including failures |
-| Change control | Agents are versioned; sessions pin a version |
-| Rule grading | Outcomes — rubric scored by an independent grader per iteration |
+| What it may reach, and with which credentials | An **egress proxy we operate**. Actors get no direct egress; the proxy holds the permit and substitutes credentials at the boundary, so no customer credential enters the sandbox. |
+| Which tools it may use | The harness, bounded by the proxy. |
+| Spend cap | Our metering, checked before each model request. |
+| Isolation | Substrate — gVisor or microVM, with state reset between actors. |
+| Schedule | Our scheduler. |
+| Proof it ran | Run records **pushed** by the harness — Substrate exposes no log or event API. |
+| Change control | Our workflow versioning, coupled to Substrate's immutable ActorTemplates. |
+| Rule grading | Our grader. This is what lets an alert name a *specific broken promise*. |
 
-Two substrate behaviors the UX must not paper over:
+Two consequences the UX must not paper over:
 
-- **Scheduled runs are jittered** up to 15% of the interval (capped at 9 minutes). Never
-  promise an exact minute.
-- **A budgeted session pauses at its cap rather than failing.** "Paused — hit its spend
-  limit" is a distinct user-visible state from "failed."
+- **The permit is enforced outside the sandbox, not inside it.** Substrate's network
+  policy is per-WorkerPool — too coarse to express one workflow's reach — and anything
+  the harness enforces is advisory, because the harness shares a sandbox with the model.
+  The proxy is the guarantee. The approval screen's "cannot go beyond this line" is only
+  as true as that proxy is.
+- **A workflow is a long-lived actor; a run is an episode in its life.** Its working
+  memory and files persist between fires. Any copy implying each run starts fresh is
+  wrong.
 
 ## Prototype scope
 
@@ -215,7 +226,7 @@ validated design, not code we keep.
 
 **Faked:**
 
-- No Managed Agents calls, no execution, no scheduling, no persistence.
+- No substrate calls, no execution, no scheduling, no persistence.
 - The build conversation is scripted, not model-driven.
 - Run history, costs, and grader results are fixtures.
 
@@ -242,8 +253,9 @@ codebase's assumptions in every screen. Nightshift is greenfield.
 
 ## Deliberately deferred
 
-- **Whose machines.** Hosted-by-us, deploy-into-their-org, and BYO-cloud are all
-  plausible; the substrate abstracts compute, so the decision does not block UX work.
+- ~~**Whose machines.**~~ **Answered 2026-08-30: hosted, multi-tenant, operated by us**,
+  on Agent Substrate. Self-hosting is explicitly not a supported path — Substrate needs a
+  Kubernetes fleet with gVisor/microVM hosts, which no non-technical user will run.
 - **The connector catalog.** This is the real ceiling on the product — the build agent
   can only propose steps for tools that exist — and the real cost. It needs its own
   spec, not a paragraph here.
