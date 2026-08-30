@@ -1,0 +1,93 @@
+package store_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/nightwatch/server/internal/testpg"
+)
+
+func testDoc() store.VersionDoc {
+	return store.VersionDoc{
+		Steps: store.StepsDoc{
+			SystemPrompt: "You prepare the weekly support digest.",
+			Kickoff:      "Summarize last week's tickets.",
+			Provider:     "anthropic",
+			Model:        "claude-sonnet-5",
+			MaxTokens:    2048,
+		},
+		Permit: json.RawMessage(`{"read":["zendesk"],"write":["slack:#support"]}`),
+		Rubric: json.RawMessage(`{"rules":["never miss a security issue"]}`),
+	}
+}
+
+func TestWorkflowVersionLifecycle(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+	tn, err := s.CreateTenant(ctx, "acme")
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
+	require.NoError(t, err)
+
+	wf, v1, err := s.CreateWorkflow(ctx, tn.ID, "weekly digest", testDoc())
+	require.NoError(t, err)
+	require.Equal(t, 1, v1.Number)
+	require.Equal(t, "draft", v1.Status)
+
+	// No approved version yet.
+	_, err = s.GetApprovedVersion(ctx, tn.ID, wf.ID)
+	require.ErrorIs(t, err, store.ErrNotFound)
+
+	// Approve v1.
+	av, err := s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "approved", av.Status)
+	require.NotNil(t, av.ApprovedAt)
+
+	// A new draft version; approving it supersedes v1.
+	v2, err := s.AddVersion(ctx, tn.ID, wf.ID, testDoc())
+	require.NoError(t, err)
+	require.Equal(t, 2, v2.Number)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 2, user.ID)
+	require.NoError(t, err)
+
+	got, err := s.GetApprovedVersion(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Number)
+
+	old, err := s.GetVersion(ctx, tn.ID, wf.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, "superseded", old.Status)
+
+	// Approving an already-superseded version fails: only drafts approve.
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	require.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestWorkflowCrossTenantIsolation(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+	tnA, err := s.CreateTenant(ctx, "a")
+	require.NoError(t, err)
+	tnB, err := s.CreateTenant(ctx, "b")
+	require.NoError(t, err)
+
+	wf, _, err := s.CreateWorkflow(ctx, tnA.ID, "a's workflow", testDoc())
+	require.NoError(t, err)
+
+	// Tenant B sees nothing of tenant A's workflow, by any path.
+	_, err = s.GetWorkflow(ctx, tnB.ID, wf.ID)
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = s.AddVersion(ctx, tnB.ID, wf.ID, testDoc())
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = s.ApproveVersion(ctx, tnB.ID, wf.ID, 1, uuid.New())
+	require.ErrorIs(t, err, store.ErrNotFound)
+	list, err := s.ListWorkflows(ctx, tnB.ID)
+	require.NoError(t, err)
+	require.Empty(t, list)
+}
