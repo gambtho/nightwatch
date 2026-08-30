@@ -4,8 +4,9 @@
 
 Nightshift only works if people trust it enough to let it run overnight against
 their real systems. Getting there takes two bets: **put the safety boundary
-somewhere the agent can't touch it**, and **run on compute that costs nothing
-while agents are idle** — which is almost always. Agent Substrate is the second
+somewhere the agent can't touch it**, and **run on compute where an idle agent
+costs almost nothing beyond storage** — and idle is almost always. (The fleet
+itself is still a standing bill; see the risks.) Agent Substrate is the second
 bet. The first is entirely our own code.
 
 ## 1. What we rent, what we build
@@ -16,14 +17,15 @@ budgets, no credentials, no schedules, no quality checks. Which suits us fine:
 the layers customers actually pay for are the ones we keep.
 
 ```mermaid
-flowchart TD
+flowchart LR
     CP["Control plane — ours<br/><i>tenancy · scheduling · spend metering · grading · run records · API</i>"]
+    subgraph S["Agent Substrate — rented: actors · RAM+disk snapshots · gVisor / microVM sandboxes"]
+        H["Harness — ours, inside the actor<br/><i>the agent loop and tools · provider-neutral</i>"]
+    end
     EP["Egress proxy — ours<br/><i>the permit enforcement point · credential injection</i>"]
-    H["Harness — ours, inside the actor<br/><i>the agent loop and tools · provider-neutral</i>"]
-    S["Agent Substrate — rented<br/><i>actors · RAM+disk snapshots · gVisor / microVM sandboxes</i>"]
-    CP -- "fires a run = one HTTPS request" --> EP
-    EP -- "all traffic out of the sandbox" --> H
-    H -- "resume actor on traffic, &lt;1s" --> S
+    CP -- "fires a run = one HTTPS request;<br/>Substrate resumes the actor, &lt;1s" --> H
+    H -- "all traffic out of the sandbox" --> EP
+    EP -- "permitted destinations only" --> NET["Slack · Zendesk · …"]
 ```
 
 That leaves eight governance pieces for us to build: permits, grading, spend
@@ -86,16 +88,16 @@ today. What it can't do is be _left alone_ with it. The gap isn't intelligence.
 It's that a desktop agent runs as you, with your credentials, only while your
 laptop is open.
 
-|              | Desktop agent                                          | Nightshift on Substrate                                         |
-| ------------ | ------------------------------------------------------ | --------------------------------------------------------------- |
-| Availability | Runs while the machine is awake and someone remembers. | Scheduler fires it at 3AM; nobody needs to be present, ever.    |
-| Blast radius | Your full privileges — what you can click, it can.     | An approved allowlist, enforced at a proxy outside the sandbox. |
-| Credentials  | Live on the machine, inside the agent's reach.         | Never enter the sandbox; injected at the boundary per request.  |
-| Spend        | Uncapped; noticed on the invoice.                      | Metered per run, checked before each model request.             |
-| Quality      | Whatever the user happens to notice.                   | Every run graded against the user's rules; auto-pause after 3.  |
-| Audit        | A chat scrollback on someone's laptop.                 | Run records pushed to the control plane, end to end.            |
-| Isolation    | The user's own OS and session.                         | gVisor / microVM sandbox, state reset between tenants.          |
-| Unit cost    | A whole machine and a human's attention per job.       | ~1/30th of a worker while idle, which is almost always.         |
+|              | Desktop agent                                          | Nightshift on Substrate                                          |
+| ------------ | ------------------------------------------------------ | ---------------------------------------------------------------- |
+| Availability | Runs while the machine is awake and someone remembers. | Scheduler fires it at 3AM; nobody needs to be present, ever.     |
+| Blast radius | Your full privileges — what you can click, it can.     | An approved allowlist, enforced at a proxy outside the sandbox.  |
+| Credentials  | Live on the machine, inside the agent's reach.         | Never enter the sandbox; injected at the boundary per request.   |
+| Spend        | Uncapped; noticed on the invoice.                      | Metered per run, checked before each model request.              |
+| Quality      | Whatever the user happens to notice.                   | Every run graded against the user's rules; auto-pause after 3.   |
+| Audit        | A chat scrollback on someone's laptop.                 | Run records pushed to the control plane, end to end.             |
+| Isolation    | The user's own OS and session.                         | gVisor / microVM sandbox; tenant state reset pending validation. |
+| Unit cost    | A whole machine and a human's attention per job.       | ~1/30th of a worker while idle, which is almost always.          |
 
 > A desktop agent is a power tool for whoever's holding it. Nightshift is the
 > same capability with the person removed — safe only because the boundary, the
