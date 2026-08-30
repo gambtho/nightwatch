@@ -78,6 +78,9 @@ func (l *Local) Invoke(ctx context.Context, a ActorID, payload InvokeRequest) (H
 func (l *Local) Suspend(ctx context.Context, a ActorID) error { return nil }
 
 func (l *Local) Destroy(ctx context.Context, a ActorID) error {
+	m := l.lockFor(a)
+	m.Lock()
+	defer m.Unlock()
 	return os.RemoveAll(l.dir(a))
 }
 
