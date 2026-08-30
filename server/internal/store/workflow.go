@@ -66,7 +66,7 @@ func (s *Store) CreateWorkflow(ctx context.Context, tenantID uuid.UUID, name str
 	if err != nil {
 		return wf, v, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx,
 		`INSERT INTO workflow (tenant_id, name) VALUES ($1, $2)
@@ -102,7 +102,7 @@ func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, 
 	if err != nil {
 		return Version{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// FOR UPDATE serializes concurrent AddVersion calls on one workflow so
 	// MAX(version)+1 cannot collide; the tenant filter doubles as the
@@ -134,7 +134,7 @@ func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UU
 	if err != nil {
 		return Version{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx,
 		`UPDATE workflow_version SET status = 'superseded'

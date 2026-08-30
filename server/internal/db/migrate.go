@@ -24,7 +24,7 @@ func Migrate(ctx context.Context, dsn string) error {
 		return err
 	}
 	sqlDB := stdlib.OpenDB(*cfg)
-	defer sqlDB.Close()
+	defer func() { _ = sqlDB.Close() }()
 
 	gooseMu.Lock()
 	defer gooseMu.Unlock()

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
+
+// maxDocBytes bounds the request body decodeDoc will read, so a client
+// cannot exhaust server memory with an oversized payload.
+const maxDocBytes = 1 << 20
 
 type workflowJSON struct {
 	ID        uuid.UUID `json:"id"`
@@ -47,8 +52,14 @@ func toVersionJSON(v store.Version) versionJSON {
 }
 
 func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxDocBytes)
 	var body versionDocJSON
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			return body, false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return body, false
 	}

@@ -87,7 +87,10 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 		if d.Sink == nil {
 			return nil
 		}
-		return d.Sink.Finalize(ctx, res)
+		// Finalize must deliver the run record even if ctx was canceled
+		// (e.g. provider.Chat aborted) — otherwise a failure record could
+		// never be written. Event emission stays best-effort on ctx as-is.
+		return d.Sink.Finalize(context.WithoutCancel(ctx), res)
 	}
 	fail := func(kind string, err error) (Result, error) {
 		res.Status = StatusFailed

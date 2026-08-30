@@ -23,7 +23,11 @@ CREATE TABLE workflow_version (
     -- Composite FK: enforces same-tenant parentage, the gap cronfoundry's
     -- own migration comments admit its single-column FKs leave open.
     FOREIGN KEY (tenant_id, workflow_id)
-        REFERENCES workflow (tenant_id, id) ON DELETE CASCADE
+        REFERENCES workflow (tenant_id, id) ON DELETE CASCADE,
+    -- Same tenant-scoping guarantee for the approver: MATCH SIMPLE means
+    -- this is skipped while approved_by is NULL, which is what drafts need.
+    FOREIGN KEY (tenant_id, approved_by)
+        REFERENCES app_user (tenant_id, id)
 );
 
 -- At most one approved version per workflow; enforced by the database,

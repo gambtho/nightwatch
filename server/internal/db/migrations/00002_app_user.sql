@@ -5,7 +5,8 @@ CREATE TABLE app_user (
     email text NOT NULL,
     role text NOT NULL DEFAULT 'owner' CHECK (role IN ('owner')),
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, email)
+    UNIQUE (tenant_id, email),
+    UNIQUE (tenant_id, id)
 );
 
 -- +goose Down

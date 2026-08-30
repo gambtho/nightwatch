@@ -46,7 +46,7 @@ func (l *Local) lockFor(a ActorID) *sync.Mutex {
 
 func (l *Local) EnsureActor(ctx context.Context, w WorkflowRef, tmpl TemplateRef) (ActorID, error) {
 	a := ActorID(filepath.Join(w.TenantID.String(), w.WorkflowID.String()))
-	if err := os.MkdirAll(l.dir(a), 0o755); err != nil {
+	if err := os.MkdirAll(l.dir(a), 0o700); err != nil {
 		return "", err
 	}
 	return a, nil
