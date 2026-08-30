@@ -8,12 +8,16 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/nightwatch/server/internal/token"
 )
 
 type Deps struct {
 	Store      *store.Store
 	SessionKey []byte
+	Signer     *token.Signer
+	Compute    compute.Compute
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
@@ -25,6 +29,10 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/workflows/{id}", auth(d.getWorkflow))
 	mux.Handle("POST /v1/workflows/{id}/versions", auth(d.addVersion))
 	mux.Handle("POST /v1/workflows/{id}/versions/{version}/approve", auth(d.approveVersion))
+	mux.Handle("POST /v1/workflows/{id}/runs", auth(d.fireRun))
+	mux.Handle("GET /v1/workflows/{id}/runs", auth(d.listRuns))
+	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
+	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
