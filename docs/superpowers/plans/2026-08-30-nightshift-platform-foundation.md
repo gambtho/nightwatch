@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-30-nightshift-platform-design.md` (companion UX spec: `docs/superpowers/specs/2026-08-28-nightshift-design.md`)
 
+**Revised:** 2026-08-30, after a Codex PAIR review — folded in: per-actor run serialization (Task 10), run-record failure safety (Tasks 8/11), token-hash enforcement and terminal-run immutability (Tasks 7/9), version-allocation locking (Task 3), internal-API body caps (Task 9), ported provider behavioral tests (Task 5), and the v1-unstable stamp (Tasks 3/12).
+
 ## Global Constraints
 
 - Module path: `github.com/gambtho/nightwatch/server`, rooted at `server/` in this repo. Go `1.26`.
@@ -21,7 +23,7 @@
 - Pinned harvest-source versions (known-good in cronfoundry): `pgx/v5@v5.9.2`, `goose/v3@v3.27.0`, `anthropic-sdk-go@v1.37.0`, `openai-go@v1.12.0`. Other deps use `@latest`.
 - The permit and rubric are stored and versioned from day one but are **opaque JSON** in this plan (enforcement is Plan 2, grading Plan 4).
 - Run all Go verification from `server/`: `gofmt -l .` (must print nothing), `go vet ./...`, `go test ./...`. Store/API tests need Docker (testcontainers).
-- Commit messages: conventional (`feat:`, `test:`, `docs:`). Docs pass `npx prettier --write <file>` from the repo root before committing (a pre-commit hook checks this).
+- Commit messages: conventional (`feat:`, `test:`, `docs:`). Docs pass `npx prettier --write <file>` from the repo root before committing — run it yourself; do not rely on a pre-commit hook (none is active in a fresh checkout).
 - The harvest source is read-only reference: `/home/tng/workspace/cronfoundry`. Never modify it.
 
 ---
@@ -661,6 +663,12 @@ git commit -m "feat(server): app_user table and tenant-scoped session auth"
 - Consumes: Task 1's store scaffolding.
 - Produces:
 
+Note on `StepsDoc`: this is the **compiled execution form** of the steps artifact, not
+the user-facing one (the UX prototype's steps are `{id, text}` items —
+`src/lib/types.ts`). The v1 API is stamped **unstable** for exactly this reason (Task
+12's contract doc); the user-facing artifact joins the version document, and the
+execution form stops being client-supplied, before the contract freezes.
+
 ```go
 type StepsDoc struct {
 	SystemPrompt string `json:"system_prompt"`
@@ -948,17 +956,35 @@ func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, 
 	if err != nil {
 		return Version{}, err
 	}
-	// The WHERE EXISTS guard makes a wrong-tenant insert a no-row result,
-	// not a foreign-key error.
-	return scanVersion(s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Version{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	// FOR UPDATE serializes concurrent AddVersion calls on one workflow so
+	// MAX(version)+1 cannot collide; the tenant filter doubles as the
+	// cross-tenant guard (wrong tenant -> no row -> ErrNotFound).
+	var id uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM workflow WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+		workflowID, tenantID).Scan(&id)
+	if err != nil {
+		return Version{}, notFound(err)
+	}
+
+	v, err := scanVersion(tx.QueryRow(ctx,
 		`INSERT INTO workflow_version
 		   (workflow_id, tenant_id, version, steps, permit, rubric)
-		 SELECT $1, $2,
-		        COALESCE((SELECT MAX(version) FROM workflow_version WHERE workflow_id = $1), 0) + 1,
-		        $3, $4, $5
-		 WHERE EXISTS (SELECT 1 FROM workflow WHERE id = $1 AND tenant_id = $2)
+		 VALUES ($1, $2,
+		        (SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_version WHERE workflow_id = $1),
+		        $3, $4, $5)
 		 RETURNING `+versionCols,
 		workflowID, tenantID, steps, doc.Permit, doc.Rubric))
+	if err != nil {
+		return Version{}, err
+	}
+	return v, tx.Commit(ctx)
 }
 
 func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UUID, number int, approvedBy uuid.UUID) (Version, error) {
@@ -1476,8 +1502,8 @@ git commit -m "feat(server): public v1 workflow endpoints"
 **Files:**
 
 - Create: `server/internal/llm/provider.go`, `server/internal/llm/anthropic.go`, `server/internal/llm/openai.go`, `server/internal/llm/pricing.go`, `server/internal/llm/factory.go`, `server/internal/llm/llmtest/scripted.go`
-- Test: `server/internal/llm/pricing_test.go`, `server/internal/llm/factory_test.go`
-- Reference (read-only): `/home/tng/workspace/cronfoundry/internal/llm/{provider,anthropic,openai,pricing}.go`
+- Test: `server/internal/llm/pricing_test.go`, `server/internal/llm/factory_test.go`, plus the ported `server/internal/llm/anthropic_test.go` and `server/internal/llm/openai_test.go`
+- Reference (read-only): `/home/tng/workspace/cronfoundry/internal/llm/{provider,anthropic,openai,pricing}.go` and their `_test.go` files
 
 **Interfaces:**
 
@@ -1494,6 +1520,8 @@ cp /home/tng/workspace/cronfoundry/internal/llm/provider.go internal/llm/
 cp /home/tng/workspace/cronfoundry/internal/llm/anthropic.go internal/llm/
 cp /home/tng/workspace/cronfoundry/internal/llm/openai.go internal/llm/
 cp /home/tng/workspace/cronfoundry/internal/llm/pricing.go internal/llm/
+cp /home/tng/workspace/cronfoundry/internal/llm/anthropic_test.go internal/llm/
+cp /home/tng/workspace/cronfoundry/internal/llm/openai_test.go internal/llm/
 ```
 
 Then edit the copies:
@@ -1501,7 +1529,8 @@ Then edit the copies:
 1. `provider.go`: delete the `Endpoint` and `Deployment` fields from `CallOptions` (and their comments). Keep everything else, including `ToolCapableProvider` — the tool loop returns with connector work.
 2. `anthropic.go` / `openai.go`: fix any import paths referencing `github.com/gambtho/cronfoundry/...` to this module; delete any code paths reading the removed `CallOptions` fields or referencing the `copilot`/`azure-foundry` providers (compile errors will point at each). Do not otherwise change behavior.
 3. `pricing.go`: delete the `"copilot-enterprise"` entry from `priceTable`. Keep the table comment noting prices are a point-in-time list; DB-driven pricing is a later concern (metering, Plan 3).
-4. Do **not** copy `factory.go`, `azurefoundry.go`, or `copilot.go`.
+4. `anthropic_test.go` / `openai_test.go`: same import fixes; delete cases exercising the removed `CallOptions` fields or dropped providers. The behavioral coverage — streaming, usage accounting, HTTP error bodies, tool turns — must survive the port: this code is supposed to behave identically to its source, and compile-only verification cannot show that.
+5. Do **not** copy `factory.go`, `azurefoundry.go`, or `copilot.go` (or their tests).
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -1860,6 +1889,7 @@ type Run struct {
 	ErrorKind  *string
 	ErrorMsg   *string
 	Output     *string
+	TokenHash  string // sha256 of the run bearer; internal API compares it
 	CreatedAt  time.Time
 }
 type RunEvent struct {
@@ -1888,6 +1918,8 @@ func (s *Store) ListRunEvents(ctx context.Context, tenantID, runID uuid.UUID) ([
 ```
 
 Note `CreateRun` takes the id: the caller generates it so the run token (which embeds the id) can be signed before the row exists.
+
+Terminal runs are **immutable**: `FinalizeRun` and `AppendRunEvent` only touch runs whose status is `pending` or `running` (returning `ErrNotFound` otherwise). The run record is the audit surface; a bearer must not be able to rewrite it after completion.
 
 - [ ] **Step 1: Write the migration**
 
@@ -2004,6 +2036,12 @@ func TestRunLifecycle(t *testing.T) {
 	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
+
+	// Terminal runs are immutable: no late events, no re-finalization.
+	err = s.AppendRunEvent(ctx, tn.ID, runID, "late", json.RawMessage(`{}`))
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, err = s.FinalizeRun(ctx, tn.ID, runID, store.RunFinal{Status: "failed"})
+	require.ErrorIs(t, err, store.ErrNotFound)
 }
 
 func TestRunCrossTenantIsolation(t *testing.T) {
@@ -2065,6 +2103,7 @@ type Run struct {
 	ErrorKind  *string
 	ErrorMsg   *string
 	Output     *string
+	TokenHash  string
 	CreatedAt  time.Time
 }
 
@@ -2088,13 +2127,13 @@ type RunFinal struct {
 
 const runCols = `id, tenant_id, workflow_id, version, status, started_at,
 	finished_at, tokens_in, tokens_out, cost_cents, error_kind, error_msg,
-	output, created_at`
+	output, runner_token_hash, created_at`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
 	err := row.Scan(&r.ID, &r.TenantID, &r.WorkflowID, &r.Version, &r.Status,
 		&r.StartedAt, &r.FinishedAt, &r.TokensIn, &r.TokensOut, &r.CostCents,
-		&r.ErrorKind, &r.ErrorMsg, &r.Output, &r.CreatedAt)
+		&r.ErrorKind, &r.ErrorMsg, &r.Output, &r.TokenHash, &r.CreatedAt)
 	return r, notFound(err)
 }
 
@@ -2154,6 +2193,7 @@ func (s *Store) FinalizeRun(ctx context.Context, tenantID, id uuid.UUID, fin Run
 		        error_kind = NULLIF($7, ''), error_msg = NULLIF($8, ''),
 		        output = $9
 		 WHERE id = $1 AND tenant_id = $2
+		   AND status IN ('pending', 'running')
 		 RETURNING `+runCols,
 		id, tenantID, fin.Status, fin.TokensIn, fin.TokensOut, fin.CostCents,
 		fin.ErrorKind, fin.ErrorMsg, fin.Output))
@@ -2166,7 +2206,8 @@ func (s *Store) AppendRunEvent(ctx context.Context, tenantID, runID uuid.UUID, t
 	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO run_event (run_id, tenant_id, type, payload)
 		 SELECT $1, $2, $3, $4
-		 WHERE EXISTS (SELECT 1 FROM run WHERE id = $1 AND tenant_id = $2)`,
+		 WHERE EXISTS (SELECT 1 FROM run WHERE id = $1 AND tenant_id = $2
+		               AND status IN ('pending', 'running'))`,
 		runID, tenantID, typ, payload)
 	if err != nil {
 		return err
@@ -2288,8 +2329,9 @@ import (
 )
 
 type memSink struct {
-	events []harness.RunEvent
-	final  *harness.Result
+	events   []harness.RunEvent
+	final    *harness.Result
+	finalErr error
 }
 
 func (m *memSink) Event(ctx context.Context, ev harness.RunEvent) error {
@@ -2299,7 +2341,7 @@ func (m *memSink) Event(ctx context.Context, ev harness.RunEvent) error {
 
 func (m *memSink) Finalize(ctx context.Context, res harness.Result) error {
 	m.final = &res
-	return nil
+	return m.finalErr
 }
 
 func steps() harness.Steps {
@@ -2360,6 +2402,19 @@ func TestRunUnknownProvider(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Equal(t, "provider_unknown", res.ErrorKind)
+}
+
+func TestRunFinalizeErrorSurfaces(t *testing.T) {
+	// The finalization IS the run record (records are pushed, never
+	// pulled), so failing to deliver it must not look like success.
+	provider := &llmtest.Scripted{Response: "the digest"}
+	sink := &memSink{finalErr: errors.New("control plane unreachable")}
+	res, err := harness.Run(context.Background(), harness.Input{Steps: steps()}, harness.Deps{
+		ProviderFactory: func(string) (llm.Provider, error) { return provider, nil },
+		Sink:            sink,
+	})
+	require.Error(t, err)
+	require.Equal(t, harness.StatusSucceeded, res.Status) // the work succeeded; recording it did not
 }
 ```
 
@@ -2449,23 +2504,28 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 	}
 	res := Result{StartedAt: now()}
 
+	// Events are best-effort telemetry; the finalization is the run record
+	// itself, so a Finalize failure surfaces to the caller.
 	emit := func(typ string, payload map[string]any) {
 		if d.Sink != nil {
 			_ = d.Sink.Event(ctx, RunEvent{Type: typ, Payload: payload})
 		}
 	}
-	finish := func() {
+	finish := func() error {
 		res.FinishedAt = now()
-		if d.Sink != nil {
-			_ = d.Sink.Finalize(ctx, res)
+		if d.Sink == nil {
+			return nil
 		}
+		return d.Sink.Finalize(ctx, res)
 	}
 	fail := func(kind string, err error) (Result, error) {
 		res.Status = StatusFailed
 		res.ErrorKind = kind
 		res.ErrorMsg = err.Error()
 		emit("run.fail", map[string]any{"kind": kind})
-		finish()
+		if ferr := finish(); ferr != nil {
+			err = errors.Join(err, ferr)
+		}
 		return res, err
 	}
 
@@ -2498,10 +2558,14 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 	res.Output = out.String()
 	res.Status = StatusSucceeded
 	emit("run.finish", map[string]any{"status": string(res.Status)})
-	finish()
+	if err := finish(); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 ```
+
+(Add `"errors"` to the imports.)
 
 - [ ] **Step 4: Run tests and full verification**
 
@@ -2527,7 +2591,7 @@ git commit -m "feat(server): tool-less harness with pushed events and finalizati
 **Interfaces:**
 
 - Consumes: `store` (Tasks 3, 7), `token` (Task 6), `harness` types (Task 8).
-- Produces: `internalapi.Deps{Store *store.Store; Signer *token.Signer}`; `internalapi.RegisterRoutes(mux *http.ServeMux, d Deps)` with routes `GET /internal/runs/{id}/context`, `POST /internal/runs/{id}/events`, `POST /internal/runs/{id}/finalize` (bearer run-JWT; the claims' `RunID` must equal the path id — a runner can only touch its own run; fetching context marks the run running). And `harness.NewClient(base string, runID uuid.UUID, bearer string) *Client` with `(*Client).Context(ctx) (Steps, error)` plus `Event`/`Finalize` making `*Client` satisfy `harness.Sink`.
+- Produces: `internalapi.Deps{Store *store.Store; Signer *token.Signer}`; `internalapi.RegisterRoutes(mux *http.ServeMux, d Deps)` with routes `GET /internal/runs/{id}/context`, `POST /internal/runs/{id}/events`, `POST /internal/runs/{id}/finalize` (bearer run-JWT; the claims' `RunID` must equal the path id — a runner can only touch its own run — **and** the bearer's sha256 must match the run's stored `runner_token_hash`, which binds the JWT to the row and gives the control plane a revocation lever; request bodies are capped at 1 MiB; fetching context marks the run running). And `harness.NewClient(base string, runID uuid.UUID, bearer string) *Client` with `(*Client).Context(ctx) (Steps, error)` plus `Event`/`Finalize` making `*Client` satisfy `harness.Sink`.
 
 Wire shapes:
 
@@ -2658,6 +2722,27 @@ func TestInternalAPIAuth(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
+
+func TestInternalAPIRejectsMismatchedTokenHash(t *testing.T) {
+	// A structurally valid JWT is not enough: the bearer must be the exact
+	// token minted for the run (the stored hash is the revocation lever).
+	s, signer, ts, tn, wf := setup(t)
+	runID := uuid.New()
+	bearer, _, err := signer.Sign(token.RunClaims{
+		RunID: runID, TenantID: tn.ID, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	_, err = s.CreateRun(context.Background(), tn.ID, wf.ID, runID, 1, "not-the-real-hash")
+	require.NoError(t, err)
+
+	req, err := http.NewRequest("GET", ts.URL+"/internal/runs/"+runID.String()+"/context", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -2701,10 +2786,17 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, claims token.RunClaims)
 
-// auth verifies the bearer run-JWT and requires that the token's run is
-// the run in the path: a runner can only touch its own run.
+// The harness pushes small JSON records, not data; cap every body. Per-run
+// event and output budgets are the metering plan's concern (Plan 3).
+const maxBodyBytes = 1 << 20
+
+// auth verifies the bearer run-JWT, requires that the token's run is the
+// run in the path (a runner can only touch its own run), and requires the
+// bearer to be the exact token minted for that run — the stored hash binds
+// the JWT to the row and clearing it revokes the token.
 func (d Deps) auth(next authedHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -2721,6 +2813,15 @@ func (d Deps) auth(next authedHandler) http.Handler {
 			return
 		}
 		if claims.RunID != pathID {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		run, err := d.Store.GetRun(r.Context(), claims.TenantID, claims.RunID)
+		if err != nil {
+			d.fail(w, err)
+			return
+		}
+		if !token.EqualHash(d.Signer.HashToken(bearer), run.TokenHash) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -2953,6 +3054,11 @@ func NewLocal(baseDir string, runner RunnerFunc) *Local  // implements Compute
 func (l *Local) Wait()                                   // test/shutdown helper: block until in-flight invocations finish
 ```
 
+Invocations of the same actor **serialize**: the spec's overlap policy is "default to
+serialize; treat concurrency as a later, explicit feature", and the actor's persistent
+state directory makes concurrent runs a data race, not a feature. Different actors run
+concurrently.
+
 - [ ] **Step 1: Write the failing tests**
 
 `server/internal/compute/local_test.go`:
@@ -3028,7 +3134,38 @@ func TestLocalDestroyRemovesState(t *testing.T) {
 	// Idempotent.
 	require.NoError(t, local.Destroy(ctx, actor))
 }
+
+func TestLocalInvokesSerializePerActor(t *testing.T) {
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	runner := func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
+		entered <- struct{}{}
+		<-release
+	}
+	local := compute.NewLocal(t.TempDir(), runner)
+	ctx := context.Background()
+	ref := compute.WorkflowRef{TenantID: uuid.New(), WorkflowID: uuid.New()}
+	actor, err := local.EnsureActor(ctx, ref, compute.TemplateRef{Name: "harness-v1"})
+	require.NoError(t, err)
+
+	_, err = local.Invoke(ctx, actor, compute.InvokeRequest{RunID: uuid.New()})
+	require.NoError(t, err)
+	_, err = local.Invoke(ctx, actor, compute.InvokeRequest{RunID: uuid.New()})
+	require.NoError(t, err)
+
+	<-entered // the first run is in
+	select {
+	case <-entered:
+		t.Fatal("second run entered while the first was still active")
+	case <-time.After(100 * time.Millisecond):
+		// serialized, as required
+	}
+	close(release)
+	local.Wait()
+}
 ```
+
+(Add `"time"` to the test file's imports.)
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -3106,14 +3243,32 @@ type Local struct {
 	baseDir string
 	runner  RunnerFunc
 	wg      sync.WaitGroup
+
+	mu     sync.Mutex
+	actors map[ActorID]*sync.Mutex
 }
 
 func NewLocal(baseDir string, runner RunnerFunc) *Local {
-	return &Local{baseDir: baseDir, runner: runner}
+	return &Local{
+		baseDir: baseDir,
+		runner:  runner,
+		actors:  make(map[ActorID]*sync.Mutex),
+	}
 }
 
 func (l *Local) dir(a ActorID) string {
 	return filepath.Join(l.baseDir, string(a))
+}
+
+func (l *Local) lockFor(a ActorID) *sync.Mutex {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	m, ok := l.actors[a]
+	if !ok {
+		m = &sync.Mutex{}
+		l.actors[a] = m
+	}
+	return m
 }
 
 func (l *Local) EnsureActor(ctx context.Context, w WorkflowRef, tmpl TemplateRef) (ActorID, error) {
@@ -3134,6 +3289,12 @@ func (l *Local) Invoke(ctx context.Context, a ActorID, payload InvokeRequest) (H
 	runCtx := context.WithoutCancel(ctx)
 	go func() {
 		defer l.wg.Done()
+		// One actor, one run at a time: the spec's overlap policy is
+		// "default to serialize", and the shared state directory makes
+		// concurrent runs a data race.
+		m := l.lockFor(a)
+		m.Lock()
+		defer m.Unlock()
 		l.runner(runCtx, payload, dir)
 	}()
 	return Handle{ActorID: a, RunID: payload.RunID}, nil
@@ -3208,8 +3369,9 @@ import (
 
 // fakeCompute records invocations instead of running anything.
 type fakeCompute struct {
-	mu      sync.Mutex
-	invokes []compute.InvokeRequest
+	mu        sync.Mutex
+	invokes   []compute.InvokeRequest
+	invokeErr error // when set, Invoke fails
 }
 
 func (f *fakeCompute) EnsureActor(ctx context.Context, w compute.WorkflowRef, tmpl compute.TemplateRef) (compute.ActorID, error) {
@@ -3219,6 +3381,9 @@ func (f *fakeCompute) EnsureActor(ctx context.Context, w compute.WorkflowRef, tm
 func (f *fakeCompute) Invoke(ctx context.Context, a compute.ActorID, req compute.InvokeRequest) (compute.Handle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.invokeErr != nil {
+		return compute.Handle{}, f.invokeErr
+	}
 	f.invokes = append(f.invokes, req)
 	return compute.Handle{ActorID: a, RunID: req.RunID}, nil
 }
@@ -3258,7 +3423,31 @@ func TestFireRunRequiresApprovedVersion(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Len(t, out["runs"], 1)
 }
+
+func TestFireRunDispatchFailureMarksRunFailed(t *testing.T) {
+	e := newEnv(t)
+
+	resp, out := e.do(t, "POST", "/v1/workflows", workflowBody())
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	id := out["workflow"].(map[string]any)["id"].(string)
+	resp, _ = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/versions/1/approve", id), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	e.compute.invokeErr = errors.New("no workers")
+	resp, _ = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/runs", id), nil)
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	// A dispatch failure must not leave the run pending forever.
+	resp, out = e.do(t, "GET", fmt.Sprintf("/v1/workflows/%s/runs", id), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	runs := out["runs"].([]any)
+	require.Len(t, runs, 1)
+	require.Equal(t, "failed", runs[0].(map[string]any)["status"])
+	require.Equal(t, "dispatch_failed", runs[0].(map[string]any)["error_kind"])
+}
 ```
+
+(Add `"errors"` to the test file's imports.)
 
 And in `workflows_test.go`, update `env`/`newEnv`:
 
@@ -3306,8 +3495,10 @@ and add to `RegisterRoutes`:
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -3386,15 +3577,27 @@ func (d Deps) fireRun(w http.ResponseWriter, r *http.Request) {
 		compute.WorkflowRef{TenantID: claims.TenantID, WorkflowID: wfID},
 		compute.TemplateRef{Name: "harness-v1"})
 	if err != nil {
+		d.failDispatch(r.Context(), claims.TenantID, runID, err)
 		writeErr(w, err)
 		return
 	}
 	if _, err := d.Compute.Invoke(r.Context(), actor,
 		compute.InvokeRequest{RunID: runID, RunToken: bearer}); err != nil {
+		d.failDispatch(r.Context(), claims.TenantID, runID, err)
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": toRunJSON(run)})
+}
+
+// failDispatch records a run that never reached its actor; without this a
+// dispatch failure would leave the run pending forever.
+func (d Deps) failDispatch(ctx context.Context, tenantID, runID uuid.UUID, cause error) {
+	if _, err := d.Store.FinalizeRun(ctx, tenantID, runID, store.RunFinal{
+		Status: "failed", ErrorKind: "dispatch_failed", ErrorMsg: cause.Error(),
+	}); err != nil {
+		slog.Error("httpapi: record dispatch failure", "run", runID, "err", err)
+	}
 }
 
 func (d Deps) getRun(w http.ResponseWriter, r *http.Request) {
@@ -3829,6 +4032,14 @@ Expected: PASS, everything builds, `gofmt` prints nothing.
 
 The UI↔server contract. The OSS boundary is undecided, so this API is
 designed as a public contract: versioned under `/v1`, no leaked internals.
+
+> **Stability: unstable (alpha).** The `steps` document currently exposes
+> the compiled execution form (system prompt, provider, model). Before this
+> contract freezes, the user-facing steps artifact — the `{id, text}` list
+> the UX prototype defines in `src/lib/types.ts` — joins the version
+> document, and the execution form becomes server-derived rather than
+> client-supplied. Nothing under `/v1` is frozen until this notice is
+> removed.
 
 ## Authentication
 
