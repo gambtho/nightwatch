@@ -25,6 +25,11 @@ exists today.
 - **Identity and onboarding** — real signup/login is in no plan yet. Plan 1 ships a
   dev-only session mint; the production auth story (provider, tenant creation flow) is
   an open decision.
+- **Egress proxy design detail** — before Plan 2 is written, the proxy's trust
+  boundary needs resolving (raised by the 2026-08-30 Codex review): how an actor
+  authenticates to the proxy, destination canonicalization, redirect and DNS-rebinding
+  defenses, TLS handling, and how "no direct egress" is proven rather than assumed.
+  The platform spec asserts the guarantee; Plan 2's spec work must design it.
 
 ## Scoping decisions made during decomposition
 
@@ -40,9 +45,9 @@ cronfoundry (see the foundation plan's task notes).
    `copilot-enterprise` (GitHub-coupled, undocumented token API — the survey's
    do-not-port) and `azure-foundry` (no `ChatTurn`, and it alone drags a second major
    version of the OpenAI SDK). Provider neutrality is retained with three.
-3. **Not ported in Plan 1:** `internal/publish` (drags `internal/config`; no
-   destinations exist until alerting — Plan 4), `internal/secrets` and
-   `internal/redact` (no customer credentials exist until the proxy — Plan 2),
+3. **Not ported in Plan 1:** `internal/publish` and `internal/template` (both serve
+   output delivery; no destinations exist until alerting — Plan 4), `internal/secrets`
+   and `internal/redact` (no customer credentials exist until the proxy — Plan 2),
    `internal/memory` / `internal/writeback` (superseded by actor state, per the spec).
 4. **Composite foreign keys from day one.** CronFoundry's own migration comment admits
    its single-column FKs don't enforce same-org child relationships. Every child table
@@ -58,3 +63,9 @@ cronfoundry (see the foundation plan's task notes).
    schema grows past what hand-written queries keep honest.
 8. **The prototype stays at `src/`** — the quarantine move from the session handoff was
    explicitly declined (2026-08-30). The Go platform lives at `server/` alongside it.
+9. **The v1 API ships stamped "unstable (alpha)".** Plan 1's `steps` document is the
+   compiled execution form (system prompt, provider, model), not the user-facing
+   `{id, text}` steps the UX prototype defines. Freezing that as a public contract
+   would leak execution internals (2026-08-30 Codex review); before the contract
+   freezes, the user-facing artifact joins the version document and the execution form
+   becomes server-derived.
