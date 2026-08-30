@@ -69,3 +69,10 @@ cronfoundry (see the foundation plan's task notes).
    would leak execution internals (2026-08-30 Codex review); before the contract
    freezes, the user-facing artifact joins the version document and the execution form
    becomes server-derived.
+10. **No orphaned-run recovery in the foundation.** A server restart kills in-flight
+    `Local` goroutines, a failed context fetch never finalizes, and per-actor queueing
+    can outlive the 1h run-token TTL — in each case a run is stuck `pending`/`running`
+    forever with nothing noticing. Plan 3 (scheduling) must add an orphaned-run reaper
+    that finalizes runs stuck past a deadline as `failed`/`error_kind: "orphaned"`, and
+    revisit the run-token TTL against actor queueing depth. (2026-08-30 final branch
+    review.)

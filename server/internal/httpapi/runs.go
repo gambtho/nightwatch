@@ -97,8 +97,11 @@ func (d Deps) fireRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // failDispatch records a run that never reached its actor; without this a
-// dispatch failure would leave the run pending forever.
+// dispatch failure would leave the run pending forever. It strips
+// cancellation from the request context so a client disconnect mid-fire
+// doesn't also abort the finalize write.
 func (d Deps) failDispatch(ctx context.Context, tenantID, runID uuid.UUID, cause error) {
+	ctx = context.WithoutCancel(ctx)
 	if _, err := d.Store.FinalizeRun(ctx, tenantID, runID, store.RunFinal{
 		Status: "failed", ErrorKind: "dispatch_failed", ErrorMsg: cause.Error(),
 	}); err != nil {
