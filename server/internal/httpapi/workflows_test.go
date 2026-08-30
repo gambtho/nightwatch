@@ -60,7 +60,7 @@ func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, m
 	if body != nil {
 		require.NoError(t, json.NewEncoder(&buf).Encode(body))
 	}
-	req, err := http.NewRequest(method, e.ts.URL+path, &buf)
+	req, err := http.NewRequestWithContext(context.Background(), method, e.ts.URL+path, &buf)
 	require.NoError(t, err)
 	req.AddCookie(e.cookie)
 	resp, err := http.DefaultClient.Do(req)
@@ -114,7 +114,9 @@ func TestWorkflowEndpoints(t *testing.T) {
 
 func TestWorkflowAPIRequiresSession(t *testing.T) {
 	e := newEnv(t)
-	resp, err := http.Get(e.ts.URL + "/v1/workflows")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, e.ts.URL+"/v1/workflows", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)

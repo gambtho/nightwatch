@@ -44,9 +44,11 @@ func CostCents(provider, model string, u Usage) int {
 	if !ok {
 		return 0
 	}
-	// Math: (tokens * cents_per_1M) / 1_000_000. Use int64 to avoid overflow
-	// at token counts in the hundreds of millions.
-	inCents := int64(u.InputTokens) * int64(p.in) / 1_000_000
-	outCents := int64(u.OutputTokens) * int64(p.out) / 1_000_000
-	return int(inCents + outCents)
+	// Math: sum the input and output numerators before dividing, so we floor
+	// once on the combined total instead of flooring input and output
+	// separately (which can throw away up to 2 cents per run — e.g. 0.75 +
+	// 0.75 floors to 0+0 instead of the correct 1). Use int64 to avoid
+	// overflow at token counts in the hundreds of millions.
+	numerator := int64(u.InputTokens)*int64(p.in) + int64(u.OutputTokens)*int64(p.out)
+	return int(numerator / 1_000_000)
 }

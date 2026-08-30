@@ -76,7 +76,7 @@ func TestEndToEndRun(t *testing.T) {
 		if body != nil {
 			require.NoError(t, json.NewEncoder(&buf).Encode(body))
 		}
-		req, err := http.NewRequest(method, ts.URL+path, &buf)
+		req, err := http.NewRequestWithContext(context.Background(), method, ts.URL+path, &buf)
 		require.NoError(t, err)
 		req.AddCookie(cookie)
 		resp, err := http.DefaultClient.Do(req)

@@ -100,13 +100,15 @@ func TestInternalAPIAuth(t *testing.T) {
 	_ = otherRunID
 
 	// No bearer: 401.
-	resp, err := http.Get(ts.URL + "/internal/runs/" + runID.String() + "/context")
+	noAuthReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+"/internal/runs/"+runID.String()+"/context", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(noAuthReq)
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
 	// A token for another run must not open this run.
-	req, err := http.NewRequest("GET", ts.URL+"/internal/runs/"+runID.String()+"/context", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", ts.URL+"/internal/runs/"+runID.String()+"/context", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+otherBearer)
 	resp, err = http.DefaultClient.Do(req)
