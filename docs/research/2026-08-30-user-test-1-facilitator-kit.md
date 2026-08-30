@@ -287,6 +287,7 @@ that the connector ceiling binds before the UX does — this test must collect d
 4. **Close:** "What almost made you say no?" · "Anything you kept expecting that never
    appeared?"
 
-Immediately after the participant leaves (before notes go cold): fill the four
-pass/fail/unclear verdicts and the top-3 connectors in the notes template, and write
+Immediately after the participant leaves (before notes go cold): fill all four rows of
+the notes template's verdict table, using each row's own labels (pass/fail, trust/deter,
+reassuring/abandoned, and their unclear variants), plus the top-3 connectors, and write
 the single most surprising moment in one sentence.

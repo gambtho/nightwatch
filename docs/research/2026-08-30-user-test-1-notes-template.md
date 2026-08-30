@@ -13,7 +13,7 @@ session; fill the verdicts immediately after.
 ## Act 1 — Intake
 
 - Typed (verbatim): ""
-- Nudge rung used: 0 / 2 / 3 / 4 · Starter chip used? \_\_
+- Nudge rung used: 1 / 2 / 3 / 4 (1 = no nudge needed) · Starter chip used? \_\_
 - Froze / wrote freely / tried to write "instructions": \_\_
 - Inert click #1 (empty submit)? y/n — expected: \_\_
 
@@ -47,8 +47,10 @@ session; fill the verdicts immediately after.
 
 - Understood which rule broke? y/n · Understood it paused itself? y/n
 - Emotional read: relieved / annoyed / confused / other: \_\_
-- Button reached for first: show runs / fix it / resume / none — expected it to: \_\_
-- Other inert clicks (#3–5): \_\_
+- Button reached for first: show runs / fix it / resume / none
+- Inert click #3 ("Show me the 3 runs")? y/n — expected: \_\_
+- Inert click #4 ("Let's fix it")? y/n — expected: \_\_
+- Inert click #5 ("It's fine, resume")? y/n — expected: \_\_
 
 ## Debrief
 
@@ -61,6 +63,7 @@ session; fill the verdicts immediately after.
 - Top 3 ranked: 1. \_\_ 2. \_\_ 3. \_\_
 - Approve-once feeling: ""
 - "What almost made you say no?": ""
+- "Anything you kept expecting that never appeared?": ""
 
 ## Verdicts (fill within 10 minutes of session end)
 
