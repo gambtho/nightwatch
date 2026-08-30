@@ -16,15 +16,17 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/testpg"
+	"github.com/gambtho/nightwatch/server/internal/token"
 )
 
 type env struct {
-	ts     *httptest.Server
-	store  *store.Store
-	key    []byte
-	cookie *http.Cookie
-	tenant store.Tenant
-	user   store.User
+	ts      *httptest.Server
+	store   *store.Store
+	key     []byte
+	cookie  *http.Cookie
+	tenant  store.Tenant
+	user    store.User
+	compute *fakeCompute
 }
 
 func newEnv(t *testing.T) *env {
@@ -42,11 +44,14 @@ func newEnv(t *testing.T) *env {
 		time.Hour)
 	require.NoError(t, err)
 
+	fc := &fakeCompute{}
+	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
+
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Signer: signer, Compute: fc})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user}
+	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user, compute: fc}
 }
 
 func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, map[string]any) {
