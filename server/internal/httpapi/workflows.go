@@ -1,0 +1,160 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/gambtho/nightwatch/server/internal/store"
+)
+
+type workflowJSON struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type versionJSON struct {
+	Number     int             `json:"number"`
+	Status     string          `json:"status"`
+	Steps      store.StepsDoc  `json:"steps"`
+	Permit     json.RawMessage `json:"permit"`
+	Rubric     json.RawMessage `json:"rubric"`
+	ApprovedAt *time.Time      `json:"approved_at,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+type versionDocJSON struct {
+	Name   string          `json:"name"`
+	Steps  store.StepsDoc  `json:"steps"`
+	Permit json.RawMessage `json:"permit"`
+	Rubric json.RawMessage `json:"rubric"`
+}
+
+func toWorkflowJSON(wf store.Workflow) workflowJSON {
+	return workflowJSON{ID: wf.ID, Name: wf.Name, CreatedAt: wf.CreatedAt}
+}
+
+func toVersionJSON(v store.Version) versionJSON {
+	return versionJSON{
+		Number: v.Number, Status: v.Status, Steps: v.Doc.Steps,
+		Permit: v.Doc.Permit, Rubric: v.Doc.Rubric,
+		ApprovedAt: v.ApprovedAt, CreatedAt: v.CreatedAt,
+	}
+}
+
+func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
+	var body versionDocJSON
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return body, false
+	}
+	if body.Permit == nil {
+		body.Permit = json.RawMessage(`{}`)
+	}
+	if body.Rubric == nil {
+		body.Rubric = json.RawMessage(`{}`)
+	}
+	return body, true
+}
+
+func (d Deps) createWorkflow(w http.ResponseWriter, r *http.Request) {
+	claims := ClaimsFrom(r.Context())
+	body, ok := decodeDoc(w, r)
+	if !ok {
+		return
+	}
+	if body.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		return
+	}
+	wf, v, err := d.Store.CreateWorkflow(r.Context(), claims.TenantID, body.Name,
+		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"workflow": toWorkflowJSON(wf), "version": toVersionJSON(v),
+	})
+}
+
+func (d Deps) listWorkflows(w http.ResponseWriter, r *http.Request) {
+	claims := ClaimsFrom(r.Context())
+	wfs, err := d.Store.ListWorkflows(r.Context(), claims.TenantID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := make([]workflowJSON, 0, len(wfs))
+	for _, wf := range wfs {
+		out = append(out, toWorkflowJSON(wf))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workflows": out})
+}
+
+func (d Deps) getWorkflow(w http.ResponseWriter, r *http.Request) {
+	claims := ClaimsFrom(r.Context())
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	wf, err := d.Store.GetWorkflow(r.Context(), claims.TenantID, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	versions, err := d.Store.ListVersions(r.Context(), claims.TenantID, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	vout := make([]versionJSON, 0, len(versions))
+	for _, v := range versions {
+		vout = append(vout, toVersionJSON(v))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workflow": toWorkflowJSON(wf), "versions": vout,
+	})
+}
+
+func (d Deps) addVersion(w http.ResponseWriter, r *http.Request) {
+	claims := ClaimsFrom(r.Context())
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	body, ok := decodeDoc(w, r)
+	if !ok {
+		return
+	}
+	v, err := d.Store.AddVersion(r.Context(), claims.TenantID, id,
+		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"version": toVersionJSON(v)})
+}
+
+func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
+	claims := ClaimsFrom(r.Context())
+	id, ok := pathUUID(w, r, "id")
+	if !ok {
+		return
+	}
+	number, err := strconv.Atoi(r.PathValue("version"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
+		return
+	}
+	v, err := d.Store.ApproveVersion(r.Context(), claims.TenantID, id, number, claims.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"version": toVersionJSON(v)})
+}
