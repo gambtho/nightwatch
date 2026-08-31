@@ -71,7 +71,7 @@ func TestCreateLoginTokenSweepsLongExpired(t *testing.T) {
 }
 
 func signup() store.NewSignup {
-	return store.NewSignup{TenantName: "pat", WrappedKEK: testKEK}
+	return store.NewSignup{WrappedKEK: testKEK}
 }
 
 func TestConsumeLoginTokenFirstLoginMintsTenant(t *testing.T) {

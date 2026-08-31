@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,10 +16,18 @@ var ErrLoginTokenInvalid = errors.New("store: login token expired or already use
 
 // NewSignup carries what a first login needs to mint a tenant. The caller
 // pre-generates the wrapped KEK so the store never depends on the vault;
-// it goes unused (harmlessly) when the email already has a tenant.
+// it goes unused (harmlessly) when the email already has a tenant. The
+// tenant is named from the email's local part — the user is never asked
+// to name a workspace.
 type NewSignup struct {
-	TenantName string
 	WrappedKEK []byte
+}
+
+func tenantNameFromEmail(email string) string {
+	if i := strings.Index(email, "@"); i > 0 {
+		return email[:i]
+	}
+	return email
 }
 
 type ConsumeResult struct {
@@ -64,7 +73,7 @@ func (s *Store) ConsumeLoginToken(ctx context.Context, tokenHash, sessionTokenHa
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		res.FirstLogin = true
-		if res.Tenant, err = createTenant(ctx, tx, signup.TenantName, signup.WrappedKEK); err != nil {
+		if res.Tenant, err = createTenant(ctx, tx, tenantNameFromEmail(email), signup.WrappedKEK); err != nil {
 			return res, err
 		}
 		if res.User, err = upsertUser(ctx, tx, res.Tenant.ID, email); err != nil {

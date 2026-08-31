@@ -22,6 +22,16 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+// GetUser fetches one user within a tenant.
+func (s *Store) GetUser(ctx context.Context, tenantID, userID uuid.UUID) (User, error) {
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, tenant_id, email, role FROM app_user WHERE tenant_id = $1 AND id = $2`,
+		tenantID, userID,
+	).Scan(&u.ID, &u.TenantID, &u.Email, &u.Role)
+	return u, notFound(err)
+}
+
 // UserByEmail resolves a normalized email to its (single, globally unique)
 // user — the login-resolution and dev-session lookup.
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
