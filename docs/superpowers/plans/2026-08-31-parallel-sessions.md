@@ -19,7 +19,7 @@ finishes, or a cross-cutting decision is taken.
 | Identity spec                    | **Merged** (PR #6)                                                                                                       |
 | Identity implementation          | **Merged** (PR #17)                                                                                                      |
 | Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
-| Connectors                       | **In flight** — plan PR #25, deadlock fix PR #24; **owns `server/`**                                                     |
+| Connectors                       | **In flight** — phase 1 in PR #27, phase 2 underway; **owns `server/`**                                                  |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
 | Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
@@ -153,6 +153,40 @@ never our own bookkeeping.
   tooling hygiene, and it needs an owner who is not the connectors lane.
 
 ## Cross-cutting decisions
+
+- **Gmail is out of v1; curated connectors are Calendar + Slack** (decided
+  2026-08-31; the user delegated the call to the coordinating session).
+  Google CASA is months of lead time plus real money and annual renewal, and
+  the evidence did not justify it for a product with zero users: the design's
+  worked scenario (tickets in, digest to Slack) does not need Gmail, none of
+  the three agent-first scenarios require Gmail read, and alerting already
+  chose Postmark so outbound email needs no Google scopes.
+  - **The "metadata-first" option never existed.** Verified against Google's
+    current Gmail scope documentation: `gmail.metadata` is itself a
+    **restricted** scope, as are `readonly`, `compose`, `insert`, `modify`,
+    and `settings.sharing`. Only `gmail.labels`, `gmail.send`, and the add-on
+    scopes fall outside. A metadata-first connector would have needed CASA
+    too, so the choice was always Gmail-or-not.
+  - **Gmail is removed from the catalog definitions and the baseline**, not
+    shipped unconsentable — an entry nobody can consent to still appears in
+    `GET /v1/catalog` and the build conversation would offer it. A connector
+    removal is a narrowing, so the catalog gate accepts it.
+  - **Reversible:** re-adding Gmail is a catalog addition plus the CASA
+    process, not a rework. Revisit if user testing shows inbox is the binding
+    constraint rather than one of three.
+- **Connector phases resequenced to 1 → 2 → 4**, deferring 3 (options client)
+  and 5/6 (remote MCP), to reach a workflow that actually does something
+  sooner. Dependency-checked and endorsed by the connectors lane: phase 4
+  depends only on 1 and 2, and phase 3 serves the build conversation, which
+  does not exist yet. **5 must still precede 6** whenever MCP returns.
+- **`GET /v1/catalog` shape, for the frontend lane** (connectors phase 1,
+  PR #27): session-authed, no query params,
+  `{connectors: [{id, name, description, auth_provider, connected, ops: [{name, description, effect, scopes, args_schema, constraints}]}]}`.
+  Two rules a permit-builder UI must know: a granted op must carry a resources
+  list for **every** field named in that op's `constraints`, or the version
+  write 400s; and resources on fields **not** in `constraints` also 400,
+  because unenforceable narrowing is rejected as false security. `connected`
+  is a plain boolean now; a richer status field joins it in phase 2.
 
 Recorded so the next session doesn't rediscover them. Each was settled by one
 session and affects others.
