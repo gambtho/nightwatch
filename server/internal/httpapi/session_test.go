@@ -1,57 +1,51 @@
 package httpapi_test
 
 import (
-	"crypto/rand"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
+	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/nightwatch/server/internal/testpg"
 )
 
-func testKey(t *testing.T) []byte {
-	t.Helper()
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
-	return key
+func TestSessionCookieContract(t *testing.T) {
+	c := httpapi.SessionCookie("tok")
+	require.Equal(t, "__Host-ns_session", c.Name)
+	require.Equal(t, "tok", c.Value)
+	require.True(t, c.Secure)
+	require.True(t, c.HttpOnly)
+	require.Equal(t, http.SameSiteLaxMode, c.SameSite)
+	require.Equal(t, "/", c.Path)
+	require.Empty(t, c.Domain, "__Host- forbids a Domain attribute")
+	require.Positive(t, c.MaxAge)
+
+	cleared := httpapi.ClearSessionCookie()
+	require.Equal(t, "__Host-ns_session", cleared.Name)
+	require.Negative(t, cleared.MaxAge)
 }
 
-func TestSessionRoundTrip(t *testing.T) {
-	key := testKey(t)
-	claims := httpapi.SessionClaims{UserID: uuid.New(), TenantID: uuid.New(), Role: "owner"}
-	val, err := httpapi.SignSession(claims, key, time.Hour)
+func TestRequireSessionAgainstStore(t *testing.T) {
+	pool := testpg.New(t)
+	s := store.New(pool)
+	ctx := context.Background()
+
+	tn, err := s.CreateTenant(ctx, "acme", []byte("kek"))
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 
-	got, err := httpapi.VerifySession(val, key)
+	value, tokenHash, err := httpapi.NewSessionToken()
 	require.NoError(t, err)
-	require.Equal(t, claims.UserID, got.UserID)
-	require.Equal(t, claims.TenantID, got.TenantID)
-}
-
-func TestSessionRejectsTamperAndExpiry(t *testing.T) {
-	key := testKey(t)
-	claims := httpapi.SessionClaims{UserID: uuid.New(), TenantID: uuid.New(), Role: "owner"}
-
-	val, err := httpapi.SignSession(claims, key, time.Hour)
+	_, err = s.CreateSession(ctx, tokenHash, tn.ID, user.ID)
 	require.NoError(t, err)
-	_, err = httpapi.VerifySession(val+"x", key)
-	require.Error(t, err)
 
-	expired, err := httpapi.SignSession(claims, key, -time.Minute)
-	require.NoError(t, err)
-	_, err = httpapi.VerifySession(expired, key)
-	require.Error(t, err)
-}
-
-func TestRequireSession(t *testing.T) {
-	key := testKey(t)
 	var seen httpapi.SessionClaims
-	h := httpapi.RequireSession(key, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := httpapi.RequireSession(s, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = httpapi.ClaimsFrom(r.Context())
 	}))
 
@@ -60,14 +54,30 @@ func TestRequireSession(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/workflows", nil))
 	require.Equal(t, http.StatusUnauthorized, rec.Code)
 
-	// Valid cookie: passes and exposes claims.
-	claims := httpapi.SessionClaims{UserID: uuid.New(), TenantID: uuid.New(), Role: "owner"}
-	cookie, err := httpapi.SessionCookie(key, claims, time.Hour)
-	require.NoError(t, err)
+	// Garbage token: 401.
 	req := httptest.NewRequest("GET", "/v1/workflows", nil)
-	req.AddCookie(cookie)
+	req.AddCookie(&http.Cookie{Name: httpapi.SessionCookieName, Value: "not-a-session"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// Valid session: passes; claims carry the CURRENT app_user role
+	// through the join.
+	req = httptest.NewRequest("GET", "/v1/workflows", nil)
+	req.AddCookie(&http.Cookie{Name: httpapi.SessionCookieName, Value: value})
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, claims.TenantID, seen.TenantID)
+	require.Equal(t, user.ID, seen.UserID)
+	require.Equal(t, tn.ID, seen.TenantID)
+	require.Equal(t, "owner", seen.Role)
+
+	// User row deleted: the same cookie is now a plain 401.
+	_, err = pool.Exec(ctx, `DELETE FROM app_user WHERE id = $1`, user.ID)
+	require.NoError(t, err)
+	req = httptest.NewRequest("GET", "/v1/workflows", nil)
+	req.AddCookie(&http.Cookie{Name: httpapi.SessionCookieName, Value: value})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }

@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
+	"github.com/gambtho/nightwatch/server/internal/mail"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/testpg"
 	"github.com/gambtho/nightwatch/server/internal/token"
@@ -27,12 +28,24 @@ type env struct {
 	ts      *httptest.Server
 	store   *store.Store
 	pool    *pgxpool.Pool
-	key     []byte
 	cookie  *http.Cookie
 	tenant  store.Tenant
 	user    store.User
 	compute *fakeCompute
 	vault   *vault.Master
+	mailer  *mail.Recorder
+	baseURL *url.URL
+}
+
+// mintSessionCookie inserts a session row and returns the cookie carrying
+// its opaque token — the DB-backed replacement for signing claims.
+func mintSessionCookie(t *testing.T, s *store.Store, tenantID, userID uuid.UUID) *http.Cookie {
+	t.Helper()
+	value, tokenHash, err := httpapi.NewSessionToken()
+	require.NoError(t, err)
+	_, err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
+	require.NoError(t, err)
+	return httpapi.SessionCookie(value)
 }
 
 func newEnv(t *testing.T) *env {
@@ -54,21 +67,19 @@ func newEnv(t *testing.T) *env {
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 
-	key := testKey(t)
-	cookie, err := httpapi.SessionCookie(key,
-		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: "owner"},
-		time.Hour)
-	require.NoError(t, err)
+	cookie := mintSessionCookie(t, s, tn.ID, user.ID)
 
 	fc := &fakeCompute{}
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: fc}
 
+	base := &url.URL{Scheme: "https", Host: "app.nightshift.test"}
+	mailer := &mail.Recorder{}
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Engine: eng, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &env{ts: ts, store: s, pool: pool, key: key, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master}
+	return &env{ts: ts, store: s, pool: pool, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master, mailer: mailer, baseURL: base}
 }
 
 func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, map[string]any) {

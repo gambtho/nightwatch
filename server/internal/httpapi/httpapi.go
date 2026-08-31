@@ -5,24 +5,31 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/google/uuid"
 
 	"github.com/gambtho/nightwatch/server/internal/engine"
+	"github.com/gambtho/nightwatch/server/internal/mail"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/vault"
 )
 
 type Deps struct {
-	Store      *store.Store
-	SessionKey []byte
-	Engine     *engine.Engine
-	Vault      *vault.Master
+	Store  *store.Store
+	Engine *engine.Engine
+	Vault  *vault.Master
+	// PublicBaseURL is the canonical customer-facing origin
+	// (NIGHTSHIFT_PUBLIC_BASE_URL): the single source for magic-link
+	// URLs, the Origin comparison, and redirect joining. Never inferred
+	// from Host or proxy headers.
+	PublicBaseURL *url.URL
+	Mailer        mail.Sender
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	auth := func(h http.HandlerFunc) http.Handler {
-		return RequireSession(d.SessionKey, h)
+		return RequireSession(d.Store, h)
 	}
 	mux.Handle("POST /v1/workflows", auth(d.createWorkflow))
 	mux.Handle("GET /v1/workflows", auth(d.listWorkflows))
