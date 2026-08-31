@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/harness"
@@ -28,6 +29,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/llm/llmtest"
 	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
+	"github.com/gambtho/nightwatch/server/internal/oauth"
 	"github.com/gambtho/nightwatch/server/internal/proxy"
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
 	"github.com/gambtho/nightwatch/server/internal/store"
@@ -53,14 +55,15 @@ func TestEndToEndRun(t *testing.T) {
 	var baseURL string
 	local := compute.NewLocal(t.TempDir(), func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, err := client.Context(ctx)
+		steps, tools, err := client.Context(ctx)
 		if err != nil {
 			t.Errorf("harness context: %v", err)
 			return
 		}
-		_, _ = harness.Run(ctx, harness.Input{Steps: steps}, harness.Deps{
+		_, _ = harness.Run(ctx, harness.Input{Steps: steps, Tools: tools}, harness.Deps{
 			ProviderFactory: factory,
 			Sink:            client,
+			Tools:           client,
 		})
 	})
 
@@ -279,14 +282,15 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	}
 	local := compute.NewLocal(t.TempDir(), func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, err := client.Context(ctx)
+		steps, tools, err := client.Context(ctx)
 		if err != nil {
 			t.Errorf("harness context: %v", err)
 			return
 		}
-		_, _ = harness.Run(ctx, harness.Input{Steps: steps, RunToken: req.RunToken}, harness.Deps{
+		_, _ = harness.Run(ctx, harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken}, harness.Deps{
 			ProviderFactory: factory,
 			Sink:            client,
+			Tools:           client,
 		})
 	})
 
@@ -368,14 +372,15 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	var baseURL string
 	local := compute.NewLocal(t.TempDir(), func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, err := client.Context(ctx)
+		steps, tools, err := client.Context(ctx)
 		if err != nil {
 			t.Errorf("harness context: %v", err)
 			return
 		}
-		_, _ = harness.Run(ctx, harness.Input{Steps: steps, RunToken: req.RunToken}, harness.Deps{
+		_, _ = harness.Run(ctx, harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken}, harness.Deps{
 			ProviderFactory: factory,
 			Sink:            client,
+			Tools:           client,
 		})
 	})
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: local}
@@ -426,4 +431,192 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	sched.Tick(ctx) // same window: nothing new
 	out = do("GET", "/v1/workflows/"+wfID+"/runs", nil)
 	require.Len(t, out["runs"].([]any), 1)
+}
+
+// TestEndToEndConnectorToolRun is the connector spec's e2e row: a run
+// against a fake Slack upstream completes a read op and a
+// channel-constrained write op with zero credentials in the harness,
+// and a write to an unlisted channel is denied and audited. The LLM is
+// scripted (the tool loop is what's under test); the tools path is the
+// real stack — permit -> approval -> run context projection -> harness
+// loop -> proxy connector route -> catalog compile -> vault-injected
+// credential -> upstream.
+func TestEndToEndConnectorToolRun(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+
+	signer := token.New(bytes.Repeat([]byte{4}, 32))
+	master, err := vault.NewMaster(bytes.Repeat([]byte{5}, 32))
+	require.NoError(t, err)
+	cat, err := catalog.Load()
+	require.NoError(t, err)
+
+	// Fake Slack: records every request's auth and path.
+	var upstreamMu sync.Mutex
+	var upstreamAuths, upstreamPaths []string
+	slackUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamMu.Lock()
+		upstreamAuths = append(upstreamAuths, r.Header.Get("Authorization"))
+		upstreamPaths = append(upstreamPaths, r.URL.Path)
+		upstreamMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(slackUpstream.Close)
+
+	// The model: read, then one approved write and one unlisted-channel
+	// write in the same turn, then finish.
+	provider := &llmtest.ScriptedTurns{Turns: []llmtest.TurnScript{
+		{ToolUses: []llm.ToolUse{
+			{ID: "t1", Name: "slack__list_channels", Input: json.RawMessage(`{}`)},
+		}},
+		{ToolUses: []llm.ToolUse{
+			{ID: "t2", Name: "slack__post_message", Input: json.RawMessage(`{"channel":"C-OK","text":"digest"}`)},
+			{ID: "t3", Name: "slack__post_message", Input: json.RawMessage(`{"channel":"C-EVIL","text":"digest"}`)},
+		}},
+		{Text: "posted to the approved channel; the other was refused"},
+	}}
+	var sawAPIKeys []string
+	factory := func(name string) (llm.Provider, error) {
+		return apiKeyRecorder{inner: provider, record: func(k string) { sawAPIKeys = append(sawAPIKeys, k) }}, nil
+	}
+
+	var baseURL string
+	local := compute.NewLocal(t.TempDir(), func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
+		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
+		steps, tools, err := client.Context(ctx)
+		if err != nil {
+			t.Errorf("harness context: %v", err)
+			return
+		}
+		require.Len(t, tools, 3, "permit ops projected as tools")
+		_, _ = harness.Run(ctx, harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken}, harness.Deps{
+			ProviderFactory: factory,
+			Sink:            client,
+			Tools:           client,
+		})
+	})
+
+	mux := http.NewServeMux()
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
+		RunProvider: "openai", RunModel: "gpt-4o-mini", Catalog: cat})
+	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
+	adapters := proxyadapter.New(s, signer, master, nil, nil)
+	cfg := proxy.DefaultConfig()
+	cfg.ConnectorUpstreams = map[string]string{"slack": slackUpstream.URL}
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	baseURL = ts.URL
+	cfg.InternalBase = baseURL
+	proxy.RegisterRoutes(mux, proxy.Deps{Auth: adapters.Auth, Permits: adapters.Permits,
+		Credentials: adapters.Credentials, Events: adapters.Events, Hook: proxy.NopHook{}, Config: cfg, Catalog: cat})
+
+	wrapped, err := master.NewTenantKEK()
+	require.NoError(t, err)
+	tn, err := s.CreateTenant(ctx, "acme", wrapped)
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
+	require.NoError(t, err)
+	cookie := mintSession(t, s, tn.ID, user.ID)
+
+	// Seed the slack oauth credential straight into the vault: the
+	// connect flow has its own tests; what matters here is that the
+	// credential exists only there.
+	bundleJSON, err := json.Marshal(oauth.Bundle{AccessToken: "xoxb-vault-token"})
+	require.NoError(t, err)
+	kek, kekVersion, err := s.TenantKEK(ctx, tn.ID)
+	require.NoError(t, err)
+	dek, ct, nonce, err := master.EncryptSecret(kek, string(bundleJSON))
+	require.NoError(t, err)
+	_, err = s.UpsertConnectionBundle(ctx, tn.ID, "default", "slack", store.BundleUpdate{
+		Kind: "oauth", DEKWrapped: dek, Ciphertext: ct, Nonce: nonce, KEKVersion: kekVersion, Metadata: []byte(`{}`),
+	})
+	require.NoError(t, err)
+
+	do := newDoHelper(t, ts.URL, cookie)
+	out := do("POST", "/v1/workflows", map[string]any{
+		"name": "digest with tools",
+		"steps": map[string]any{
+			"v":     1,
+			"steps": []map[string]any{{"id": "digest", "text": "Post the digest to #team-digest."}},
+		},
+		"permit": map[string]any{
+			"v":   1,
+			"llm": map[string]any{"providers": []string{"openai"}},
+			"connections": map[string]any{
+				"slack": map[string]any{
+					"kind": "http",
+					"ops":  []string{"list_channels", "read_messages", "post_message"},
+					"resources": map[string]any{
+						"post_message": map[string]any{"channel": []string{"C-OK"}},
+					},
+				},
+			},
+		},
+	})
+	wfID := out["workflow"].(map[string]any)["id"].(string)
+	do("POST", "/v1/workflows/"+wfID+"/versions/1/approve", nil)
+	out = do("POST", "/v1/workflows/"+wfID+"/runs", nil)
+	runID := out["run"].(map[string]any)["id"].(string)
+
+	local.Wait()
+
+	out = do("GET", "/v1/runs/"+runID, nil)
+	run := out["run"].(map[string]any)
+	require.Equal(t, "succeeded", run["status"], "run finishes degraded past the denial")
+	require.Contains(t, run["output"], "approved channel")
+
+	// Zero credentials in the harness: the provider saw only the run
+	// token, and the upstream saw only the vault credential.
+	for _, k := range sawAPIKeys {
+		require.NotEqual(t, "xoxb-vault-token", k)
+		require.NotEmpty(t, k)
+	}
+	upstreamMu.Lock()
+	require.Len(t, upstreamPaths, 2, "the denied write never reached Slack")
+	for _, a := range upstreamAuths {
+		require.Equal(t, "Bearer xoxb-vault-token", a)
+	}
+	require.Contains(t, upstreamPaths, "/api/conversations.list")
+	require.Contains(t, upstreamPaths, "/api/chat.postMessage")
+	upstreamMu.Unlock()
+
+	// The model saw the denial as an error result, not a success.
+	thirdTurn := provider.TurnMsgs[2]
+	var deniedResult *llm.Message
+	for i := range thirdTurn {
+		if thirdTurn[i].Role == llm.RoleTool && thirdTurn[i].ToolUseID == "t3" {
+			deniedResult = &thirdTurn[i]
+		}
+	}
+	require.NotNil(t, deniedResult)
+	require.True(t, deniedResult.IsError)
+
+	// And the denial is audit content.
+	out = do("GET", "/v1/runs/"+runID+"/events", nil)
+	var types []string
+	for _, ev := range out["events"].([]any) {
+		types = append(types, ev.(map[string]any)["type"].(string))
+	}
+	require.Contains(t, types, "proxy.denied")
+	require.Contains(t, types, "proxy.request")
+	require.Contains(t, types, "tool.call.ok")
+	require.Contains(t, types, "tool.call.fail")
+}
+
+// apiKeyRecorder wraps a tool-capable provider to record the API key
+// each call carries (the run token, never a real credential).
+type apiKeyRecorder struct {
+	inner  llm.ToolCapableProvider
+	record func(string)
+}
+
+func (a apiKeyRecorder) Chat(ctx context.Context, msgs []llm.Message, opts llm.CallOptions, onChunk func(llm.StreamChunk)) (llm.Usage, error) {
+	a.record(opts.APIKey)
+	return a.inner.Chat(ctx, msgs, opts, onChunk)
+}
+
+func (a apiKeyRecorder) ChatTurn(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts llm.CallOptions, onChunk func(llm.StreamChunk)) (llm.TurnResult, error) {
+	a.record(opts.APIKey)
+	return a.inner.ChatTurn(ctx, msgs, tools, opts, onChunk)
 }

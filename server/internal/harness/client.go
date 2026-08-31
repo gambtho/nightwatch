@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,12 +60,65 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	return nil
 }
 
-func (c *Client) Context(ctx context.Context) (Steps, error) {
+func (c *Client) Context(ctx context.Context) (Steps, []Tool, error) {
 	var body struct {
-		Steps Steps `json:"steps"`
+		Steps Steps  `json:"steps"`
+		Tools []Tool `json:"tools"`
 	}
 	err := c.do(ctx, "GET", "/internal/runs/"+c.runID.String()+"/context", nil, &body)
-	return body.Steps, err
+	return body.Steps, body.Tools, err
+}
+
+// maxToolResultBytes bounds what one tool result feeds back into the
+// model's context.
+const maxToolResultBytes = 256 << 10
+
+// Invoke executes one projected tool call through the proxy's connector
+// route. The tool name is {connector}__{op} exactly as the run context
+// projected it; the run token is the only credential the harness holds.
+// Non-2xx responses are tool-level results the model sees (the proxy
+// already audited the denial); only an unreachable proxy or a dead run
+// token is a transport failure, fatal to the run.
+func (c *Client) Invoke(ctx context.Context, name string, input json.RawMessage) (ToolResult, error) {
+	connector, op, ok := strings.Cut(name, "__")
+	if !ok || connector == "" || op == "" {
+		// A name the control plane never projected: the model made it
+		// up. Tool-level — let it see the mistake and recover.
+		return ToolResult{Content: "unknown tool " + name, IsError: true}, nil
+	}
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.base+"/proxy/connector/"+url.PathEscape(connector)+"/"+url.PathEscape(op),
+		bytes.NewReader(input))
+	if err != nil {
+		return ToolResult{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.bearer)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return ToolResult{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxToolResultBytes))
+	if err != nil {
+		return ToolResult{}, err
+	}
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		// The run token is dead (finalized, revoked, expired): nothing
+		// this run does can recover. Fatal.
+		return ToolResult{}, fmt.Errorf("harness client: tool %s: %s", name, resp.Status)
+	case resp.StatusCode >= 300:
+		return ToolResult{
+			Content: "tool call failed: " + resp.Status + ": " + strings.TrimSpace(string(body)),
+			IsError: true,
+		}, nil
+	default:
+		return ToolResult{Content: string(body)}, nil
+	}
 }
 
 func (c *Client) Event(ctx context.Context, ev RunEvent) error {

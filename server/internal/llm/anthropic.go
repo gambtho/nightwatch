@@ -120,7 +120,7 @@ func (p *anthropicProvider) ChatTurn(
 			apiMsgs = append(apiMsgs, anthropic.NewAssistantMessage(blocks...))
 		case RoleTool:
 			apiMsgs = append(apiMsgs, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(m.ToolUseID, m.Content, false),
+				anthropic.NewToolResultBlock(m.ToolUseID, m.Content, m.IsError),
 			))
 		}
 	}

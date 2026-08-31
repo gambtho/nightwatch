@@ -26,7 +26,18 @@ type Message struct {
 	Content   string
 	ToolUses  []ToolUse // RoleAssistant: tool_use blocks the model emitted
 	ToolUseID string    // RoleTool: id of the call this message answers
+	// IsError marks a RoleTool result as a failure the model should see
+	// (denial, refresh failure, upstream connector error). Anthropic
+	// maps it to tool_result.is_error; providers with no error flag get
+	// the ToolErrorPrefix convention. Without it, failures would present
+	// to the model as successful results.
+	IsError bool
 }
+
+// ToolErrorPrefix is the stated error convention for providers whose
+// tool-result shape carries no error flag (OpenAI-shaped APIs): the
+// result content is prefixed so the model can tell failure from output.
+const ToolErrorPrefix = "TOOL ERROR: "
 
 // StreamChunk is an incremental portion of the assistant's response.
 type StreamChunk struct {

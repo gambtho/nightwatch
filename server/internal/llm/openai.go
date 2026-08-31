@@ -142,7 +142,13 @@ func (p *openAIProvider) ChatTurn(
 			}
 			msgs = append(msgs, am)
 		case RoleTool:
-			msgs = append(msgs, openai.ToolMessage(m.Content, m.ToolUseID))
+			content := m.Content
+			// No error slot in the OpenAI tool-result shape; the stated
+			// prefix convention is how a failure stays visible.
+			if m.IsError {
+				content = ToolErrorPrefix + content
+			}
+			msgs = append(msgs, openai.ToolMessage(content, m.ToolUseID))
 		}
 	}
 
