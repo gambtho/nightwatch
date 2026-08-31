@@ -191,8 +191,8 @@ Plan 3 merged (2026-08-31):
 ## Open design items, recorded not resolved
 
 Raised by a Codex review of the corrected platform spec (docs lane, PR #15).
-Design work, not bookkeeping — none applied. Relayed to the Plan 5 session
-2026-08-31.
+Relayed to the Plan 5 session 2026-08-31 and all three folded into PR #12
+the same day; kept here as the record of what was decided and why.
 
 - **Upstream `EgressPolicy` cannot subsume our proxy.** The connectors design
   enforces per-operation and per-path rules — application layer. Upstream's
@@ -201,16 +201,27 @@ Design work, not bookkeeping — none applied. Relayed to the Plan 5 session
   narrows the roadmap's long-standing "does the proxy have an expiry date"
   question: it does not, it has a shrinking lower half. Any convergence note
   in the platform spec should say so rather than implying full convergence.
-  **Unassigned.** The docs lane correctly declined to fold a substantive
-  design amendment into a bookkeeping PR, so this needs an owner — either the
-  Plan 5 session in PR #12 or the platform spec's next design pass.
-- **State retention across permit narrowing** — what happens to actor state
-  accumulated under a wider permit when the permit narrows. Plan 5 scope.
+  **Resolved in PR #12** (commit `4dc4a4b`): the permit's host-level floor
+  stays compilable to upstream `EgressPolicy`; op-level enforcement and
+  credential injection are ours permanently. Follow-on consistency fix routed
+  to the docs lane — PR #15's tracking task still said to "avoid semantics
+  theirs cannot express (e.g. per-path rules)", which the merged connectors
+  spec already requires, and still implied the proxy could migrate away.
+- **State retention across permit narrowing** — **resolved in PR #12** with a
+  stated v1 default: state persists across narrowing (narrowing bounds future
+  reach, not past knowledge, and retained state can only leave through the
+  narrowed permit's destinations). Purge-on-narrow was rejected as a default
+  because it would destroy the memory feature on every edit. Whether narrowing
+  should _offer_ a reset is delegated to graduated permits, where permit
+  transitions are first-class.
 - **Retry and idempotency for cold-boot request loss** — what the control
   plane does when an invoke is lost to a cold boot or a request the router
   sheds under pool saturation, and how that stays idempotent against Plan 3's
-  one-active-run admission index and `run_workflow_firetime_unique`. Plan 5
-  scope.
+  one-active-run admission index and `run_workflow_firetime_unique`.
+  **Resolved in PR #12**: a cold-boot loss or parking-shed 503 is retried as
+  the same RunID against the same run row, so retries create no rows and both
+  indexes see exactly one run per occurrence. Recovery is always retry, never
+  re-fire; only window exhaustion converts to a terminal `dispatch_failed`.
 
 ## Follow-ups
 
