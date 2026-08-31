@@ -38,3 +38,23 @@ func TestParseRejects(t *testing.T) {
 		require.Error(t, err, name)
 	}
 }
+
+func TestParseSpend(t *testing.T) {
+	p, err := permit.Parse([]byte(`{"v":1,"llm":{"providers":["anthropic"]},"spend":{"per_run_cents":50}}`))
+	require.NoError(t, err)
+	require.NotNil(t, p.Spend)
+	require.Equal(t, 50, p.Spend.PerRunCents)
+
+	p, err = permit.Parse(permit.Empty)
+	require.NoError(t, err)
+	require.Nil(t, p.Spend)
+
+	for name, raw := range map[string]string{
+		"zero cap":     `{"v":1,"spend":{"per_run_cents":0}}`,
+		"negative cap": `{"v":1,"spend":{"per_run_cents":-5}}`,
+		"unknown key":  `{"v":1,"spend":{"per_run_dollars":1}}`,
+	} {
+		_, err := permit.Parse([]byte(raw))
+		require.Error(t, err, name)
+	}
+}
