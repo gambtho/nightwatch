@@ -38,7 +38,7 @@ finishes, or a cross-cutting decision is taken.
 | Packaging shell (`app/`)         | **Merged as record** (#42, Wails v3 spike) — lane PAUSED by direction change 2; `app/` gets a paused banner |
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
-| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49); **K2 delivered: PR #62** (live `llm:`, set-key Secret, real runtime; decisions below)  |
+| K8s agent track (THE FOCUS)      | **REDIRECTED onto kagent** (user, 2026-08-31): stop building our own runner — adopt kagent, mount Tomte governance on it. K1 #49 merged / K2 #62 stand as record; prompt below |
 | Lean-in cleanup                  | **COMPLETE AND FULLY MERGED** (#51, #52, #54, #55, #56) — the repo is onboarding-ready                     |
 | P2 — Connectors main road        | **OWNS `server/`. A MERGED (#57); B delivered: #59** (key-verify + ledger 00013; decisions below). C after #59 merges |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
@@ -154,6 +154,33 @@ integration.
 - **Owed to the user**: the real-endpoint path (Anthropic, pasted key)
   is documented but not hand-verified — no live key in the session; one
   manual run requested.
+
+## Course correction (2026-08-31, late): adopt kagent, stop rebuilding it
+
+User decision, after seeing kagent's current docs: "we're actively
+rebuilding something that exists — our literal goal at the moment is run
+an agent on k8s." Correct — kagent already ships declarative K8s agents
+(Agent CRD YAML), a CLI + dashboard, a wide model-provider list, MCP
+tools, and A2A multi-agent topology. The coordinator's earlier
+not-adopted ruling optimized for the governance destination over the
+stated near-term goal and is REVERSED for the runner layer.
+
+The new shape:
+
+- **kagent is the agent runner.** Agents are kagent `Agent` resources —
+  that YAML is the agent-as-code topology artifact leadership asked for
+  (A2A agent cards included). We do not build or extend our own runtime.
+- **Tomte is the governance plane** — the differentiation kagent
+  verifiably lacks (no budgets, metering, approvals, permits, credential
+  custody, or egress enforcement in their docs). The integration points
+  exist in their model: ModelConfig's BYO OpenAI-compatible base URL can
+  point at Tomte's metering/enforcing proxy, and kagent tools are MCP —
+  exactly what P2's phases C/D (MCP registration + proxy enforcement)
+  build. P2 continues unchanged and becomes MORE load-bearing.
+- **tomtectl/ stops growing.** K1 (#49, merged) and K2 (#62) stand as
+  the record — the schema/Secret/fail-closed lessons carry over. Whether
+  #62 merges as record or closes is the user's call. A later thin CLI,
+  if wanted, wraps kagent rather than replacing it.
 
 ## Lean-in cleanup (2026-08-31): onboarding-ready repo
 
