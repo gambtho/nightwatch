@@ -63,7 +63,7 @@ func TestHarnessClientAgainstInternalAPI(t *testing.T) {
 
 	client := harness.NewClient(ts.URL, runID, bearer)
 
-	steps, err := client.Context(ctx)
+	steps, _, err := client.Context(ctx)
 	require.NoError(t, err)
 	// The context serves the compiled execution form (decision 9), with the
 	// fire occasion appended to the compiled kickoff.
@@ -170,7 +170,7 @@ func TestFinalizeResolvesPerRunCap(t *testing.T) {
 	runID, bearer := mintRun(t, s, signer, tn, capped)
 
 	client := harness.NewClient(ts.URL, runID, bearer)
-	_, err = client.Context(ctx)
+	_, _, err = client.Context(ctx)
 	require.NoError(t, err)
 	require.NoError(t, client.Finalize(ctx, harness.Result{
 		Status: harness.StatusSucceeded, Output: "big",
@@ -201,7 +201,7 @@ func TestContextServesScheduledOccasion(t *testing.T) {
 	require.NoError(t, err)
 
 	client := harness.NewClient(ts.URL, runID, bearer)
-	steps, err := client.Context(ctx)
+	steps, _, err := client.Context(ctx)
 	require.NoError(t, err)
 	require.Contains(t, steps.Kickoff, "2026-09-07T09:00:00Z")
 	require.Contains(t, steps.Kickoff, "scheduled occurrence")
@@ -220,6 +220,6 @@ func TestContextFailsWithoutCompiled(t *testing.T) {
 	require.NoError(t, err)
 	runID, bearer := mintRun(t, s, signer, tn, draft)
 	client := harness.NewClient(ts.URL, runID, bearer)
-	_, err = client.Context(ctx)
+	_, _, err = client.Context(ctx)
 	require.Error(t, err)
 }

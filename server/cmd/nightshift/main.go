@@ -232,14 +232,14 @@ func serve(ctx context.Context) error {
 	})
 	local := compute.NewLocal(stateDir, func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, err := client.Context(ctx)
+		steps, tools, err := client.Context(ctx)
 		if err != nil {
 			slog.Error("harness: fetch context", "run", req.RunID, "err", err)
 			return
 		}
 		if _, err := harness.Run(ctx,
-			harness.Input{Steps: steps, RunToken: req.RunToken},
-			harness.Deps{ProviderFactory: factory, Sink: client}); err != nil {
+			harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken},
+			harness.Deps{ProviderFactory: factory, Sink: client, Tools: client}); err != nil {
 			slog.Error("harness: run failed", "run", req.RunID, "err", err)
 		}
 	})
@@ -261,7 +261,7 @@ func serve(ctx context.Context) error {
 		RunModel:    os.Getenv("NIGHTSHIFT_RUN_MODEL"),
 		Catalog:     cat, OAuth: oauthSvc, StateSigner: stateSigner,
 	})
-	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
+	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
 
 	adapters := proxyadapter.New(s, signer, master, platform, oauthSvc)
 	cfg := proxy.DefaultConfig()

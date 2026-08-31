@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/permit"
 	"github.com/gambtho/nightwatch/server/internal/steps"
 	"github.com/gambtho/nightwatch/server/internal/store"
@@ -23,6 +25,9 @@ import (
 type Deps struct {
 	Store  *store.Store
 	Signer *token.Signer
+	// Catalog backs the run context's tools projection. Nil serves runs
+	// with no tools (permits without connections work unchanged).
+	Catalog *catalog.Catalog
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
@@ -120,6 +125,17 @@ func (d Deps) runContext(w http.ResponseWriter, r *http.Request, claims token.Ru
 		return
 	}
 	compiled.Kickoff += "\n\n" + occasion(run)
+
+	// The tools array is server-derived from the approved permit joined
+	// with the running catalog: the harness stays a dumb executor — it
+	// never sees the permit, never holds a credential, and cannot grant
+	// itself a tool the control plane did not project.
+	tools, err := d.projectTools(version.Doc.Permit)
+	if err != nil {
+		d.fail(w, err)
+		return
+	}
+
 	if err := d.Store.MarkRunRunning(ctx, claims.TenantID, claims.RunID); err != nil {
 		d.fail(w, err)
 		return
@@ -128,9 +144,59 @@ func (d Deps) runContext(w http.ResponseWriter, r *http.Request, claims token.Ru
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"run_id": run.ID,
 		"steps":  compiled,
+		"tools":  tools,
 	}); err != nil {
 		slog.Error("internalapi: encode context", "err", err)
 	}
+}
+
+type toolJSON struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+// projectTools turns permit connections into the harness tool list:
+// {connector}__{op}, catalog copy and schema verbatim, in stable order.
+// An op the catalog no longer defines projects nothing — its invocation
+// would 403 at the proxy anyway, and a missing tool is honest about
+// that; the drop is logged because it means a permit outlived its op.
+func (d Deps) projectTools(rawPermit []byte) ([]toolJSON, error) {
+	p, err := permit.Parse(rawPermit)
+	if err != nil {
+		return nil, fmt.Errorf("projecting tools: %w", err)
+	}
+	if len(p.Connections) == 0 {
+		return []toolJSON{}, nil
+	}
+	if d.Catalog == nil {
+		return nil, fmt.Errorf("projecting tools: permit has connections but no catalog is configured")
+	}
+	keys := make([]string, 0, len(p.Connections))
+	for key := range p.Connections {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := []toolJSON{}
+	for _, key := range keys {
+		entry := p.Connections[key]
+		ops := append([]string(nil), entry.Ops...)
+		sort.Strings(ops)
+		for _, opName := range ops {
+			_, op, ok := d.Catalog.Op(key, opName)
+			if !ok {
+				slog.Warn("internalapi: permit op absent from catalog, not projected",
+					"connector", key, "op", opName)
+				continue
+			}
+			out = append(out, toolJSON{
+				Name:        key + "__" + opName,
+				Description: op.Description,
+				InputSchema: op.ArgsSchema,
+			})
+		}
+	}
+	return out, nil
 }
 
 // occasion names what fired the run — fixed text assembled from the run
