@@ -160,25 +160,18 @@ right rather than merely asserted.
 connections manager (charter item 4 upgrade), and the I/O palette positioned
 in the build-conversation triage.
 
-**The Tomte name is under leadership review (2026-08-31).** Both naming lanes
-hold: the mechanical rename is COMPLETE and open as **PR #38** with an
-on-hold comment (verified: server suite green, web tsc + 110 tests + build
-green, real `tomte serve` boot); PR #37 keeps Tomte until the final name
-lands. If the name changes, both are a one-commit `tomte→<newname>`
-find-replace — the rename session confirmed nothing else on its branch
-collides with the literal string — except the module-path portion, which
-waits on the user's second repo-rename click (the repo is ALREADY
-`gambtho/tomte`). Two rename facts worth memory: the derived-key labels
+**The name is CONFIRMED: Tomte** (user, 2026-08-31, after leadership review;
+trademark counsel still owed). The hold is released: the mechanical rename is
+complete and ready to merge as **PR #38** (verified: server suite green, web
+tsc + 110 tests + build green, real `tomte serve` boot); PR #37's naming is
+final as written. Screening history for the record: Duende died (Duende
+Software is IdentityServer's company), Momoy was legally clean but loaded
+(sacred Chumash Datura figure; "ugly/nasty" in Hiligaynon; Momo-adjacent).
+Two rename facts worth memory: the derived-key labels
 (`tomte:run-jwt` HKDF info, `tomte-oauth-state` salt) are cryptographic
 inputs — renaming them invalidates outstanding run tokens, fine pre-release,
 not fine later; and `src/` (retired prototype) deliberately still greps as
 nightshift.
-
-Name screening: Duende is DEAD (Duende Software is IdentityServer's company —
-an identity-security vendor, our worst possible neighbor); Momoy is legally
-clean but loaded (sacred Chumash Datura figure — appropriation risk;
-"ugly/nasty" in Hiligaynon; one letter from the Momo creepypasta). Nisse and
-Bymorning remain viable fallbacks.
 
 Board-relevant spec contents:
 
