@@ -1,21 +1,15 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/token"
 )
-
-const runTokenTTL = time.Hour
 
 type runJSON struct {
 	ID         uuid.UUID  `json:"id"`
@@ -67,49 +61,16 @@ func (d Deps) fireRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runID := uuid.New()
-	bearer, hash, err := d.Signer.Sign(token.RunClaims{
-		RunID: runID, TenantID: claims.TenantID,
-		ExpiresAt: time.Now().Add(runTokenTTL),
-	})
-	if err != nil {
-		writeErr(w, err)
+	run, err := d.Engine.Fire(r.Context(), claims.TenantID, wfID, version.Number, "manual", nil)
+	if errors.Is(err, store.ErrActiveRun) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a run is already active for this workflow"})
 		return
 	}
-	run, err := d.Store.CreateRun(r.Context(), claims.TenantID, wfID, runID, version.Number, hash, "manual", nil)
 	if err != nil {
-		writeErr(w, err)
-		return
-	}
-
-	actor, err := d.Compute.EnsureActor(r.Context(),
-		compute.WorkflowRef{TenantID: claims.TenantID, WorkflowID: wfID},
-		compute.TemplateRef{Name: "harness-v1"})
-	if err != nil {
-		d.failDispatch(r.Context(), claims.TenantID, runID, err)
-		writeErr(w, err)
-		return
-	}
-	if _, err := d.Compute.Invoke(r.Context(), actor,
-		compute.InvokeRequest{RunID: runID, RunToken: bearer}); err != nil {
-		d.failDispatch(r.Context(), claims.TenantID, runID, err)
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": toRunJSON(run)})
-}
-
-// failDispatch records a run that never reached its actor; without this a
-// dispatch failure would leave the run pending forever. It strips
-// cancellation from the request context so a client disconnect mid-fire
-// doesn't also abort the finalize write.
-func (d Deps) failDispatch(ctx context.Context, tenantID, runID uuid.UUID, cause error) {
-	ctx = context.WithoutCancel(ctx)
-	if _, err := d.Store.FinalizeRun(ctx, tenantID, runID, store.RunFinal{
-		Status: "failed", ErrorKind: "dispatch_failed", ErrorMsg: cause.Error(),
-	}, 0); err != nil {
-		slog.Error("httpapi: record dispatch failure", "run", runID, "err", err)
-	}
 }
 
 func (d Deps) getRun(w http.ResponseWriter, r *http.Request) {
