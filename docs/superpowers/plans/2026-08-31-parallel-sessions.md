@@ -14,7 +14,8 @@ finishes, or a cross-cutting decision is taken.
 | Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                  |
 | Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                 |
 | Identity spec                    | **Merged** (PR #6)                                                  |
-| Identity implementation          | **Merged** (PR #17) — **`server/` is FREE and unassigned**          |
+| Identity implementation          | **Merged** (PR #17)                                                 |
+| Steps v1 (decision 9)            | **PR #19 open** (branch `feat/steps-v1`) — **owns `server/`**       |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                      |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed    |
 | Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane             |
@@ -172,6 +173,32 @@ scheduler/reaper/meter wiring in `serve()` (do not displace it),
   coordinating session has green-lit the identity implementation — it owns
   `server/` until its PR merges.
 
+## Delta sheet: what steps v1 changes (PR #19, not yet merged)
+
+Relayed by the steps-v1 session and **verified against `origin/feat/steps-v1`,
+not commit messages**. PR #19 is open — none of this is on `main` yet, so every
+entry reads "once #19 merges".
+
+- **Migration `00010_steps_v1.sql` is taken**; next free is **00011**.
+- **`workflow_version` gains `compiled jsonb`**, with a DB CHECK enforcing
+  **approved ⇒ compiled**. The dev-data migration copies each old
+  execution-form steps document into `compiled` stamped `compiler_v 0` and
+  synthesizes a v1 user-facing artifact from the old kickoff.
+- **`store.ApproveVersion` now takes a trailing `compiled json.RawMessage`**
+  and writes the column inside the approval transaction.
+- **`store.StepsDoc` is gone**; `VersionDoc.Steps` is `json.RawMessage`.
+  `harness.Steps` is unchanged.
+- **`httpapi.Deps` gains `RunProvider` / `RunModel`**
+  (`NIGHTSHIFT_RUN_PROVIDER` / `NIGHTSHIFT_RUN_MODEL`, defaulting to
+  `anthropic` / `claude-haiku-4-5`). They must be a **priced pair** or
+  approvals 400 — decision 9 took provider and model out of the user's hands.
+- **The public API accepts only `{v: 1, steps: [{id, text}]}`**; an
+  execution-form steps document is a 400. The reserved alpha break in
+  `docs/api/v1.md` is marked spent.
+- **For the connectors lane:** approval does **not** cross-check the platform
+  run provider against the permit's `llm.providers` allowlist. A mismatch
+  surfaces as a proxy denial at run time rather than a 400 at approval.
+
 ## Delta sheet: notes for the escalation implementation
 
 From the delegation-specs session, verified against `main` @ b7af659 after
@@ -198,6 +225,22 @@ Plan 3 merged (2026-08-31):
     today; "suspended with the hash cleared" implies it equally. Widen the
     predicates to state the no-token-holder invariant directly rather than
     dropping them.
+
+- **Two consequences of steps v1 for the amendment flow** (raised by the
+  delegation-specs session; applies once PR #19 merges). The escalation spec's
+  amendment flow creates workflow version N+1 and approves it
+  **programmatically**, not through the HTTP approve handler — so it inherits
+  both approval-time changes without passing through their validation.
+  - **Recompile, do not copy.** `approved ⇒ compiled` is a DB CHECK, and
+    copying the prior version's `compiled` blob satisfies it while silently
+    pinning a stale compilation if the platform provider or model has moved.
+    That path must run the compiler.
+  - **Pre-check pricing when the escalation is opened, not when it is
+    answered.** The priced-pair gate lands on this path too, and lands badly:
+    an unpriced provider/model becomes a 400 at the moment a user clicks
+    approve on an escalation, with the run already suspended in
+    `awaiting_input`. A bad platform config should surface before a human is
+    asked a yes/no question mid-run.
 
 ## Owed, with owners
 
