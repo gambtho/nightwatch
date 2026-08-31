@@ -53,8 +53,21 @@ that finds cap-exceeded or already-active workflows simply skips them.
 
 `internal/engine.Reaper` sweeps runs stuck past `NIGHTSHIFT_RUN_DEADLINE`
 and finalizes them as failed, recovering from harness crashes and lost
-dispatches. It only ever reaps a run whose token has already expired,
-which the deadline>TTL invariant above guarantees.
+dispatches. A run's deadline is measured from its creation time, so by
+the time the reaper is allowed to sweep it, its token (minted at
+creation, with the shorter TTL) has already expired — the deadline>TTL
+invariant above guarantees that for reaping itself.
+
+That guarantee doesn't cover a narrower path one layer up, in
+`internal/engine.Engine.dispatch`: if `Invoke` succeeds but the
+following `MarkRunDispatched` write fails (and a same-run retry on a
+cancel-free context also fails), the run is live under a valid,
+unexpired token but still looks undispatched — `dispatched_at` is still
+NULL. The scheduler's next tick then treats it as crashed-before-dispatch
+and calls `Redispatch`, which invalidates that live token and re-invokes,
+duplicating spend. This is mitigated (not eliminated) by the retry in
+`dispatch`; the residual risk is a rare double-write, not a race the
+reaper itself can see or prevent.
 
 ### Metering
 

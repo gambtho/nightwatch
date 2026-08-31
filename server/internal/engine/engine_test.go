@@ -23,6 +23,11 @@ type fakeCompute struct {
 	mu        sync.Mutex
 	invokes   []compute.InvokeRequest
 	invokeErr error
+	// onInvoke, if set, runs (under the same lock) right after a
+	// successful Invoke is recorded — used to simulate the caller's
+	// context being canceled the instant the harness accepts the run,
+	// before dispatch's post-Invoke store write runs.
+	onInvoke func()
 }
 
 func (f *fakeCompute) EnsureActor(ctx context.Context, w compute.WorkflowRef, tmpl compute.TemplateRef) (compute.ActorID, error) {
@@ -35,6 +40,9 @@ func (f *fakeCompute) Invoke(ctx context.Context, a compute.ActorID, req compute
 		return compute.Handle{}, f.invokeErr
 	}
 	f.invokes = append(f.invokes, req)
+	if f.onInvoke != nil {
+		f.onInvoke()
+	}
 	return compute.Handle{ActorID: a, RunID: req.RunID}, nil
 }
 func (f *fakeCompute) Suspend(ctx context.Context, a compute.ActorID) error { return nil }
@@ -91,6 +99,30 @@ func TestFireDispatchFailureFinalizes(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, "failed", runs[0].Status)
 	require.Equal(t, "dispatch_failed", *runs[0].ErrorKind)
+}
+
+// TestDispatchRetriesMarkRunDispatchedAfterContextCancel guards the path
+// where the caller's context is canceled the instant Invoke succeeds (a
+// client disconnect, or — as here — the scheduler's context ending
+// between ticks): the harness already holds the bearer and is running,
+// but the immediately-following MarkRunDispatched(ctx, ...) would fail
+// on the now-canceled context. Without a cancel-free retry the run stays
+// pending with dispatched_at NULL, so the next tick's dispatchPending
+// would Redispatch it — invalidating the live token and double-invoking.
+// The retry (on context.WithoutCancel) must succeed, land dispatched_at,
+// and never cause a second Invoke.
+func TestDispatchRetriesMarkRunDispatchedAfterContextCancel(t *testing.T) {
+	s, eng, fc, tn, wf := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	fc.onInvoke = cancel // simulates the caller disconnecting right after the harness accepts the run
+
+	run, err := eng.Fire(ctx, tn.ID, wf.ID, 1, "manual", nil)
+	require.NoError(t, err)
+	require.Len(t, fc.invokes, 1) // exactly one Invoke, no duplicate dispatch
+
+	got, err := s.GetRun(context.Background(), tn.ID, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.DispatchedAt, "MarkRunDispatched retry on a cancel-free context must still land")
 }
 
 func TestRedispatchResignsToken(t *testing.T) {
