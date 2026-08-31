@@ -8,17 +8,15 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/compute"
+	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/token"
 	"github.com/gambtho/nightwatch/server/internal/vault"
 )
 
 type Deps struct {
 	Store      *store.Store
 	SessionKey []byte
-	Signer     *token.Signer
-	Compute    compute.Compute
+	Engine     *engine.Engine
 	Vault      *vault.Master
 }
 

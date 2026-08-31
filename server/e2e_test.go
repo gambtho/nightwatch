@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gambtho/nightwatch/server/internal/compute"
+	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/harness"
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
@@ -60,7 +61,7 @@ func TestEndToEndRun(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Signer: signer, Compute: local})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -190,7 +191,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Signer: signer, Compute: local, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()

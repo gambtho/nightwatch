@@ -91,3 +91,18 @@ func TestFireRunDispatchFailureMarksRunFailed(t *testing.T) {
 	require.Equal(t, "failed", runs[0].(map[string]any)["status"])
 	require.Equal(t, "dispatch_failed", runs[0].(map[string]any)["error_kind"])
 }
+
+func TestFireRunWhileActiveIs409(t *testing.T) {
+	e := newEnv(t)
+	resp, out := e.do(t, "POST", "/v1/workflows", workflowBody())
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	id := out["workflow"].(map[string]any)["id"].(string)
+	resp, _ = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/versions/1/approve", id), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, _ = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/runs", id), nil)
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	resp, out = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/runs", id), nil)
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Contains(t, out["error"], "already active")
+}

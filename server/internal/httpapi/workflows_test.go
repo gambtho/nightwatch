@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/testpg"
@@ -58,9 +59,10 @@ func newEnv(t *testing.T) *env {
 
 	fc := &fakeCompute{}
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
+	eng := &engine.Engine{Store: s, Signer: signer, Compute: fc}
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Signer: signer, Compute: fc, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Engine: eng, Vault: master})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master}

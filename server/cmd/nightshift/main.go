@@ -31,6 +31,7 @@ import (
 
 	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/db"
+	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/harness"
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
@@ -151,8 +152,10 @@ func serve(ctx context.Context) error {
 		}
 	})
 
+	eng := &engine.Engine{Store: s, Signer: signer, Compute: local}
+
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Signer: signer, Compute: local, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: eng, Vault: master})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 
 	adapters := proxyadapter.New(s, signer, master, platform)
