@@ -46,7 +46,8 @@ type Deps struct {
 	// a candidate LLM endpoint + key, before anything is saved.
 	LLMVerify *llmverify.Client
 	// Meter guards the verify call with the same monthly-budget check
-	// every other spend path gets (nil skips the check — tests only).
+	// every other spend path gets; the verify handler fails closed (500)
+	// when it is unwired.
 	Meter *meter.Meter
 }
 

@@ -110,7 +110,12 @@ func (c *Client) Verify(ctx context.Context, e endpoint.Endpoint, secret string)
 	// are accepted so one struct reads either.
 	var envelope struct {
 		Error json.RawMessage `json:"error"`
-		Usage struct {
+		// Completion evidence, one per API shape: a 2xx must show the
+		// provider actually answered (choices/content or counted usage) —
+		// a bare {} from a misconfigured gateway proves nothing.
+		Choices json.RawMessage `json:"choices"`
+		Content json.RawMessage `json:"content"`
+		Usage   struct {
 			InputTokens      int `json:"input_tokens"`
 			OutputTokens     int `json:"output_tokens"`
 			PromptTokens     int `json:"prompt_tokens"`
@@ -139,11 +144,15 @@ func (c *Client) Verify(ctx context.Context, e endpoint.Endpoint, secret string)
 		return Result{Message: msg}, nil
 	}
 
-	// A 2xx with a populated error field is a gateway-style rejection
-	// (OpenRouter-class: HTTP 200 + {"error": ...} for a bad key) — a
-	// status-only check would store garbage.
-	if parseErr == nil && detail != "" {
-		return Result{Billed: true, Message: "The service didn't accept this key: " + detail}, nil
+	// A 2xx with a non-null error field is a gateway-style rejection
+	// (OpenRouter-class: HTTP 200 + {"error": ...} for a bad key) — even
+	// a messageless {"error":{}} is an error, never a pass.
+	if parseErr == nil && jsonPresent(envelope.Error) {
+		msg := "The service didn't accept this key."
+		if detail != "" {
+			msg = "The service didn't accept this key: " + detail
+		}
+		return Result{Billed: true, Message: msg}, nil
 	}
 
 	// Fail closed on a 2xx we cannot read — an interstitial or truncated
@@ -158,7 +167,25 @@ func (c *Client) Verify(ctx context.Context, e endpoint.Endpoint, secret string)
 		InputTokens:  envelope.Usage.InputTokens + envelope.Usage.PromptTokens,
 		OutputTokens: envelope.Usage.OutputTokens + envelope.Usage.CompletionTokens,
 	}
+	// OK needs positive evidence of a completion, not just well-formed
+	// JSON: choices (OpenAI shape), content (Anthropic shape), or counted
+	// usage. A bare {} fails closed.
+	if !jsonPresent(envelope.Choices) && !jsonPresent(envelope.Content) &&
+		u.InputTokens == 0 && u.OutputTokens == 0 {
+		return Result{Billed: true, Message: "The service answered without a completion while checking the key. Check the model name and try again."}, nil
+	}
 	return Result{OK: true, Billed: true, Usage: u}, nil
+}
+
+// jsonPresent reports whether a raw field carries a value — set, and not
+// null, an empty array, or an empty string. An empty object counts: a
+// messageless {"error":{}} is still an error.
+func jsonPresent(raw json.RawMessage) bool {
+	switch string(raw) {
+	case "", "null", "[]", `""`:
+		return false
+	}
+	return true
 }
 
 // errorDetail extracts a human-readable message from an error field that

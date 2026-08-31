@@ -193,3 +193,33 @@ func TestVerifyNon2xxCarriesUpstreamDetail(t *testing.T) {
 	require.False(t, res.OK)
 	require.Contains(t, res.Message, "max_completion_tokens")
 }
+
+func TestVerifyRejectsBare200(t *testing.T) {
+	// {} parses, but proves nothing: no completion, no usage, no error.
+	// A misconfigured gateway's empty JSON must not verify a key.
+	u := &upstream{status: 200, body: `{}`}
+	ts := newUpstream(t, u)
+	res, err := (&Client{}).Verify(context.Background(), customEndpoint(t, ts.URL), "sk-x")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+	require.True(t, res.Billed)
+}
+
+func TestVerifyRejectsMessagelessErrorField(t *testing.T) {
+	// An error field with no readable message is still an error.
+	u := &upstream{status: 200, body: `{"error":{}}`}
+	ts := newUpstream(t, u)
+	res, err := (&Client{}).Verify(context.Background(), customEndpoint(t, ts.URL), "sk-x")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+}
+
+func TestVerifyAcceptsCompletionWithoutUsage(t *testing.T) {
+	// Completion evidence without usage still verifies (some local
+	// servers omit usage); covered by choices / content presence.
+	u := &upstream{status: 200, body: `{"content":[{"type":"text","text":"hi"}]}`}
+	ts := newUpstream(t, u)
+	res, err := (&Client{}).Verify(context.Background(), customEndpoint(t, ts.URL), "sk-x")
+	require.NoError(t, err)
+	require.True(t, res.OK)
+}
