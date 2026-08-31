@@ -247,6 +247,15 @@ recorded as an open item, not silently ignored.
 - **First fire after actor creation** cold-boots (seconds, not the 257 ms
   resume); the 202-ack-with-retry protocol absorbs it. Golden-memory resume
   is microvm-only; on the v1 gVisor pool a fresh actor cold-boots — accepted.
+- **Lost invokes never touch the indexes.** A request lost to a cold boot or
+  shed by the router's parking lot (a 503 under pool saturation) is retried
+  as the **same RunID against the same run row** — retries create no rows,
+  so `run_one_active_per_workflow` and `run_workflow_firetime_unique` see
+  exactly one run per occurrence however many delivery attempts it takes,
+  and the token-lifecycle dedupe makes an attempt that secretly succeeded
+  harmless. Recovery from a lost invoke is always **retry**, never re-fire;
+  only exhausting the retry window converts the loss into the terminal
+  `dispatch_failed` above.
 - **Substrate control-plane outage — occurrences fail fast, honestly.** When
   `EnsureActor`/`Invoke` exhaust the invoke retry window (~2 min), the engine
   finalizes the run `dispatch_failed` — and that is terminal: finalization
@@ -534,10 +543,26 @@ autoscaling; managed object storage; billing for compute.
   small design when actor memory becomes a product surface.
 - **Re-pin cadence in practice** — monthly is the spike's estimate; the
   first two re-pins will tell us the real cost of upstream's proto churn.
-- **When upstream enforces `EgressPolicy`** — our proxy becomes
-  defence-in-depth or compiles permits into upstream policy; the permit is
-  already kept compilable (correction 4), so this is a tracking item, not a
-  redesign.
+- **When upstream enforces `EgressPolicy`** — resolved in shape, open only in
+  timing. Upstream's rules are **network-layer** (hostname/CIDR first-match
+  plus header injection); the connector catalog's permit entries are
+  **application-layer** (per-operation, per-path, effect-scoped). So upstream
+  enforcement, when it lands, replaces only the floor beneath our proxy — the
+  default-deny NetworkPolicies this spec authors, and eventually the
+  masquerade residual — never the proxy itself. **The proxy has no expiry
+  date; it has a shrinking lower half.** The permit's _host-level floor_
+  stays compilable to upstream `EgressPolicy` (correction 4) so we can adopt
+  that floor when it ships; op-level enforcement and credential injection
+  remain ours permanently.
+- **Actor state across permit narrowing.** When a new approved version
+  narrows the permit, the actor keeps state accumulated under the wider one —
+  narrowing bounds future _reach_, not past _knowledge_, and the still-alive
+  state can only leave through destinations the narrowed permit allows.
+  That is the v1 default, chosen over purge-on-narrow (which would destroy
+  the memory feature on every edit). Whether narrowing should _offer_ a
+  state reset — the `Destroy`-then-`EnsureActor` op the harness-upgrade
+  procedure already defines — is a product decision that belongs with the
+  graduated-permits work, where permit transitions are first-class.
 - **Suspend timing vs. billing** — if compute cost ever becomes
   tenant-visible, the 60 s idle threshold is a pricing knob, not just an
   efficiency one.
