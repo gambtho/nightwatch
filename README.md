@@ -14,6 +14,13 @@ points at; hello world takes about five minutes on a local
 deliberate placeholder that prints its steps on the schedule; the LLM
 arrives in K2.
 
+The K8s track runs with **no database of its own** — none is planned,
+either. The cluster is the store: the agent file lives in a ConfigMap,
+keys in Secrets, run state in Deployment/Job status, and Kubernetes
+primitives cover scheduling. The durable store returns only with the
+governed control plane at the K3+ transition — deployed into the cluster
+as a normal workload, not something `tomtectl` carries.
+
 The destination is the full Tomte experience: describe a job in plain
 language, approve exactly what the agent may touch and spend, and Tomte
 runs it on a schedule — against any LLM endpoint you bring (Anthropic,
