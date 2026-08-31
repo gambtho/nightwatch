@@ -17,7 +17,6 @@ import (
 
 	"github.com/gambtho/tomte/server/internal/engine"
 	"github.com/gambtho/tomte/server/internal/httpapi"
-	"github.com/gambtho/tomte/server/internal/mail/mailtest"
 	"github.com/gambtho/tomte/server/internal/store"
 	"github.com/gambtho/tomte/server/internal/testpg"
 	"github.com/gambtho/tomte/server/internal/token"
@@ -33,7 +32,6 @@ type env struct {
 	user    store.User
 	compute *fakeCompute
 	vault   *vault.Master
-	mailer  *mailtest.Recorder
 	baseURL *url.URL
 }
 
@@ -74,16 +72,15 @@ func newEnv(t *testing.T, mods ...func(*httpapi.Deps)) *env {
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: fc}
 
 	base := &url.URL{Scheme: "https", Host: "app.tomte.test"}
-	mailer := &mailtest.Recorder{}
 	mux := http.NewServeMux()
-	deps := httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer}
+	deps := httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base}
 	for _, mod := range mods {
 		mod(&deps)
 	}
 	httpapi.RegisterRoutes(mux, deps)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &env{ts: ts, store: s, pool: pool, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master, mailer: mailer, baseURL: base}
+	return &env{ts: ts, store: s, pool: pool, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master, baseURL: base}
 }
 
 func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, map[string]any) {

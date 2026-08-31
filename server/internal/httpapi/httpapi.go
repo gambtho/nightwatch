@@ -11,7 +11,6 @@ import (
 
 	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/engine"
-	"github.com/gambtho/tomte/server/internal/mail"
 	"github.com/gambtho/tomte/server/internal/store"
 	"github.com/gambtho/tomte/server/internal/vault"
 )
@@ -20,12 +19,12 @@ type Deps struct {
 	Store  *store.Store
 	Engine *engine.Engine
 	Vault  *vault.Master
-	// PublicBaseURL is the canonical customer-facing origin
-	// (TOMTE_PUBLIC_BASE_URL): the single source for magic-link
-	// URLs, the Origin comparison, and redirect joining. Never inferred
-	// from Host or proxy headers.
+	// PublicBaseURL is the app's canonical origin — normally the
+	// auto-configured loopback origin derived from the bound listener,
+	// overridable via TOMTE_PUBLIC_BASE_URL (dev topologies like
+	// Vite-as-origin). Single source for the Origin comparison and
+	// redirect joining; never inferred from Host or proxy headers.
 	PublicBaseURL *url.URL
-	Mailer        mail.Sender
 	// RunProvider/RunModel are the platform-selected execution model
 	// (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) baked into the
 	// compiled document at approval time — decision 9 took provider and
@@ -70,10 +69,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	auth := func(h http.HandlerFunc) http.Handler {
 		return RequireSession(d.Store, h)
 	}
-	a := &authHandlers{d: d, ips: newIPLimiter(ipLimitMax, ipLimitWindow)}
-	mux.Handle("POST /v1/auth/magic-link", mut(http.HandlerFunc(a.magicLink)))
-	mux.Handle("GET /auth/verify", http.HandlerFunc(a.verifyPage))
-	mux.Handle("POST /v1/auth/verify", mut(http.HandlerFunc(a.verify)))
+	a := &authHandlers{d: d}
 	mux.Handle("POST /v1/auth/logout", mut(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /v1/me", auth(a.me))
 	mux.Handle("POST /v1/workflows", mut(auth(d.createWorkflow)))

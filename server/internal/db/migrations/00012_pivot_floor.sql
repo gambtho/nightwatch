@@ -1,6 +1,10 @@
 -- +goose Up
 -- P1 pivot floor (click-install spec).
 
+-- Login as a surface dies: magic links, their tokens, and the mailer.
+-- The session core (session table, RequireSession, cookies) survives.
+DROP TABLE login_token;
+
 -- OAuth credentials are dead with the pivot; delete rows BEFORE narrowing
 -- the kind check, or the constraint fails on any install that has one.
 -- metadata and epoch existed only for the OAuth machinery; status stays —
@@ -76,6 +80,16 @@ CREATE TABLE tenant_event (
 );
 
 -- +goose Down
+-- Recreated exactly as 00009 defined it.
+CREATE TABLE login_token (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash bytea NOT NULL UNIQUE,
+    email text NOT NULL,
+    next_path text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz
+);
 ALTER TABLE connection DROP CONSTRAINT connection_kind_check;
 ALTER TABLE connection ADD CONSTRAINT connection_kind_check
     CHECK (kind IN ('llm_api_key', 'oauth', 'api_key'));

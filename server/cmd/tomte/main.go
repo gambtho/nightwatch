@@ -11,13 +11,8 @@
 //	                        canonical customer-facing origin, scheme + host
 //	                        (required for serve). HTTPS required; http is
 //	                        allowed for localhost only. Single source for
-//	                        magic-link URLs, the Origin check, and redirect
-//	                        joining — Host/proxy headers are never used.
-//	TOMTE_POSTMARK_TOKEN, TOMTE_MAIL_FROM
-//	                        Postmark server token and From address, set
-//	                        together. Unset is allowed only for a localhost
-//	                        base URL (magic links then go to the log);
-//	                        setting exactly one refuses startup.
+//	                        the Origin check and redirect joining —
+//	                        Host/proxy headers are never used.
 //	TOMTE_RUNNER_KEY   base64, 32 bytes (required for serve)
 //	TOMTE_VAULT_KEY    base64, 32 bytes (required for serve;
 //	                        dev-session needs it only when minting a new
@@ -65,7 +60,6 @@ import (
 	"github.com/gambtho/tomte/server/internal/httpapi"
 	"github.com/gambtho/tomte/server/internal/internalapi"
 	"github.com/gambtho/tomte/server/internal/llm"
-	"github.com/gambtho/tomte/server/internal/mail"
 	"github.com/gambtho/tomte/server/internal/meter"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/proxyadapter"
@@ -158,14 +152,6 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mailer, err := mail.Select(os.Getenv("TOMTE_POSTMARK_TOKEN"), os.Getenv("TOMTE_MAIL_FROM"),
-		httpapi.IsLocalhost(publicBase))
-	if err != nil {
-		return err
-	}
-	if _, isLog := mailer.(mail.LogSender); isLog {
-		slog.Warn("mail: no Postmark config; magic links go to the log (localhost dev mode)")
-	}
 	// The catalog refuses to load on invalid definitions or any drift
 	// from its committed baseline (reach-widening or otherwise) — serve
 	// does not start with an unenforceable or unreviewed catalog.
@@ -243,7 +229,7 @@ func serve(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	httpapi.RegisterRoutes(mux, httpapi.Deps{
-		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
+		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase,
 		RunProvider: os.Getenv("TOMTE_RUN_PROVIDER"),
 		RunModel:    os.Getenv("TOMTE_RUN_MODEL"),
 		Catalog:     cat,

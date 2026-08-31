@@ -5,10 +5,11 @@ import (
 	"net/url"
 )
 
-// ParsePublicBaseURL validates TOMTE_PUBLIC_BASE_URL: scheme + host,
-// nothing else. It carries magic-link tokens, defines the trusted Origin,
-// and pairs with a Secure cookie, so HTTPS is required — with an explicit
-// exception only for localhost development (the secure-context carve-out).
+// ParsePublicBaseURL validates a public base URL override
+// (TOMTE_PUBLIC_BASE_URL): scheme + host, nothing else. It defines the
+// trusted Origin and drives the session cookie's attributes, so HTTPS is
+// required — with an explicit exception for loopback hosts (the
+// click-install deployment serves plain HTTP on 127.0.0.1).
 func ParsePublicBaseURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -29,8 +30,3 @@ func ParsePublicBaseURL(raw string) (*url.URL, error) {
 func isLocalhost(hostname string) bool {
 	return hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1"
 }
-
-// IsLocalhost reports whether the public base URL points at local
-// development — the condition under which log-based mail delivery and
-// plain HTTP are acceptable.
-func IsLocalhost(u *url.URL) bool { return isLocalhost(u.Hostname()) }

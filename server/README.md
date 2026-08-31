@@ -24,22 +24,16 @@ export TOMTE_VAULT_KEY=$(openssl rand -base64 32)
 go run ./cmd/tomte serve
 ```
 
-`TOMTE_PUBLIC_BASE_URL` is the canonical customer-facing origin
-(scheme + host, nothing else). It must be HTTPS — plain `http` is accepted
-for `localhost`/`127.0.0.1`/`::1` only — because it carries magic-link
-tokens, defines the trusted `Origin` for CSRF checks, and anchors
-post-login redirects. Host and proxy headers are never used for any of
-those.
+`TOMTE_PUBLIC_BASE_URL` is the app's canonical origin (scheme + host,
+nothing else). It must be HTTPS — plain `http` is accepted for
+`localhost`/`127.0.0.1`/`::1` only — because it defines the trusted
+`Origin` for CSRF checks and anchors redirects. Host and proxy headers
+are never used for any of those.
 
-Login is an email magic link (`POST /v1/auth/magic-link` →
-`GET /auth/verify` interstitial → consuming `POST /v1/auth/verify`); the
-first verified login mints the tenant. Sessions are opaque DB-backed
-cookies (`__Host-tomte_session`) with a 7-day idle window inside a 30-day
-cap. Magic-link email goes through Postmark when
-`TOMTE_POSTMARK_TOKEN` and `TOMTE_MAIL_FROM` are both set
-(setting exactly one refuses startup); with neither set, the link is
-written to the server log — allowed only for a localhost base URL, so a
-production deployment cannot silently run without mail.
+There is no login surface: one install is one user. The app shell mints
+the session at launch, and "open in browser" exchanges a single-use
+handoff token at `GET /local/handoff`. Sessions are opaque DB-backed
+cookies with a 7-day idle window inside a 30-day cap.
 
 `tomte dev-session` mints a tenant, owner user, and session row for
 local use, printing the cookie. It reuses the tenant an existing email
@@ -137,7 +131,7 @@ server/
   internal/engine/              shared fire path, scheduler, orphaned-run reaper
   internal/schedule/            cron + IANA timezone schedule artifact
   internal/meter/               tenant monthly spend cap, wired as the proxy Hook
-  internal/httpapi/             public /v1 API: magic-link auth, DB-backed sessions, Origin policy
+  internal/httpapi/             public /v1 API: DB-backed sessions, local handoff, Origin policy
   internal/mail/                transactional email seam: Postmark sender + dev log sender
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)
