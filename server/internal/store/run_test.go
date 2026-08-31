@@ -49,6 +49,13 @@ func TestRunLifecycle(t *testing.T) {
 	require.Equal(t, "the digest", *final.Output)
 	require.Equal(t, 100, *final.TokensIn)
 
+	// Finalization revokes the run token: the stored hash is cleared in the
+	// same UPDATE that sets the terminal status.
+	require.Empty(t, final.TokenHash)
+	got, err := s.GetRun(ctx, tn.ID, runID)
+	require.NoError(t, err)
+	require.Empty(t, got.TokenHash)
+
 	events, err := s.ListRunEvents(ctx, tn.ID, runID)
 	require.NoError(t, err)
 	require.Len(t, events, 1)

@@ -47,7 +47,7 @@ type RunFinal struct {
 
 const runCols = `id, tenant_id, workflow_id, version, status, started_at,
 	finished_at, tokens_in, tokens_out, cost_cents, error_kind, error_msg,
-	output, runner_token_hash, created_at`
+	output, COALESCE(runner_token_hash, ''), created_at`
 
 func scanRun(row pgx.Row) (Run, error) {
 	var r Run
@@ -111,7 +111,8 @@ func (s *Store) FinalizeRun(ctx context.Context, tenantID, id uuid.UUID, fin Run
 		`UPDATE run SET status = $3, finished_at = now(),
 		        tokens_in = $4, tokens_out = $5, cost_cents = $6,
 		        error_kind = NULLIF($7, ''), error_msg = NULLIF($8, ''),
-		        output = $9
+		        output = $9,
+		        runner_token_hash = NULL
 		 WHERE id = $1 AND tenant_id = $2
 		   AND status IN ('pending', 'running')
 		 RETURNING `+runCols,
