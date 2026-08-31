@@ -1,0 +1,30 @@
+# An agent, as code. This file IS the agent: reading it shows the
+# topology — what the agent does, when it runs, what model it thinks
+# with, and what it may reach. Deploy it with `tomtectl up`.
+apiVersion: tomte.dev/v1alpha1
+kind: Agent
+metadata:
+  name: hello
+spec:
+  # What the agent does, in order, each time it wakes. In K1 a
+  # placeholder runtime prints each step verbatim; K2 hands the same
+  # steps to an LLM. The shape does not change.
+  steps:
+    - id: greet
+      text: Hello, world — from the hello agent.
+  # When it runs. The agent stays resident and wakes on this interval —
+  # a whole number with one unit: 30s, 5m, 2h.
+  schedule:
+    every: 30s
+  # K2 — the model this agent thinks with. Empty means no LLM: the
+  # agent is deterministic. Shape, aligned with Tomte's endpoint record:
+  #   llm:
+  #     endpoint:
+  #       kind: anthropic | openai_compatible
+  #       base_url: https://…        # fixed by preset, or user-supplied
+  #       local: false               # explicit "on this computer" marker
+  #     api_key_secret: my-key       # K8s Secret holding the API key
+  llm: {}
+  # K3 — what the agent may reach. Tomte connectors and their permits
+  # mount here; until then the agent has no reach beyond its own logs.
+  connectors: []
