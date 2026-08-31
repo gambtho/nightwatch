@@ -1,0 +1,38 @@
+# The in-cluster stub OpenAI-compatible endpoint the e2e agent talks
+# to. Same image as the agent runtime, in "stub" mode. It reads its
+# expected key from the SAME Secret `tomtectl set-key` writes for the
+# agent, so a reply proves the Secret round trip on both ends.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-stub
+  labels: {app: llm-stub}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: llm-stub}
+  template:
+    metadata:
+      labels: {app: llm-stub}
+    spec:
+      containers:
+        - name: stub
+          image: tomte-agent:0.2.0
+          imagePullPolicy: IfNotPresent
+          args: ["stub"]
+          env:
+            - name: TOMTE_STUB_KEY
+              valueFrom:
+                secretKeyRef: {name: hello-key, key: api_key}
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-stub
+spec:
+  selector: {app: llm-stub}
+  ports:
+    - port: 8080
+      targetPort: 8080

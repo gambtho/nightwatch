@@ -69,9 +69,9 @@ func TestParseRejects(t *testing.T) {
 		{"zero every", func(s string) string {
 			return strings.Replace(s, "every: 30s", "every: 0s", 1)
 		}, "must be positive"},
-		{"llm set too early", func(s string) string {
+		{"K1's commented endpoint sketch is an unknown field now", func(s string) string {
 			return strings.Replace(s, "llm: {}", "llm: {endpoint: {kind: anthropic}}", 1)
-		}, "K2"},
+		}, ""},
 		{"connectors set too early", func(s string) string {
 			return strings.Replace(s, "connectors: []", "connectors: [slack]", 1)
 		}, "K3"},
@@ -88,6 +88,110 @@ func TestParseRejects(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse([]byte(tc.mutate(valid)))
+			if err == nil {
+				t.Fatalf("want error, got nil")
+			}
+			if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+const validLLM = `
+apiVersion: tomte.dev/v1alpha1
+kind: Agent
+metadata:
+  name: hello
+spec:
+  steps:
+    - id: greet
+      text: Hello, world
+  schedule:
+    every: 30s
+  llm:
+    kind: openai_compatible
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    secretRef: hello-key
+  connectors: []
+`
+
+func TestParseAcceptsLLM(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{"openai_compatible with secretRef", func(s string) string { return s }},
+		{"anthropic with secretRef", func(s string) string {
+			s = strings.Replace(s, "kind: openai_compatible", "kind: anthropic", 1)
+			s = strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: https://api.anthropic.com", 1)
+			return strings.Replace(s, "model: gpt-4o-mini", "model: claude-haiku-4-5", 1)
+		}},
+		{"local keyless over http loopback", func(s string) string {
+			s = strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://127.0.0.1:11434/v1", 1)
+			return strings.Replace(s, "secretRef: hello-key", "local: true", 1)
+		}},
+		{"keyed http to a cluster-local service", func(s string) string {
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub:8080/v1", 1)
+		}},
+		{"keyed http to a .svc name", func(s string) string {
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub.default.svc.cluster.local:8080/v1", 1)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := Parse([]byte(tc.mutate(validLLM)))
+			if err != nil {
+				t.Fatalf("want valid, got %v", err)
+			}
+			if !a.Spec.LLM.Enabled() {
+				t.Fatalf("llm should be enabled")
+			}
+		})
+	}
+}
+
+func TestParseRejectsBadLLM(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(string) string
+		wantErr string
+	}{
+		{"unknown llm kind", func(s string) string {
+			return strings.Replace(s, "kind: openai_compatible", "kind: copilot", 1)
+		}, "spec.llm.kind"},
+		{"missing model", func(s string) string {
+			return strings.Replace(s, "    model: gpt-4o-mini\n", "", 1)
+		}, "spec.llm.model"},
+		{"missing base_url", func(s string) string {
+			return strings.Replace(s, "    base_url: https://api.openai.com/v1\n", "", 1)
+		}, "spec.llm.base_url"},
+		{"missing secretRef without local", func(s string) string {
+			return strings.Replace(s, "    secretRef: hello-key\n", "", 1)
+		}, "secretRef"},
+		{"local with secretRef", func(s string) string {
+			return strings.Replace(s, "secretRef: hello-key", "secretRef: hello-key\n    local: true", 1)
+		}, "keyless"},
+		{"keyed plain http to the internet", func(s string) string {
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://api.example.com/v1", 1)
+		}, "https"},
+		{"userinfo in base_url", func(s string) string {
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: https://user:pw@api.openai.com/v1", 1)
+		}, "userinfo"},
+		{"bad secret name", func(s string) string {
+			return strings.Replace(s, "secretRef: hello-key", "secretRef: Hello_Key", 1)
+		}, "secretRef"},
+		{"unknown llm field", func(s string) string {
+			return strings.Replace(s, "    model: gpt-4o-mini", "    model: gpt-4o-mini\n    api_key: sk-oops", 1)
+		}, ""},
+		{"connectors still reject at K2", func(s string) string {
+			return strings.Replace(s, "connectors: []", "connectors: [slack]", 1)
+		}, "K3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.mutate(validLLM)))
 			if err == nil {
 				t.Fatalf("want error, got nil")
 			}

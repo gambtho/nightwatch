@@ -1,14 +1,10 @@
 package manifest
 
 import (
-	"context"
-	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/gambtho/tomte/tomtectl/internal/agentfile"
 )
@@ -18,7 +14,7 @@ func TestObjectsDeriveFromTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm, dep := Objects(a, agentfile.Template)
+	cm, dep := Objects(a, agentfile.Template, DefaultImage)
 
 	if cm.Name != "hello" || dep.Name != "hello" {
 		t.Errorf("objects named %q/%q, want the agent name", cm.Name, dep.Name)
@@ -26,97 +22,75 @@ func TestObjectsDeriveFromTheFile(t *testing.T) {
 	if cm.Data["agent.yaml"] != string(agentfile.Template) {
 		t.Error("ConfigMap must carry the agent.yaml byte-for-byte, comments included")
 	}
-	if !strings.Contains(cm.Data["run.sh"], "sleep") {
-		t.Error("ConfigMap must carry the runtime script")
+	if _, ok := cm.Data["run.sh"]; ok {
+		t.Error("the K1 placeholder script must be gone — the runtime image replaced it")
 	}
 	if got := dep.Spec.Selector.MatchLabels[AgentLabel]; got != "hello" {
 		t.Errorf("selector %s = %q, want hello", AgentLabel, got)
 	}
-	if got := dep.Spec.Template.ObjectMeta.Labels[AgentLabel]; got != "hello" {
-		t.Errorf("pod label %s = %q, want hello", AgentLabel, got)
-	}
 	c := dep.Spec.Template.Spec.Containers[0]
-	if c.Image != Image {
-		t.Errorf("image = %q, want %q", c.Image, Image)
+	if c.Image != DefaultImage {
+		t.Errorf("image = %q, want %q", c.Image, DefaultImage)
+	}
+	if c.ImagePullPolicy != corev1.PullIfNotPresent {
+		t.Errorf("pull policy = %q, want IfNotPresent (local kind-loaded images)", c.ImagePullPolicy)
 	}
 	vol := dep.Spec.Template.Spec.Volumes[0]
 	if vol.ConfigMap == nil || vol.ConfigMap.Name != cm.Name {
 		t.Error("deployment must mount the agent ConfigMap")
 	}
+	if len(c.Env) != 0 {
+		t.Errorf("a keyless agent must get no env, got %v", c.Env)
+	}
 }
 
-// runScriptAgainst executes the placeholder runtime under sh against a
-// mounted-style file for a bounded time and returns its output plus
-// whether it was still running when the deadline hit.
-func runScriptAgainst(t *testing.T, doc string) (output string, ranUntilDeadline bool) {
-	t.Helper()
-	dir := t.TempDir()
-	if doc != "" {
-		if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(doc), 0o644); err != nil {
-			t.Fatal(err)
-		}
+func TestImageOverride(t *testing.T) {
+	a, _ := agentfile.Parse(agentfile.Template)
+	_, dep := Objects(a, agentfile.Template, "example.com/other:1")
+	if got := dep.Spec.Template.Spec.Containers[0].Image; got != "example.com/other:1" {
+		t.Errorf("image = %q, want the override", got)
 	}
-	script := strings.ReplaceAll(RunScript, "/tomte/agent.yaml", filepath.Join(dir, "agent.yaml"))
-	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {
+}
+
+const llmDoc = `
+apiVersion: tomte.dev/v1alpha1
+kind: Agent
+metadata:
+  name: hello
+spec:
+  steps:
+    - id: greet
+      text: Hello, world
+  schedule:
+    every: 30s
+  llm:
+    kind: openai_compatible
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    secretRef: hello-key
+`
+
+// TestSecretRefBecomesEnv: the key arrives as env from the named
+// Secret — never in the ConfigMap, never in the file.
+func TestSecretRefBecomesEnv(t *testing.T) {
+	a, err := agentfile.Parse([]byte(llmDoc))
+	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, _ := exec.CommandContext(ctx, "sh", filepath.Join(dir, "run.sh")).CombinedOutput()
-	return string(out), errors.Is(ctx.Err(), context.DeadlineExceeded)
-}
-
-// TestRunScriptReadsTheMountedFile checks the behavior really comes
-// from the file, not the script — including quote stripping.
-func TestRunScriptReadsTheMountedFile(t *testing.T) {
-	doc := strings.Replace(string(agentfile.Template), "every: 30s", "every: 1s", 1)
-	doc = strings.Replace(doc, "text: Hello, world — from the hello agent.", `text: "marker-from-the-yaml"`, 1)
-
-	got, ranUntilDeadline := runScriptAgainst(t, doc)
-	if !ranUntilDeadline {
-		t.Fatalf("script exited on its own instead of looping:\n%s", got)
+	cm, dep := Objects(a, []byte(llmDoc), DefaultImage)
+	c := dep.Spec.Template.Spec.Containers[0]
+	if len(c.Env) != 1 || c.Env[0].Name != APIKeyEnv {
+		t.Fatalf("want exactly one %s env, got %v", APIKeyEnv, c.Env)
 	}
-	if !strings.Contains(got, "waking every 1s") {
-		t.Errorf("script did not read the schedule from the file:\n%s", got)
+	src := c.Env[0].ValueFrom
+	if src == nil || src.SecretKeyRef == nil ||
+		src.SecretKeyRef.Name != "hello-key" || src.SecretKeyRef.Key != SecretKey {
+		t.Errorf("env must come from secret %q key %q, got %+v", "hello-key", SecretKey, src)
 	}
-	if strings.Count(got, "marker-from-the-yaml") < 2 {
-		t.Errorf("script did not loop the step text from the file:\n%s", got)
-	}
-	if strings.Contains(got, `"marker-from-the-yaml"`) {
-		t.Errorf("script did not strip the surrounding quotes:\n%s", got)
-	}
-}
-
-// TestRunScriptCleansScalarsLikeTheParser: trailing comments and
-// single quotes must not leak into sleep arguments or printed text.
-func TestRunScriptCleansScalarsLikeTheParser(t *testing.T) {
-	doc := strings.Replace(string(agentfile.Template), "every: 30s", "every: 1s # wake fast", 1)
-	doc = strings.Replace(doc, "text: Hello, world — from the hello agent.", "text: 'single-quoted' # note", 1)
-
-	got, ranUntilDeadline := runScriptAgainst(t, doc)
-	if !ranUntilDeadline {
-		t.Fatalf("script exited on its own — the comment likely leaked into sleep:\n%s", got)
-	}
-	if !strings.Contains(got, "waking every 1s\n") {
-		t.Errorf("trailing comment leaked into the schedule:\n%s", got)
-	}
-	if !strings.Contains(got, "Z single-quoted\n") {
-		t.Errorf("single quotes or comment leaked into the text:\n%s", got)
-	}
-}
-
-// TestRunScriptFailsLoudly: a missing file or missing schedule must
-// crash the container visibly, never fall back to a silent default.
-func TestRunScriptFailsLoudly(t *testing.T) {
-	got, ranUntilDeadline := runScriptAgainst(t, "")
-	if ranUntilDeadline || !strings.Contains(got, "not mounted") {
-		t.Errorf("missing file: want fast loud exit, got (still running=%v):\n%s", ranUntilDeadline, got)
-	}
-
-	noEvery := strings.Replace(string(agentfile.Template), "every: 30s", "", 1)
-	got, ranUntilDeadline = runScriptAgainst(t, noEvery)
-	if ranUntilDeadline || !strings.Contains(got, "no schedule.every") {
-		t.Errorf("missing every: want fast loud exit, got (still running=%v):\n%s", ranUntilDeadline, got)
+	for k, v := range cm.Data {
+		if strings.Contains(v, "hello-key") && k != "agent.yaml" {
+			t.Errorf("secret name may only appear in the agent.yaml itself")
+		}
 	}
 }
 
@@ -128,7 +102,7 @@ func TestUserLabelsPropagateButNeverWin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cm, dep := Objects(a, []byte(doc))
+	cm, dep := Objects(a, []byte(doc), DefaultImage)
 	if cm.Labels["team"] != "night" || dep.Labels["team"] != "night" {
 		t.Errorf("user label did not propagate: cm=%v dep=%v", cm.Labels, dep.Labels)
 	}
@@ -137,5 +111,18 @@ func TestUserLabelsPropagateButNeverWin(t *testing.T) {
 	}
 	if got := dep.Spec.Selector.MatchLabels; len(got) != 1 || got[AgentLabel] != "hello" {
 		t.Errorf("selector must stay %s alone, got %v", AgentLabel, got)
+	}
+}
+
+func TestSecretForKey(t *testing.T) {
+	s := SecretForKey("hello-key", "hello", []byte("sk-test"))
+	if s.Name != "hello-key" {
+		t.Errorf("secret name = %q", s.Name)
+	}
+	if s.Labels[AgentLabel] != "hello" || s.Labels[ManagedByLabel] != ManagedByValue {
+		t.Errorf("secret must carry ownership labels, got %v", s.Labels)
+	}
+	if string(s.Data[SecretKey]) != "sk-test" {
+		t.Errorf("secret data[%s] wrong", SecretKey)
 	}
 }

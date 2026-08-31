@@ -22,7 +22,7 @@ import (
 )
 
 type Client struct {
-	cs *kubernetes.Clientset
+	cs kubernetes.Interface
 	// Namespace is the flag override, else the kubeconfig context's
 	// namespace, else "default".
 	Namespace string
@@ -114,6 +114,36 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 	})
 	if err != nil {
 		return fmt.Errorf("applying Deployment: %w", err)
+	}
+	return nil
+}
+
+// ApplySecret creates or updates the Secret holding an agent's API
+// key, under the same ownership rule as every other object: a
+// same-name Secret that tomtectl does not manage for this agent is
+// refused, never overwritten.
+func (c *Client) ApplySecret(ctx context.Context, s *corev1.Secret) error {
+	agent := s.Labels[manifest.AgentLabel]
+	secrets := c.cs.CoreV1().Secrets(c.Namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := secrets.Get(ctx, s.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err = secrets.Create(ctx, s, metav1.CreateOptions{})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		if err := owned(existing.Labels, agent, "Secret", s.Name); err != nil {
+			return err
+		}
+		existing.Labels = s.Labels
+		existing.Data = s.Data
+		_, err = secrets.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("applying Secret: %w", err)
 	}
 	return nil
 }

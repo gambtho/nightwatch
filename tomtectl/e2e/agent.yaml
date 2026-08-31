@@ -1,0 +1,20 @@
+# The e2e agent: thinks with the in-cluster stub endpoint. The
+# single-label host llm-stub resolves to the Service in the same
+# namespace; a keyed plain-http URL is only legal because the host is
+# cluster-local.
+apiVersion: tomte.dev/v1alpha1
+kind: Agent
+metadata:
+  name: hello
+spec:
+  steps:
+    - id: greet
+      text: Say hello to the cluster.
+  schedule:
+    every: 10s
+  llm:
+    kind: openai_compatible
+    base_url: http://llm-stub:8080/v1
+    model: stub-model
+    secretRef: hello-key
+  connectors: []
