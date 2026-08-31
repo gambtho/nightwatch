@@ -33,7 +33,7 @@ finishes, or a cross-cutting decision is taken.
 | Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
-| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 amended + coordinator-accepted; Codex review, then impl on `feat/p1-…`      |
+| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 final (zero_cost + 6 Codex findings folded); implementation underway        |
 | CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
 | Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
@@ -133,8 +133,12 @@ identity, and steps v1 are merged; connector phases 1, 2, 4 are merged.
    rename; `serve()` as a library entry point. Mostly deletion; every later
    item builds on this floor. →
 2. **P2 — Connectors main road**: Slack token capture + verify (capture guide
-   in catalog, control-plane verify), then old phases 5 → 6 (remote MCP —
-   5 before 6, unchanged), phase 3 (options client) when the build needs it. →
+   in catalog, control-plane verify), **plus first-run LLM key verification**
+   — the spec's disclosed, metered "one live, minimal call" at paste time,
+   assigned here 2026-08-31 after a Codex review of the P1 plan flagged it
+   unowned (it wants the same session-authed verify path capture-verify
+   builds) — then old phases 5 → 6 (remote MCP — 5 before 6, unchanged),
+   phase 3 (options client) when the build needs it. →
 3. **P3 — Build conversation**: the build resource, agent loop, and its
    checklist — unchanged as the highest product value, now against the P1
    endpoint model. →
