@@ -51,8 +51,7 @@ type Connector struct {
 }
 
 // Auth names the OAuth credential namespace for the connector. Distinct
-// connectors may share one (google-gmail and google-calendar both use
-// "google"), so one consent covers both.
+// connectors may share one, so one consent can cover them all.
 type Auth struct {
 	Provider string `json:"provider"`
 }
