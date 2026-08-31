@@ -1,0 +1,179 @@
+// Package kube talks to whatever cluster the user's kubeconfig points
+// at: plain namespaced objects, create-or-update, no CRDs and no
+// controller.
+package kube
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sort"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
+
+	"github.com/gambtho/tomte/tomtectl/internal/manifest"
+)
+
+type Client struct {
+	cs *kubernetes.Clientset
+	// Namespace is the flag override, else the kubeconfig context's
+	// namespace, else "default".
+	Namespace string
+}
+
+// New builds a client from the user's kubeconfig, honoring the usual
+// loading rules (KUBECONFIG, ~/.kube/config).
+func New(kubeContext, namespace string) (*Client, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubeContext}
+	cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+
+	restCfg, err := cfg.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("loading kubeconfig: %w", err)
+	}
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return nil, err
+	}
+	if namespace == "" {
+		namespace, _, err = cfg.Namespace()
+		if err != nil || namespace == "" {
+			namespace = "default"
+		}
+	}
+	return &Client{cs: cs, Namespace: namespace}, nil
+}
+
+// Apply creates or updates the agent's ConfigMap and Deployment.
+// Updates mutate the freshly-fetched object under RetryOnConflict —
+// the deployment controller bumps ResourceVersions concurrently.
+func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.Deployment) error {
+	cms := c.cs.CoreV1().ConfigMaps(c.Namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := cms.Get(ctx, cm.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err = cms.Create(ctx, cm, metav1.CreateOptions{})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		existing.Labels = cm.Labels
+		existing.Data = cm.Data
+		_, err = cms.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("applying ConfigMap: %w", err)
+	}
+
+	deps := c.cs.AppsV1().Deployments(c.Namespace)
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := deps.Get(ctx, dep.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err = deps.Create(ctx, dep, metav1.CreateOptions{})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		existing.Labels = dep.Labels
+		existing.Spec = dep.Spec
+		// A ConfigMap-only change does not roll pods by itself; stamp
+		// the pod template (kubectl rollout restart's mechanism) so the
+		// running agent picks up the new file.
+		if existing.Spec.Template.Annotations == nil {
+			existing.Spec.Template.Annotations = map[string]string{}
+		}
+		existing.Spec.Template.Annotations["tomte.dev/restarted-at"] = time.Now().UTC().Format(time.RFC3339)
+		_, err = deps.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("applying Deployment: %w", err)
+	}
+	return nil
+}
+
+// Status prints deployment readiness and the agent's pods.
+func (c *Client) Status(ctx context.Context, name string, out io.Writer) error {
+	dep, err := c.cs.AppsV1().Deployments(c.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		fmt.Fprintf(out, "agent %q is not deployed in namespace %q — run `tomtectl up`\n", name, c.Namespace)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "agent %s (namespace %s): %d/%d ready\n",
+		name, c.Namespace, dep.Status.ReadyReplicas, dep.Status.Replicas)
+
+	pods, err := c.pods(ctx, name)
+	if err != nil {
+		return err
+	}
+	for _, p := range pods {
+		restarts := int32(0)
+		for _, cs := range p.Status.ContainerStatuses {
+			restarts += cs.RestartCount
+		}
+		fmt.Fprintf(out, "  pod %s: %s, %d restart(s), started %s\n",
+			p.Name, p.Status.Phase, restarts, p.CreationTimestamp.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// Logs streams the newest pod's logs.
+func (c *Client) Logs(ctx context.Context, name string, follow bool, out io.Writer) error {
+	pods, err := c.pods(ctx, name)
+	if err != nil {
+		return err
+	}
+	if len(pods) == 0 {
+		return fmt.Errorf("no pods for agent %q in namespace %q — run `tomtectl up` and check `tomtectl status`", name, c.Namespace)
+	}
+	pod := pods[len(pods)-1] // newest
+	req := c.cs.CoreV1().Pods(c.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Follow: follow})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return fmt.Errorf("streaming logs from %s: %w", pod.Name, err)
+	}
+	defer stream.Close()
+	_, err = io.Copy(out, stream)
+	return err
+}
+
+// Delete removes the agent's objects; missing objects are fine.
+func (c *Client) Delete(ctx context.Context, name string) error {
+	err := c.cs.AppsV1().Deployments(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting Deployment: %w", err)
+	}
+	err = c.cs.CoreV1().ConfigMaps(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("deleting ConfigMap: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) pods(ctx context.Context, name string) ([]corev1.Pod, error) {
+	list, err := c.cs.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: manifest.AgentLabel + "=" + name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	pods := list.Items
+	sort.Slice(pods, func(i, j int) bool {
+		return pods[i].CreationTimestamp.Before(&pods[j].CreationTimestamp)
+	})
+	return pods, nil
+}
