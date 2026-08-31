@@ -62,6 +62,30 @@ proxy, scheduler, reaper, local compute — in one process against one
 Postgres, and the connector e2e passes in that shape. The pivot is mostly
 subtraction and packaging.
 
+Two clarifications from the user, after the coordinating session over-read
+"customer-deployed" as "technical user" — twice, and was corrected:
+
+- **Deployer == user, and the user is still the non-technical person.** The
+  bar is "click install" — a desktop-app-grade experience (no terminal, no
+  docker, no database administration), not an operator persona. The UX spec's
+  target user, the build conversation as front door, and all four surfaces
+  survive unchanged. The dev-persona research stays the companion study.
+- **OAuth is dropped entirely.** Consequences, verified: the `google-calendar`
+  curated connector dies (Google user data requires OAuth), so **curated v1 is
+  Slack alone** via pasted bot token; calendar/inbox arrive through remote MCP
+  servers that do their own auth — the deferred phases 5→6 become the main
+  connector road. Connector phase 2's OAuth machinery (~2,000 lines, landed
+  the same day) is sunk. And the deferred credential-capture UX problem is now
+  every connector's problem: token-paste for a non-technical user is exactly
+  the friction OAuth removed, so guided capture copy becomes load-bearing.
+
+Two hard problems this hands the pivot spec: **packaging** (the store is pgx
+throughout — bundled-invisible Postgres vs a SQLite rewrite is a real
+decision), and **the sleeping machine**. The second is half-solved already:
+`scheduler.mostRecentDue` fires the latest occurrence ≤ now and skips older,
+so a slept-through 3AM digest fires once on wake. The spec owes the honest
+product copy for that, and an always-on option for people who want true 3AM.
+
 **The serialized queue is FROZEN pending the pivot spec.** No session takes
 `server/` until the pivot spec merges and the queue is re-derived from it.
 
