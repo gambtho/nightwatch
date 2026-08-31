@@ -33,7 +33,7 @@ finishes, or a cross-cutting decision is taken.
 | Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
-| P1 — Subtraction and floor       | **Next: owns `server/` at launch** — prompt below                                                          |
+| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 delivered; impl on `feat/p1-subtraction-floor`; one plan amendment pending  |
 | CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
 | Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
 | Pivot demo (`demo/tomte-pivot`)  | **Lane opened** — prototype re-skin telling the click-install story; not for merge; prompt below           |
@@ -490,6 +490,29 @@ the classic path). The P1 prompt carries the two implementation wrinkles
 proxy). Leadership copy names them "GitHub Models (included with GitHub
 Copilot plans)" — do not claim `api.githubcopilot.com` support; it is
 undocumented for third parties and needs token exchange.
+
+**P1's resolutions (plan PR #45, 2026-08-31), coordinator-reviewed:**
+
+- **Azure — accepted as planned.** P1 pins the **v1 GA API** (per-resource
+  base `https://<resource>.openai.azure.com/openai/v1` or
+  `<resource>.services.ai.azure.com/openai/v1`; plain OpenAI-compatible, no
+  `api-version` param). Keys inject as an `api-key` header (Entra/Bearer out
+  of scope v1). Validation: HTTPS + Azure host-suffix allowlist + exact
+  `/openai/v1` path. No bundled prices — Azure rides the user-entered
+  (base_url, model) price path, so the gate applies via the price form.
+- **GitHub Models — amended, blanket $0 rejected.** The plan proposed
+  classifying the preset zero-cost with the gate skipped. Verified against
+  GitHub's current docs: GitHub Models has **opt-in pay-as-you-go billing**
+  beyond the free quota (token units × per-model multipliers; default
+  GitHub-side spending limit $0 until raised), so a hard $0 would record a
+  paying user's real spend as zero — the silent unmetered spend the gate
+  exists to prevent. Direction to P1: explicit free-vs-paid choice on the
+  github preset (free → $0 classification with honest copy; paid → the
+  user-entered price path), switchable in settings since an org can enable
+  paid usage after first run.
+- Preset enum for the record:
+  `anthropic|openai|openrouter|github|azure|custom|local`. Next migration
+  confirmed 00012.
 
 ## Rule: no pre-stacked PR bases
 
