@@ -32,11 +32,6 @@ type env struct {
 	vault   *vault.Master
 }
 
-// testKEK is a placeholder wrapped KEK for tests that don't exercise the
-// encrypt path; newEnv mints a real one from a real vault.Master so the
-// connections API's encrypt path works end to end.
-var testKEK = []byte("test-wrapped-kek")
-
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	s := store.New(testpg.New(t))

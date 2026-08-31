@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -96,7 +97,9 @@ func (c *credentials) Credential(ctx context.Context, tenantID uuid.UUID, name, 
 			return proxy.Secret{}, derr
 		}
 		go func() {
-			if terr := c.store.TouchConnection(context.WithoutCancel(ctx), tenantID, conn.ID); terr != nil {
+			touchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if terr := c.store.TouchConnection(touchCtx, tenantID, conn.ID); terr != nil {
 				slog.Error("proxyadapter: touch connection", "err", terr)
 			}
 		}()

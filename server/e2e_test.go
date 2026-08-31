@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,10 +157,13 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	// shape matches internal/llm's openai fixture format (see
 	// openAIStreamFixture in openai_test.go) — that is what the ported
 	// openai-go SDK's streaming client actually parses.
+	var upstreamMu sync.Mutex
 	var upstreamAuth, upstreamPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamMu.Lock()
 		upstreamAuth = r.Header.Get("Authorization")
 		upstreamPath = r.URL.Path
+		upstreamMu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"proxied digest"}}]}` + "\n\n"))
@@ -234,10 +238,12 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	run := out["run"].(map[string]any)
 	require.Equal(t, "succeeded", run["status"])
 	require.Contains(t, run["output"], "proxied digest")
+	upstreamMu.Lock()
 	require.Equal(t, "Bearer platform-openai-key", upstreamAuth) // injected, not the run token
 	// The SDK emitted /chat/completions relative to its base; with a bare
 	// upstream base the exact path proves the /v1 rewrite logic is right.
 	require.Equal(t, "/chat/completions", upstreamPath)
+	upstreamMu.Unlock()
 
 	out = do("GET", "/v1/runs/"+runID+"/events", nil)
 	var types []string

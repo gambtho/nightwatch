@@ -41,8 +41,11 @@ func (h *handler) emit(r *http.Request, id RunIdentity, typ string, payload map[
 	// cancel-free context: a client disconnect must not silently drop the
 	// audit event for a request the proxy already finished handling (same
 	// class of fix as main's failDispatch — audit delivery must survive
-	// client disconnect).
-	if err := h.d.Events.AppendEvent(context.WithoutCancel(r.Context()), id.TenantID, id.RunID, typ, payload); err != nil {
+	// client disconnect). Bounded to 5s so a stalled pool cannot hang the
+	// denial response indefinitely.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err := h.d.Events.AppendEvent(ctx, id.TenantID, id.RunID, typ, payload); err != nil {
 		slog.Error("proxy: append event", "type", typ, "run", id.RunID, "err", err)
 	}
 }
