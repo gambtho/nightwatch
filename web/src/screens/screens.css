@@ -410,3 +410,40 @@
     flex-direction: column;
   }
 }
+
+/* Schedule confirmation — the sleeping-machine promise and the always-on
+   options, in the spec's order. Quiet by design: the promise reads inline,
+   the options unfold only when asked for. */
+
+.schedule-expectations {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 16px;
+  margin: 12px 0 20px;
+  max-width: 620px;
+  font-size: 0.9rem;
+}
+
+.schedule-expectations p {
+  margin: 0;
+}
+
+.schedule-always-on {
+  margin-top: 10px;
+}
+
+.schedule-always-on summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.schedule-always-on ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.schedule-always-on li {
+  margin-top: 6px;
+}

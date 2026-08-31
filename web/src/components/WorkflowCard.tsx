@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import type { WorkflowSummary } from "../screens/Home";
 import { dollars, timeAgo } from "../lib/format";
 import { describeSchedule, nextRunLabel } from "../lib/schedule";
+import { wakeLine } from "../lib/wake";
 
 function lastRunLine(summary: WorkflowSummary): string {
   const last = summary.last;
@@ -9,6 +10,10 @@ function lastRunLine(summary: WorkflowSummary): string {
   switch (last.status) {
     case "succeeded": {
       const cost = last.cost_cents !== undefined ? ` · ${dollars(last.cost_cents)}` : "";
+      // A run that fired on wake says so — this is where the sleeping-
+      // machine promise ("scheduled 3:00 AM · ran 7:42 AM…") is kept.
+      const wake = wakeLine(last);
+      if (wake) return `${wake}${cost}`;
       return `Ran ${timeAgo(last.created_at)}${cost}`;
     }
     case "failed":

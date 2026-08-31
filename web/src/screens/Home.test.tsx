@@ -187,3 +187,62 @@ describe("Home — draft alongside approved", () => {
     expect(screen.getByText(/Mondays at 9:00 AM/)).toBeInTheDocument();
   });
 });
+
+describe("Home — fired on wake", () => {
+  it("says when a scheduled run fired at wake-up instead of on time", async () => {
+    mockApi({
+      "GET /v1/me": {
+        body: {
+          user: { id: "u", email: "e", role: "owner" },
+          tenant: { id: "t", name: "dev" },
+        },
+      },
+      "GET /v1/workflows": {
+        body: {
+          workflows: [
+            { id: "wf4", name: "night digest", created_at: "2026-08-30T00:00:00Z" },
+          ],
+        },
+      },
+      "GET /v1/workflows/wf4": {
+        body: {
+          workflow: {
+            id: "wf4",
+            name: "night digest",
+            created_at: "2026-08-30T00:00:00Z",
+          },
+          versions: [approvedVersion],
+        },
+      },
+      "GET /v1/workflows/wf4/runs": {
+        body: {
+          runs: [
+            {
+              id: "r2",
+              workflow_id: "wf4",
+              version: 1,
+              status: "succeeded",
+              fire_reason: "schedule",
+              fire_time: "2026-08-31T03:00:00Z",
+              started_at: "2026-08-31T07:42:00Z",
+              cost_cents: 3,
+              created_at: "2026-08-31T07:42:00Z",
+            },
+          ],
+        },
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <SessionProvider>
+          <Home />
+        </SessionProvider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(/scheduled .+ · ran .+, when your computer woke/),
+    ).toBeInTheDocument();
+  });
+});

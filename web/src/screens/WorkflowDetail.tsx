@@ -6,6 +6,7 @@ import PermitDiagram from "../components/PermitDiagram";
 import { dollars, timeAgo } from "../lib/format";
 import { parseSteps } from "../lib/steps";
 import { describeSchedule, nextRunLabel } from "../lib/schedule";
+import { wakeLine } from "../lib/wake";
 import { summarizeVersions } from "../lib/versions";
 import { useCatalog } from "../lib/useCatalog";
 import { useSession } from "../session";
@@ -60,7 +61,9 @@ function RunRow({ run }: { run: Run }) {
           <span className="dim">{dollars(run.cost_cents)}</span>
         )}
         <span className="dim run-fire">
-          {run.fire_reason === "schedule" ? "on schedule" : "fired by hand"}
+          {run.fire_reason === "schedule"
+            ? (wakeLine(run) ?? "on schedule")
+            : "fired by hand"}
         </span>
       </button>
       {open && (
