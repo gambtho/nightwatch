@@ -115,6 +115,9 @@ server/
   internal/db/                  pool, goose migrate, migrations/*.sql
   internal/testpg/              shared Postgres testcontainer helper
   internal/store/               hand-written pgx queries; one file per aggregate
+  internal/engine/              shared fire path, scheduler, orphaned-run reaper
+  internal/schedule/            cron + IANA timezone schedule artifact
+  internal/meter/               tenant monthly spend cap, wired as the proxy Hook
   internal/httpapi/             public /v1 API + session auth
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)

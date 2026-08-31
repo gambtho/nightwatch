@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gambtho/nightwatch/server/internal/engine"
@@ -25,6 +26,7 @@ import (
 type env struct {
 	ts      *httptest.Server
 	store   *store.Store
+	pool    *pgxpool.Pool
 	key     []byte
 	cookie  *http.Cookie
 	tenant  store.Tenant
@@ -35,7 +37,8 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	s := store.New(testpg.New(t))
+	pool := testpg.New(t)
+	s := store.New(pool)
 	ctx := context.Background()
 
 	vkey := make([]byte, vault.KeyLen)
@@ -65,7 +68,7 @@ func newEnv(t *testing.T) *env {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Engine: eng, Vault: master})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master}
+	return &env{ts: ts, store: s, pool: pool, key: key, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master}
 }
 
 func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, map[string]any) {
@@ -98,6 +101,31 @@ func workflowBody() map[string]any {
 		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 		"rubric": map[string]any{"rules": []string{"under a page"}},
 	}
+}
+
+// TestApproveRejectsUnpricedDraft: a draft persisted before a price-table
+// change must not become approved. decodeDoc blocks writing an unpriced
+// model through the API, so simulate the stale draft with direct SQL.
+func TestApproveRejectsUnpricedDraft(t *testing.T) {
+	e := newEnv(t)
+
+	resp, out := e.do(t, "POST", "/v1/workflows", workflowBody())
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	id := out["workflow"].(map[string]any)["id"].(string)
+
+	_, err := e.pool.Exec(context.Background(),
+		`UPDATE workflow_version SET steps = jsonb_set(steps, '{model}', '"claude-legacy-1"')
+		 WHERE workflow_id = $1`, id)
+	require.NoError(t, err)
+
+	resp, out = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/versions/1/approve", id), nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Contains(t, out["error"], "no pricing")
+
+	// The draft was not promoted.
+	v, err := e.store.GetVersion(context.Background(), e.tenant.ID, uuid.MustParse(id), 1)
+	require.NoError(t, err)
+	require.Equal(t, "draft", v.Status)
 }
 
 func TestWorkflowEndpoints(t *testing.T) {

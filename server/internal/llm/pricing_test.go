@@ -15,6 +15,11 @@ func TestCostCentsKnownAndUnknown(t *testing.T) {
 		}
 		break
 	}
+	// Pin the default fixture model's public-list rate exactly ($2/$10 per
+	// 1M as of 2026-08): 1M in + 1M out = 200 + 1000 cents.
+	if got := CostCents("anthropic", "claude-sonnet-5", u); got != 1200 {
+		t.Fatalf("claude-sonnet-5 at 1M/1M: want 1200 cents, got %d", got)
+	}
 }
 
 // TestCostCentsFloorsCombinedNotSeparately guards against flooring input and

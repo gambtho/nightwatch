@@ -28,8 +28,10 @@ var priceTable = map[string]map[string]pricePer1M{
 		"google/gemini-2.0-flash-001":       {in: 10, out: 40},
 	},
 	"anthropic": {
-		"claude-haiku-4-5":  {in: 100, out: 500},
-		"claude-sonnet-5":   {in: 300, out: 1500},
+		"claude-haiku-4-5": {in: 100, out: 500},
+		// Sonnet 5 launched at $2/$10 per 1M; the $3/$15 increase once
+		// scheduled for 2026-09-01 was cancelled.
+		"claude-sonnet-5":   {in: 200, out: 1000},
 		"claude-sonnet-4-5": {in: 300, out: 1500},
 		"claude-opus-4-6":   {in: 1500, out: 7500},
 	},
