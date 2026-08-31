@@ -47,7 +47,7 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	for _, c := range cat.Connectors() {
 		ids = append(ids, c.ID)
 	}
-	require.Equal(t, []string{"google-calendar", "google-gmail", "slack"}, ids)
+	require.Equal(t, []string{"google-calendar", "slack"}, ids)
 
 	_, op, ok := cat.Op("slack", "post_message")
 	require.True(t, ok)

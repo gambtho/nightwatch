@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gambtho/nightwatch/server/internal/catalog"
@@ -57,6 +59,7 @@ type upstreamCapture struct {
 	header                 http.Header
 	body                   []byte
 	status                 int
+	statusOnce             int // when set, the FIRST hit returns it instead of status
 	respBody               string
 	location               string
 	hits                   int
@@ -64,8 +67,22 @@ type upstreamCapture struct {
 
 type connEnv struct {
 	*env
-	up  *upstreamCapture
-	cat *catalog.Catalog
+	up      *upstreamCapture
+	cat     *catalog.Catalog
+	swapper *credsSwapper
+}
+
+// credsSwapper lets a test replace the credential source after route
+// registration (Deps is copied at RegisterRoutes).
+type credsSwapper struct{ inner proxy.CredentialSource }
+
+func (c *credsSwapper) Credential(ctx context.Context, tenantID uuid.UUID, name, provider string) (proxy.Secret, error) {
+	return c.inner.Credential(ctx, tenantID, name, provider)
+}
+
+func (e *connEnv) creds2(t *testing.T, src proxy.CredentialSource) {
+	t.Helper()
+	e.swapper.inner = src
 }
 
 func newConnectorEnv(t *testing.T, p permit.Permit, hook proxy.Hook) *connEnv {
@@ -80,7 +97,11 @@ func newConnectorEnv(t *testing.T, p permit.Permit, hook proxy.Hook) *connEnv {
 		if up.location != "" {
 			w.Header().Set("Location", up.location)
 		}
-		w.WriteHeader(up.status)
+		status := up.status
+		if up.statusOnce != 0 && up.hits == 1 {
+			status = up.statusOnce
+		}
+		w.WriteHeader(status)
 		_, _ = w.Write([]byte(up.respBody))
 	}))
 	t.Cleanup(upstream.Close)
@@ -99,14 +120,15 @@ func newConnectorEnv(t *testing.T, p permit.Permit, hook proxy.Hook) *connEnv {
 	if hook == nil {
 		hook = proxy.NopHook{}
 	}
+	swapper := &credsSwapper{inner: e.creds}
 	mux := http.NewServeMux()
 	proxy.RegisterRoutes(mux, proxy.Deps{
-		Auth: e.auth, Permits: e.permits, Credentials: e.creds,
+		Auth: e.auth, Permits: e.permits, Credentials: swapper,
 		Events: e.events, Hook: hook, Config: cfg, Catalog: cat,
 	})
 	e.ts = httptest.NewServer(mux)
 	t.Cleanup(e.ts.Close)
-	return &connEnv{env: e, up: up, cat: cat}
+	return &connEnv{env: e, up: up, cat: cat, swapper: swapper}
 }
 
 func invoke(t *testing.T, e *connEnv, connector, op, args, token string) *http.Response {
@@ -279,3 +301,56 @@ func TestConnectorOversizedArgsDenied(t *testing.T) {
 type hookFunc func(ctx context.Context, req proxy.HookRequest) error
 
 func (f hookFunc) Before(ctx context.Context, req proxy.HookRequest) error { return f(ctx, req) }
+
+// brokenCreds hands out secrets whose MarkBroken reports a chosen CAS
+// outcome and counts resolutions, for the upstream-401 paths.
+type brokenCreds struct {
+	applied  bool
+	resolves int
+	marks    int
+}
+
+func (b *brokenCreds) Credential(ctx context.Context, tenantID uuid.UUID, name, provider string) (proxy.Secret, error) {
+	b.resolves++
+	val := fmt.Sprintf("token-%d", b.resolves)
+	return proxy.Secret{
+		Value: val,
+		MarkBroken: func(ctx context.Context) (bool, error) {
+			b.marks++
+			return b.applied, nil
+		},
+	}, nil
+}
+
+// A 401 whose CAS applies demotes once: connection.broken is recorded
+// and the 401 relayed — no retry.
+func TestConnectorUpstream401DemotesAndRelays(t *testing.T) {
+	e := newConnectorEnv(t, mustPermit(t, grantAll), nil)
+	bc := &brokenCreds{applied: true}
+	e.creds2(t, bc)
+	e.up.status = http.StatusUnauthorized
+
+	resp := invoke(t, e, "fake", "read_things", `{}`, "tok")
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, 1, bc.resolves, "no retry when the demotion applied")
+	require.Equal(t, 1, bc.marks)
+	require.Contains(t, e.events.events, "connection.broken")
+}
+
+// A 401 whose CAS misses means the token was stale: exactly one retry
+// with a freshly resolved credential.
+func TestConnectorUpstream401StaleRetriesOnce(t *testing.T) {
+	e := newConnectorEnv(t, mustPermit(t, grantAll), nil)
+	bc := &brokenCreds{applied: false}
+	e.creds2(t, bc)
+
+	// First upstream hit 401s, the retry succeeds.
+	e.up.statusOnce = http.StatusUnauthorized
+
+	resp := invoke(t, e, "fake", "read_things", `{}`, "tok")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, 2, bc.resolves, "one re-resolution for the retry")
+	require.Equal(t, 2, e.up.hits)
+	require.Equal(t, "Bearer token-2", e.up.header.Get("Authorization"))
+	require.NotContains(t, e.events.events, "connection.broken")
+}

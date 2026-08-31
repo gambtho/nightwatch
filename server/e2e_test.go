@@ -294,7 +294,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
 		RunProvider: "openai", RunModel: "gpt-4o-mini"})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
-	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
+	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"}, nil)
 	cfg := proxy.DefaultConfig()
 	route := cfg.Providers["openai"]
 	route.Base = upstream.URL // bare base: the SDK's emitted path arrives verbatim

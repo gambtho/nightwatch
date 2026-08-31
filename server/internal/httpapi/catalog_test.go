@@ -23,7 +23,7 @@ func TestGetCatalog(t *testing.T) {
 	resp, out := e.do(t, "GET", "/v1/catalog", nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	connectors := out["connectors"].([]any)
-	require.Len(t, connectors, 3)
+	require.Len(t, connectors, 2)
 
 	byID := map[string]map[string]any{}
 	for _, c := range connectors {

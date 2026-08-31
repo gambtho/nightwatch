@@ -12,6 +12,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/mail"
+	"github.com/gambtho/nightwatch/server/internal/oauth"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/vault"
 )
@@ -36,6 +37,10 @@ type Deps struct {
 	// Catalog is the validated curated connector catalog. Version writes
 	// check permit connections against it; GET /v1/catalog serves it.
 	Catalog *catalog.Catalog
+	// OAuth + StateSigner drive the platform-app connect flow; nil
+	// disables the oauth routes (500 with a clear error).
+	OAuth       *oauth.Service
+	StateSigner *oauth.Signer
 }
 
 // Platform run-model defaults, used when the env leaves the choice to us:
@@ -86,6 +91,8 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
 	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
 	mux.Handle("GET /v1/catalog", auth(d.getCatalog))
+	mux.Handle("POST /v1/connections/oauth/{connector}/start", mut(auth(d.oauthStart)))
+	mux.Handle("GET "+oauthCallbackPath, http.HandlerFunc(d.oauthCallback))
 	mux.Handle("PUT /v1/connections/{name}", mut(auth(d.putConnection)))
 	mux.Handle("GET /v1/connections", auth(d.listConnections))
 	mux.Handle("DELETE /v1/connections/{name}", mut(auth(d.deleteConnection)))
