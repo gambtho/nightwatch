@@ -1,7 +1,7 @@
 // Package permit defines the workflow permit document, schema v1. The
 // permit is the approved blast radius: what a workflow's runs may reach.
-// v1 governs LLM provider egress only; the connections map is reserved
-// for the connector catalog and must be empty.
+// v1 governs LLM provider egress only and the approved spend caps; the
+// connections map is reserved for the connector catalog and must be empty.
 package permit
 
 import (
@@ -15,12 +15,21 @@ import (
 type Permit struct {
 	V           int                        `json:"v"`
 	LLM         LLM                        `json:"llm"`
+	Spend       *Spend                     `json:"spend,omitempty"`
 	Connections map[string]json.RawMessage `json:"connections,omitempty"`
 }
 
 type LLM struct {
 	Providers  []string `json:"providers,omitempty"`
 	Connection string   `json:"connection,omitempty"`
+}
+
+// Spend is the approved per-run budget — the number the blast-radius
+// diagram shows. Detection is transactional at finalization (see the
+// scheduling+metering spec); pre-request enforcement arrives with
+// multi-turn runs.
+type Spend struct {
+	PerRunCents int `json:"per_run_cents"`
 }
 
 // Empty is the canonical deny-all permit: valid v1, no egress allowed.
@@ -51,6 +60,9 @@ func Parse(raw []byte) (Permit, error) {
 		if name == "" {
 			return Permit{}, fmt.Errorf("permit: empty provider name")
 		}
+	}
+	if p.Spend != nil && p.Spend.PerRunCents <= 0 {
+		return Permit{}, fmt.Errorf("permit: spend.per_run_cents must be positive")
 	}
 	if p.LLM.Connection == "" {
 		p.LLM.Connection = "default"
