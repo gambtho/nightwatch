@@ -46,33 +46,27 @@ it extends the existing `server/cmd/nightshift` binary
 1. ~~**Plan 3**~~ (merged, PR #10) →
 2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
    mechanism across httpapi and every test helper; retired
-   `NIGHTSHIFT_SESSION_KEY`. **`server/` is now free and unassigned. The next
-   owner is a decision, not a default** — see the note under item 3. →
-3. **Connectors** (plan + implementation — collides with `permit.Parse`, the
-   proxy, and the harness, and wants identity's session changes settled; four
-   downstream specs depend on its operation vocabulary). **Contested:** the
-   build-conversation spec's first server item — user-facing steps v1 plus the
-   approval-time compile, resolving scoping decision 9 — is deliberately
-   independent of connectors and is a much smaller slot. Taking it first
-   unblocks the frontend sooner, because the frontend cannot consume a `steps`
-   contract that is still the compiled execution form. Connectors is the bigger
-   unlock but the longer occupancy. →
-4. **Plan 4** — grading + alerting. Creates `workflow.status`
+   `NIGHTSHIFT_SESSION_KEY`. →
+3. ~~**Steps v1 (decision 9)**~~ (merged, PR #19) — the user-facing steps
+   artifact plus the approval-time compiler. Taken ahead of connectors because
+   it was small, independent of everything else, and the frontend cannot
+   consume a `steps` contract that is still the compiled execution form.
+   **`server/` has been free and unassigned since it merged.** →
+4. **Connectors** — NEXT IN LINE. Plan and implementation; collides with
+   `permit.Parse`, the proxy, and the harness, and four downstream specs
+   depend on its operation vocabulary. The bigger unlock and the longer
+   occupancy. →
+5. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
-5. **Escalation** (carries Plan 3 amendment 1) →
-6. **Objectives** (widens `workflow.status`; no longer carries amendment 3) →
-7. **Graduated permits** (hard dependency on Plan 4's grader) →
-8. **Plan 5** — Substrate + K8s-Jobs Compute
+6. **Escalation** (carries Plan 3 amendment 1) →
+7. **Objectives** (widens `workflow.status`; no longer carries amendment 3) →
+8. **Graduated permits** (hard dependency on Plan 4's grader) →
+9. **Plan 5** — Substrate + K8s-Jobs Compute
 
 Escalation precedes objectives because the objectives spec declares the
 dependency. Plan 5 stays last, and the verification spike confirmed that was
 right rather than merely asserted.
-
-**Unslotted, needs a decision:** the build-conversation spec resolves roadmap
-scoping decision 9 (the user-facing `steps` artifact joins the version
-document; the execution form becomes server-derived). That is a `server/`
-change with no queue position yet. It most likely rides with connectors.
 
 ### Parallel-safe lanes, open now
 
