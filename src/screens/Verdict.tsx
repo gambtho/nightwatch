@@ -3,10 +3,10 @@ import "./screens.css";
 
 interface Props {
   verdict: Verdict;
-  onBuild: () => void;
+  onReview: () => void;
 }
 
-export default function VerdictScreen({ verdict, onBuild }: Props) {
+export default function VerdictScreen({ verdict, onReview }: Props) {
   return (
     <div className="screen screen-narrow">
       <h2>Yes — mostly. Here's what I'd actually do.</h2>
@@ -38,8 +38,8 @@ export default function VerdictScreen({ verdict, onBuild }: Props) {
         <p className="dim">You'll see exactly what it can touch before anything runs.</p>
       </div>
 
-      <button className="btn" onClick={onBuild}>
-        Build this
+      <button className="btn" onClick={onReview}>
+        Review what it can touch
       </button>
     </div>
   );

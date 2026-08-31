@@ -51,7 +51,7 @@ export default function PermitDiagram({ permit, highlightIds, maxCostLabel }: Pr
           <div className="permit-arrow">→</div>
 
           <div className="permit-agent">
-            <div className="permit-agent-icon">🌙</div>
+            <div className="permit-agent-icon">🧝</div>
             <div className="permit-agent-name">the agent</div>
             <div className="permit-agent-cost">{maxCostLabel}</div>
           </div>

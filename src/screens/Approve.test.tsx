@@ -16,6 +16,30 @@ test("shows the full permit, not a partial one", () => {
   expect(screen.getByText("Slack #team-digest")).toBeInTheDocument();
 });
 
+test("states the enforcement posture in the spec's softened words, verbatim", () => {
+  render(<Approve onApproved={() => {}} />);
+  expect(
+    screen.getByText(
+      /It can only act through Tomte's checkpoint, and every request is checked against this picture\./,
+    ),
+  ).toBeInTheDocument();
+});
+
+test("carries the spend line: per-run cap, grader cost, monthly budget", () => {
+  render(<Approve onApproved={() => {}} />);
+  expect(screen.getByText(/Runs on your key/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Checking my work against your rules adds ~1–2¢ per run/),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/\$10\.00 monthly\s+budget/)).toBeInTheDocument();
+});
+
+test("names the sleeping machine honestly — fire on wake, once", () => {
+  render(<Approve onApproved={() => {}} />);
+  expect(screen.getByText(/Tomte works while your computer is on/)).toBeInTheDocument();
+  expect(screen.getByText(/once, not twelve times/)).toBeInTheDocument();
+});
+
 test("nothing is highlighted as newly added on the approval screen", () => {
   render(<Approve onApproved={() => {}} />);
   expect(screen.getByTestId("cap-zendesk-read")).not.toHaveClass("just-added");

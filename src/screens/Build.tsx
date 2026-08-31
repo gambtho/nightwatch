@@ -1,27 +1,52 @@
-import { useState } from "react";
 import Chat from "../components/Chat";
 import PermitDiagram from "../components/PermitDiagram";
 import { buildScript, permitAfter } from "../fixtures/conversation";
 import { maxCostLabel } from "../lib/permit";
 import "./screens.css";
 
-export default function Build({ onApprove }: { onApprove: () => void }) {
-  const [shown, setShown] = useState(1);
+interface Props {
+  shown: number;
+  onAdvance: () => void;
+  slackConnected: boolean;
+  onConnectSlack: () => void;
+  onVerdict: () => void;
+}
+
+// `shown` lives in App so the conversation survives the round trip through
+// the connections manager.
+export default function Build({
+  shown,
+  onAdvance,
+  slackConnected,
+  onConnectSlack,
+  onVerdict,
+}: Props) {
   const permit = permitAfter(buildScript, shown);
-  const highlightIds = buildScript[shown - 1].grants.map((g) => g.id);
+  const current = buildScript[shown - 1];
+  const highlightIds = current.grants.map((g) => g.id);
   const atEnd = shown >= buildScript.length;
+  const needsSlack = Boolean(current.connectSlack) && !slackConnected;
 
   return (
     <div className="screen build">
       <div className="build-chat">
         <div className="label">Chat</div>
         <Chat turns={buildScript.slice(0, shown)} />
-        {atEnd ? (
-          <button className="btn" onClick={onApprove}>
-            Review what it can touch
+        {current.connectSlack && slackConnected && (
+          <p className="verify-ok">
+            ✓ Slack connected — every future job finds it already connected.
+          </p>
+        )}
+        {needsSlack ? (
+          <button className="btn" onClick={onConnectSlack}>
+            Connect Slack — one paste
+          </button>
+        ) : atEnd ? (
+          <button className="btn" onClick={onVerdict}>
+            See my honest read
           </button>
         ) : (
-          <button className="btn" onClick={() => setShown(shown + 1)}>
+          <button className="btn" onClick={onAdvance}>
             Continue
           </button>
         )}

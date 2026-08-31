@@ -41,6 +41,10 @@ export interface RuleResult {
 export interface Run {
   id: string;
   at: string;
+  // The occurrence this run was scheduled for. When it differs from `at`,
+  // the machine was asleep at fire time and the run fired on wake — the home
+  // surface renders that honestly instead of hiding it.
+  fireTime?: string;
   status: RunStatus;
   costCents: number;
   ruleResults: RuleResult[];

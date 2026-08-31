@@ -84,17 +84,22 @@ export const supportDigestDegraded: Workflow = {
   paused: true,
 };
 
+// Scheduled for the middle of the night on a laptop that sleeps: the run
+// fired on wake. 3:00 AM America/New_York (EDT) is 07:00Z; 7:42 AM is
+// 11:42Z. Home renders the gap honestly — "scheduled 3:00 AM · ran
+// 7:42 AM, when your computer woke".
 export const renewals: Workflow = {
   id: "wf-renewals",
   name: "Contract renewals coming up",
-  schedule: { label: "Every morning at 7:00 AM", timezone: "America/New_York" },
+  schedule: { label: "Every night at 3:00 AM", timezone: "America/New_York" },
   steps: [{ id: "s1", text: "Check for contracts due in 60 days" }],
   permit: { capabilities: [], denied: [], maxCostCents: 100 },
   rubric: [{ id: "window", text: "Looks 60 days ahead" }],
   runs: [
     {
       id: "r1",
-      at: "2026-08-29T07:00:00Z",
+      at: "2026-08-31T11:42:00Z",
+      fireTime: "2026-08-31T07:00:00Z",
       status: "ok",
       costCents: 12,
       ruleResults: [{ ruleId: "window", passed: true }],

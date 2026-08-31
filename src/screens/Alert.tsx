@@ -13,7 +13,7 @@ export default function Alert() {
   return (
     <div className="screen screen-narrow">
       <p className="dim alert-channel">
-        Email + push — they didn't open the app. It found them.
+        An OS notification — they didn't open the app. It found them.
       </p>
 
       <h2>⚠️ Your Monday digest has been getting worse, and I think I know why.</h2>

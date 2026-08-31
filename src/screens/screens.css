@@ -120,7 +120,7 @@
   border-bottom-right-radius: 4px;
 }
 
-.bubble-nightshift {
+.bubble-tomte {
   background: var(--surface-2);
   border-bottom-left-radius: 4px;
 }
@@ -166,4 +166,226 @@
   border-radius: 9px;
   padding: 8px 11px;
   font-size: 0.78rem;
+}
+
+/* First run — endpoint chooser */
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.preset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.preset:hover {
+  border-color: var(--accent);
+}
+
+.preset .dim {
+  font-size: 0.76rem;
+}
+
+/* Guided capture card — first-run keys and connector tokens alike */
+
+.capture-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 13px 15px;
+  margin: 14px 0;
+}
+
+.capture-start {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.capture-step {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  font-size: 0.86rem;
+  margin-bottom: 7px;
+}
+
+.capture-num {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.key-input {
+  width: 100%;
+  margin-top: 8px;
+  background: rgb(99 102 241 / 0.06);
+  border: 1px solid rgb(99 102 241 / 0.45);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 0.88rem;
+  padding: 8px 11px;
+}
+
+.paste-error {
+  color: var(--write);
+  font-size: 0.8rem;
+  margin: 6px 0 0;
+}
+
+.capture-disclose {
+  font-size: 0.8rem;
+  margin: 10px 0 0;
+}
+
+.verify-checking {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+.verify-ok {
+  color: var(--read);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Budget step */
+
+.budget-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.budget-dollar {
+  font-size: 1.2rem;
+}
+
+.budget-input {
+  width: 90px;
+  margin-top: 0;
+  font-size: 1.05rem;
+}
+
+.autostart {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 14px;
+}
+
+/* Connections manager */
+
+.conn-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+
+.conn-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.conn-chip {
+  font-size: 0.72rem;
+  border-radius: 20px;
+  padding: 2px 9px;
+}
+
+.conn-ok {
+  color: var(--read);
+  background: rgb(22 163 74 / 0.12);
+}
+
+.conn-missing {
+  color: var(--text-dim);
+  background: var(--surface-2);
+}
+
+.conn-detail {
+  font-size: 0.82rem;
+  margin: 8px 0;
+}
+
+/* Approve */
+
+.approve-guarantee {
+  font-size: 0.86rem;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: rgb(22 163 74 / 0.08);
+  border: 1px solid rgb(22 163 74 / 0.35);
+}
+
+/* Home — budget meter and wake line */
+
+.meter-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  margin-bottom: 14px;
+}
+
+.meter {
+  height: 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  margin: 8px 0 6px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent);
+}
+
+.meter-line {
+  font-size: 0.82rem;
+}
+
+.meter-foot {
+  font-size: 0.76rem;
+  margin: 6px 0 0;
+}
+
+.wf-wake {
+  color: var(--text);
 }

@@ -3,9 +3,12 @@ import type { Capability, Permit } from "../lib/types";
 
 export interface BuildTurn {
   id: string;
-  speaker: "user" | "nightshift";
+  speaker: "user" | "tomte";
   text: string;
   grants: Capability[];
+  // This turn pauses the build until Slack is connected in the
+  // connections manager — connect once, every later build finds it.
+  connectSlack?: boolean;
 }
 
 export const MAX_COST_CENTS = 200;
@@ -19,7 +22,7 @@ export const buildScript: BuildTurn[] = [
   },
   {
     id: "t2",
-    speaker: "nightshift",
+    speaker: "tomte",
     text: "Got it. I'll need to read your tickets — is that Zendesk, or the #support Slack channel?",
     grants: [
       {
@@ -54,20 +57,27 @@ export const buildScript: BuildTurn[] = [
   },
   {
     id: "t4",
-    speaker: "nightshift",
-    text: "Done. What should I do if something looks like a security problem?",
+    speaker: "tomte",
+    text: "I can do that once Slack is connected. It's one paste — and every job you build after this one will find it already connected.",
     grants: [],
+    connectSlack: true,
   },
   {
     id: "t5",
+    speaker: "tomte",
+    text: "What should I do if something looks like a security problem?",
+    grants: [],
+  },
+  {
+    id: "t6",
     speaker: "user",
     text: "Flag it separately at the top, and don't bury it.",
     grants: [],
   },
   {
-    id: "t6",
-    speaker: "nightshift",
-    text: "That's everything I need. Want to see exactly what this will be able to touch?",
+    id: "t7",
+    speaker: "tomte",
+    text: "That's everything I need. Here's my honest read on what I can and can't do — before anything runs.",
     grants: [],
   },
 ];

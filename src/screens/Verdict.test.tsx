@@ -4,7 +4,7 @@ import VerdictScreen from "./Verdict";
 import { supportDigestVerdict } from "../fixtures/verdict";
 
 test("shows all three blocks", () => {
-  render(<VerdictScreen verdict={supportDigestVerdict} onBuild={() => {}} />);
+  render(<VerdictScreen verdict={supportDigestVerdict} onReview={() => {}} />);
   expect(screen.getByText("I CAN DO THIS")).toBeInTheDocument();
   expect(screen.getByText("I'D GET THIS WRONG")).toBeInTheDocument();
   expect(screen.getByText("I'D NEED ACCESS TO")).toBeInTheDocument();
@@ -14,9 +14,9 @@ test("the fixture verdict names at least one limitation", () => {
   expect(supportDigestVerdict.cannot.length).toBeGreaterThan(0);
 });
 
-test("build button reports the user's intent", async () => {
-  const onBuild = vi.fn();
-  render(<VerdictScreen verdict={supportDigestVerdict} onBuild={onBuild} />);
-  await userEvent.click(screen.getByRole("button", { name: "Build this" }));
-  expect(onBuild).toHaveBeenCalledOnce();
+test("the review button reports the user's intent", async () => {
+  const onReview = vi.fn();
+  render(<VerdictScreen verdict={supportDigestVerdict} onReview={onReview} />);
+  await userEvent.click(screen.getByRole("button", { name: "Review what it can touch" }));
+  expect(onReview).toHaveBeenCalledOnce();
 });

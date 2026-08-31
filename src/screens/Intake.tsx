@@ -13,7 +13,7 @@ export default function Intake({ onSubmit }: { onSubmit: (text: string) => void 
   return (
     <div className="screen screen-narrow">
       <div className="intake-head">
-        <div className="intake-moon">🌙</div>
+        <div className="intake-moon">🧝</div>
         <h1>What do you want taken care of?</h1>
         <p className="dim">Describe it how you'd describe it to a coworker.</p>
       </div>
