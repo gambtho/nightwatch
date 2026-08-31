@@ -57,3 +57,15 @@ func TestNewMasterRejectsBadKey(t *testing.T) {
 	_, err := vault.NewMaster([]byte("short"))
 	require.Error(t, err)
 }
+
+func TestDecryptSecretRejectsTruncatedNonce(t *testing.T) {
+	m := testMaster(t)
+	kek, err := m.NewTenantKEK()
+	require.NoError(t, err)
+
+	dek, ct, nonce, err := m.EncryptSecret(kek, "sk-ant-secret")
+	require.NoError(t, err)
+
+	_, err = m.DecryptSecret(kek, dek, ct, nonce[:len(nonce)-1])
+	require.Error(t, err)
+}

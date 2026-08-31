@@ -169,8 +169,12 @@ func serve(ctx context.Context) error {
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 		// WriteTimeout deliberately zero: streamed LLM responses run for
 		// minutes and a server-wide write deadline would sever them.
+		// ReadTimeout bounds slow-body clients (LLM prompts are modest);
+		// IdleTimeout reclaims idle keep-alive connections.
 	}
 	return srv.ListenAndServe()
 }

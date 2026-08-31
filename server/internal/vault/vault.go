@@ -108,6 +108,9 @@ func (m *Master) DecryptSecret(wrappedKEK, dekWrapped, ciphertext, nonce []byte)
 	if err != nil {
 		return "", err
 	}
+	if len(nonce) != gcm.NonceSize() {
+		return "", fmt.Errorf("vault: invalid nonce length %d", len(nonce))
+	}
 	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return "", fmt.Errorf("vault: decrypt: %w", err)
