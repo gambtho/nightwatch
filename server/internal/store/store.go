@@ -3,9 +3,11 @@
 package store
 
 import (
+	"context"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,6 +23,13 @@ var ErrActiveRun = errors.New("store: a run is already active for this workflow"
 
 type Store struct {
 	pool *pgxpool.Pool
+}
+
+// querier is the subset of pgx shared by the pool and a transaction, so
+// row-level operations can run standalone or inside a larger transaction.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
