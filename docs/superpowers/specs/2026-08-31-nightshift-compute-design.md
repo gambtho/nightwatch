@@ -10,9 +10,9 @@ turns the Plan 2 proxy from advisory into the guarantee, harness
 containerization, and the deployment shape.
 **Primary input:** [`../../research/2026-08-30-substrate-verification.md`](../../research/2026-08-30-substrate-verification.md) —
 where the spike refuted or changed a platform-spec claim, this design follows
-the spike. The corrections the spike flagged are applied to the platform spec
-in the same change as this document; see
-[Platform-spec corrections](#platform-spec-corrections-applied-with-this-spec).
+the spike. The corrections the spike flagged are **listed, not applied,
+here** — a separate docs-only PR owns editing the platform spec; see
+[Platform-spec corrections](#platform-spec-corrections-needed).
 
 ## What this delivers
 
@@ -417,10 +417,13 @@ nightshift-runners   Jobs-backend namespace (empty on Substrate deployments)
   record; then the conformance suite above, plus (Substrate) resume-with-
   state across an explicit suspend, and the cross-actor state-leak probe.
 
-## Platform-spec corrections (applied with this spec)
+## Platform-spec corrections (needed)
 
-The spike's owed correction pass is taken here; the platform spec is edited
-in the same change:
+Listed for cross-checking; **not applied here**. A separate docs-only PR owns
+folding the spike's corrections into the platform spec. Items 1–6 restate the
+spike's flagged list; item 7 is new from this design and is **not** in the
+spike's list — the docs PR should pick it up (or the platform spec keeps a
+pointer here):
 
 1. Control-plane surface: four RPCs → full CRUD (32 RPCs + `ActorIdentity`);
    keep "no exec/attach", add "no watch/streaming — observation is
