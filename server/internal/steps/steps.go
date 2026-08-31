@@ -39,8 +39,8 @@ var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // Parse validates raw as a v1 steps document. Fail closed: anything
 // unrecognized is an error — in particular the old execution fields
-// (system_prompt, provider, model, max_tokens) are unknown fields here
-// and are rejected, not ignored.
+// (system_prompt, kickoff, provider, model, max_tokens) are unknown
+// fields here and are rejected, not ignored.
 func Parse(raw []byte) (Doc, error) {
 	var d Doc
 	dec := json.NewDecoder(bytes.NewReader(raw))
