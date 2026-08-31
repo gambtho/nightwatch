@@ -38,7 +38,7 @@ finishes, or a cross-cutting decision is taken.
 | Packaging shell (`app/`)         | **Merged as record** (#42, Wails v3 spike) — lane PAUSED by direction change 2; `app/` gets a paused banner |
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
-| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49 @ 9c9d970; 6 review findings fixed, re-verified on kind) — lane holds for K2 launch      |
+| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49); **K2 GO** (user, 2026-08-31) — K1 session exited, fresh-session prompt below           |
 | Lean-in cleanup                  | **COMPLETE AND FULLY MERGED** (#51, #52, #54, #55, #56) — the repo is onboarding-ready                     |
 | P2 — Connectors main road        | **OWNS `server/`. PR A MERGED (#57)**; phase B (key-verify + spend_entry ledger, migration 00013) is GO    |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
@@ -758,6 +758,43 @@ five never take it. Each prompt is self-contained.
 > PR to `main`; CI (PR #41's workflows) must pass once #41 is merged.
 > Report your naming and structure decisions to the coordinating session
 > for the board.
+
+### Prompt — K8s agent track, phase K2 (LLM-enhanced agent)
+
+> You own K2 of the K8s agent track — the project's current focus. K1 is
+> merged (`tomtectl/` on `main`: agent-as-code YAML, CLI, hello-world
+> runtime verified on kind). Read the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` (direction
+> change 2, the K1-delivered decisions, the five-preset decision, and the
+> phase-A fail-closed guidance) and `tomtectl/`'s code and README before
+> writing anything. Linked worktree; PR to `main` (the tomtectl CI
+> workflow is live); no pre-stacking; you take no `server/` lock (P2
+> holds it) and touch only `tomtectl/`.
+>
+> Scope — the leadership arc's "expand to leverage llm to enhance the
+> agent":
+> 1. **The `llm:` block comes alive** in agent.yaml:
+>    `{kind, base_url, secretRef}` using the vocabulary K1 aligned
+>    (anthropic | openai_compatible; explicit local stays keyless). The
+>    key arrives as a **Kubernetes Secret reference** — tomtectl gains
+>    the minimal command or flag to create/point at that Secret; the key
+>    never appears in the YAML, a ConfigMap, or logs.
+> 2. **A real runtime image replaces the busybox placeholder on the SAME
+>    mount contract**: minimal Go runtime that reads the mounted
+>    agent.yaml, sends its steps/task to the configured endpoint on the
+>    schedule, and writes results to logs (`tomtectl logs` shows them).
+>    Still deliberately bare — no proxy, no permits; governance mounts at
+>    K3 (standing decision; flag anything pushing you toward governance
+>    early to the coordinating session instead of adding it).
+> 3. Non-empty `llm:` stops being rejected; non-empty `connectors:` still
+>    rejects.
+> 4. **Verification on a real kind cluster, end to end**: an in-cluster
+>    stub OpenAI-compatible server for the automated proof, plus the
+>    documented (ideally hand-verified) real-endpoint path with a pasted
+>    key. Fail CLOSED on unreadable or error responses — well-formed
+>    positive or fail is board-recorded standing guidance.
+>
+> Report decisions to the coordinating session for the board.
 
 ## Pivot spec MERGED (PR #37); name FINAL
 
