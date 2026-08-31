@@ -12,16 +12,16 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/endpoint"
 	"github.com/gambtho/tomte/server/internal/permit"
 )
 
 type RunIdentity struct{ TenantID, RunID uuid.UUID }
 
-// Secret is an injectable credential. MarkBroken, when set (oauth-kind
+// Secret is an injectable credential. MarkBroken, when set (stored
 // connections), demotes the backing credential to needs_reauth after an
-// upstream 401 — epoch-CAS inside, so a 401 earned by a stale token
-// cannot demote a connection already refreshed to a newer one; it
-// reports whether the demotion applied.
+// upstream 401 — a pasted token revoked at the provider; it reports
+// whether the demotion applied (false when already demoted).
 type Secret struct {
 	Value      string
 	MarkBroken func(ctx context.Context) (bool, error)
@@ -52,6 +52,13 @@ type CredentialSource interface {
 
 type EventSink interface {
 	AppendEvent(ctx context.Context, tenantID, runID uuid.UUID, typ string, payload map[string]any) error
+}
+
+// EndpointSource resolves the tenant's configured LLM endpoint. nil (both
+// the source and its result) means legacy env mode: the static Providers
+// route table alone. A lookup error fails the request closed.
+type EndpointSource interface {
+	EndpointFor(ctx context.Context, tenantID uuid.UUID) (*endpoint.Endpoint, error)
 }
 
 type Hook interface {
@@ -112,8 +119,12 @@ type Deps struct {
 	Permits     PermitSource
 	Credentials CredentialSource
 	Events      EventSink
-	Hook        Hook
-	Config      Config
+	// Endpoints, when set, overrides the static route table with the
+	// tenant's configured endpoint (matching provider name); nil keeps
+	// legacy env mode.
+	Endpoints EndpointSource
+	Hook      Hook
+	Config    Config
 	// Catalog serves the connector routes. Like permit, it is
 	// declarative data with no reach of its own — the proxy stays
 	// standalone-capable. Nil disables the connector routes (404).

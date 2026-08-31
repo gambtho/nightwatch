@@ -1,16 +1,19 @@
 package llm
 
 // pricePer1M is USD cents per 1,000,000 tokens, as fixed-point integers.
-// 75 means $0.75. Azure AI Foundry is omitted — that provider is BYOK and
-// the customer is billed by Azure directly, so we do not compute cost.
+// 75 means $0.75. This bundled table covers the fixed-base presets only;
+// azure and custom endpoints are priced by user-entered rows
+// (store.ModelPrice), resolved at approval time.
 type pricePer1M struct{ in, out int }
 
 // priceTable is a minimal lookup for public-list pricing as of 2026-Q1.
 // Unknown (provider, model) combinations return 0 rather than erroring —
 // a run must not fail because we haven't catalogued a new model. Operators
 // can PR new rows; stale rows are harmless (they just under/over-report).
-// Workflow validation makes unknown (provider, model) pairs unreachable for
-// approved workflows, so CostCents returning 0 for an unknown model is safe.
+// On the legacy env-mode path, approval fails closed on unpriced pairs, so
+// CostCents returning 0 for an unknown model is safe there; endpoint-era
+// approvals record their own prices in the compiled doc and never reach
+// this table at run time.
 var priceTable = map[string]map[string]pricePer1M{
 	"openai": {
 		"gpt-4o-mini": {in: 15, out: 60},
@@ -58,15 +61,21 @@ func CostCents(provider, model string, u Usage) int {
 	return int(numerator / 1_000_000)
 }
 
-// Priced reports whether a (provider, model) pair has a price row. The
-// workflow API fails closed on unpriced pairs at approval time, which is
-// what makes spend caps meaningful — CostCents returning 0 for an unknown
-// model must be unreachable for approved workflows, not a loophole. Since
-// decision 9 the pair is the platform-selected run model, so a failure
-// here is an operator misconfiguration, not user input.
+// Priced reports whether a (provider, model) pair has a bundled price
+// row — the legacy env-mode approval gate (endpoint-era approvals resolve
+// prices through resolvePrices instead: bundled row, then user-entered
+// row, then a 400 that asks for one).
 func Priced(provider, model string) bool {
 	_, ok := priceTable[provider][model]
 	return ok
+}
+
+// Price returns the bundled table row for a (provider, model) pair — the
+// preset path of the reworked gate; azure/custom endpoints use
+// user-entered rows instead (store.ModelPrice).
+func Price(provider, model string) (inCentsPer1M, outCentsPer1M int, ok bool) {
+	p, ok := priceTable[provider][model]
+	return p.in, p.out, ok
 }
 
 // Token bounds for the compiled max_tokens: the default when no spend cap
@@ -84,14 +93,18 @@ const (
 // must have checked Priced first; an unpriced pair falls back to the
 // default rather than an arbitrary value.
 func MaxTokensForBudget(provider, model string, perRunCents int) int {
-	if perRunCents <= 0 {
+	p := priceTable[provider][model]
+	return MaxTokensForOutPrice(p.out, perRunCents)
+}
+
+// MaxTokensForOutPrice is the same derivation with the output price
+// supplied directly — the endpoint path, where prices may be user-entered
+// or zero (zero-cost endpoints fall back to the fixed default).
+func MaxTokensForOutPrice(outCentsPer1M, perRunCents int) int {
+	if perRunCents <= 0 || outCentsPer1M <= 0 {
 		return defaultBudgetTokens
 	}
-	p, ok := priceTable[provider][model]
-	if !ok || p.out <= 0 {
-		return defaultBudgetTokens
-	}
-	tokens := int64(perRunCents) * 1_000_000 / int64(p.out)
+	tokens := int64(perRunCents) * 1_000_000 / int64(outCentsPer1M)
 	if tokens > maxBudgetTokens {
 		return maxBudgetTokens
 	}

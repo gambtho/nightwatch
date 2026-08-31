@@ -2,14 +2,12 @@ package llm
 
 import "testing"
 
-func TestNewFactory(t *testing.T) {
-	factory := NewFactory(Config{})
-	for _, name := range []string{"anthropic", "openai", "openrouter"} {
-		if _, err := factory(name); err != nil {
+func TestNewProxyFactory(t *testing.T) {
+	factory := NewProxyFactory("http://127.0.0.1:9999")
+	for _, name := range []string{"anthropic", "openai", "openrouter", "github", "azure", "custom", "local"} {
+		p, err := factory(name)
+		if err != nil || p == nil {
 			t.Fatalf("factory(%q): %v", name, err)
 		}
-	}
-	if _, err := factory("copilot-enterprise"); err == nil {
-		t.Fatal("dropped provider should error")
 	}
 }

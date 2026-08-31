@@ -18,28 +18,22 @@ export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmod
 
 go run ./cmd/tomte migrate
 
-export TOMTE_PUBLIC_BASE_URL=http://localhost:8080
 export TOMTE_RUNNER_KEY=$(openssl rand -base64 32)
 export TOMTE_VAULT_KEY=$(openssl rand -base64 32)
 go run ./cmd/tomte serve
 ```
 
-`TOMTE_PUBLIC_BASE_URL` is the canonical customer-facing origin
-(scheme + host, nothing else). It must be HTTPS — plain `http` is accepted
-for `localhost`/`127.0.0.1`/`::1` only — because it carries magic-link
-tokens, defines the trusted `Origin` for CSRF checks, and anchors
-post-login redirects. Host and proxy headers are never used for any of
-those.
+The app's origin is derived automatically from the bound listener (the
+loopback origin); `TOMTE_PUBLIC_BASE_URL` is an optional override for
+dev topologies like Vite-as-origin (scheme + host, nothing else; HTTPS
+required except loopback hosts). It defines the trusted `Origin` for
+CSRF checks, the session cookie's attributes, and the Host allowlist —
+Host and proxy headers are never used to derive any of those.
 
-Login is an email magic link (`POST /v1/auth/magic-link` →
-`GET /auth/verify` interstitial → consuming `POST /v1/auth/verify`); the
-first verified login mints the tenant. Sessions are opaque DB-backed
-cookies (`__Host-tomte_session`) with a 7-day idle window inside a 30-day
-cap. Magic-link email goes through Postmark when
-`TOMTE_POSTMARK_TOKEN` and `TOMTE_MAIL_FROM` are both set
-(setting exactly one refuses startup); with neither set, the link is
-written to the server log — allowed only for a localhost base URL, so a
-production deployment cannot silently run without mail.
+There is no login surface: one install is one user. The app shell mints
+the session at launch, and "open in browser" exchanges a single-use
+handoff token at `GET /local/handoff`. Sessions are opaque DB-backed
+cookies with a 7-day idle window inside a 30-day cap.
 
 `tomte dev-session` mints a tenant, owner user, and session row for
 local use, printing the cookie. It reuses the tenant an existing email
@@ -58,15 +52,18 @@ durations; `serve` refuses to start unless the deadline strictly exceeds
 the token TTL, since a run whose token has already expired can never
 finalize itself before the reaper would be allowed to sweep it.
 `TOMTE_DEFAULT_MONTHLY_CAP_CENTS` (default `0`, meaning unlimited)
-sets the tenant monthly spend cap in cents.
+sets the default monthly budget in cents — how much Tomte may spend
+from the user's key per month (Tomte meters only what goes through
+Tomte). The user edits it at `PUT /v1/settings/budget`.
 
 ### Scheduler and reaper
 
 `internal/engine.Scheduler` ticks on an interval, looking for workflows
 whose versioned `schedule` artifact (see [`docs/api/v1.md`](../docs/api/v1.md))
-is due. It creates and dispatches a run for the current occurrence only —
-a schedule that was down for a while does not catch up on missed
-occurrences — and admits at most one active run per workflow at a time,
+is due. Its lookback is wake-aware: a persisted heartbeat widens it to
+cover sleep or downtime, so a missed occurrence fires once on wake — the
+latest occurrence only, never a backlog — and it admits at most one
+active run per workflow at a time,
 via a store-level admission index rather than an in-process queue. A tick
 that finds cap-exceeded or already-active workflows simply skips them.
 
@@ -93,7 +90,7 @@ reaper itself can see or prevent.
 ### Metering
 
 `internal/meter.Meter` is wired as the egress proxy's `Hook`: every
-provider call is checked against the tenant's monthly spend cap
+provider call is checked against the user's monthly budget
 (`TOMTE_DEFAULT_MONTHLY_CAP_CENTS`, UTC calendar month) before it is
 allowed to reach the upstream — the cap is enforced at the proxy hook,
 not before a run is admitted.
@@ -105,9 +102,9 @@ run's sole point of egress. The harness carries only its run token (in the
 provider-native auth-header slot the SDK would otherwise put an API key
 in); the proxy verifies that token, resolves the run's approved permit,
 checks the requested provider against the permit's allowlist and against
-one hardcoded (method, path) per provider, then injects the real
-credential — either a tenant's stored connection or the operator's
-platform-default key — and forwards. Every accepted or denied request is
+the endpoint's one allowed (method, path), then injects the real
+credential in the endpoint's native header — the endpoint's stored
+connection, or nothing at all on a local endpoint — and forwards. Every accepted or denied request is
 recorded as a run event. See
 [`docs/superpowers/specs/2026-08-30-nightshift-egress-proxy-design.md`](../docs/superpowers/specs/2026-08-30-nightshift-egress-proxy-design.md)
 for the full design, including this caveat: **on Local compute (today) the
@@ -136,9 +133,8 @@ server/
   internal/store/               hand-written pgx queries; one file per aggregate
   internal/engine/              shared fire path, scheduler, orphaned-run reaper
   internal/schedule/            cron + IANA timezone schedule artifact
-  internal/meter/               tenant monthly spend cap, wired as the proxy Hook
-  internal/httpapi/             public /v1 API: magic-link auth, DB-backed sessions, Origin policy
-  internal/mail/                transactional email seam: Postmark sender + dev log sender
+  internal/meter/               the monthly budget meter, wired as the proxy Hook
+  internal/httpapi/             public /v1 API: DB-backed sessions, local handoff, Origin policy
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)
   internal/llm/                  ported providers + pricing; llmtest/ fake

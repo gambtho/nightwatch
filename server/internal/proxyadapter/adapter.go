@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/sync/singleflight"
 
-	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/endpoint"
 	"github.com/gambtho/tomte/server/internal/permit"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/store"
@@ -27,17 +26,17 @@ type Set struct {
 	Permits     proxy.PermitSource
 	Credentials proxy.CredentialSource
 	Events      proxy.EventSink
+	Endpoints   proxy.EndpointSource
 }
 
-// New wires the adapter set. oauthSvc may be nil in tests that never
-// resolve oauth-kind connections; production passes the real service so
-// injection-time refresh works.
-func New(s *store.Store, signer *token.Signer, master *vault.Master, platform map[string]string, oauthSvc *oauth.Service) Set {
+// New wires the adapter set.
+func New(s *store.Store, signer *token.Signer, master *vault.Master, platform map[string]string) Set {
 	return Set{
 		Auth:        &auth{store: s, signer: signer},
 		Permits:     &permits{store: s},
-		Credentials: &credentials{store: s, master: master, platform: platform, oauth: oauthSvc},
+		Credentials: &credentials{store: s, master: master, platform: platform},
 		Events:      &events{store: s},
+		Endpoints:   &endpoints{store: s},
 	}
 }
 
@@ -85,17 +84,7 @@ type credentials struct {
 	store    *store.Store
 	master   *vault.Master
 	platform map[string]string
-	oauth    *oauth.Service
-	// refreshes collapses concurrent refreshes of one connection into a
-	// single in-process flight; the transaction-scoped advisory lock in
-	// WithConnectionLock serializes across processes.
-	refreshes singleflight.Group
 }
-
-// refreshSkew: a token expiring within this window is refreshed before
-// use. A longer upstream call can still outlive a token injected just
-// outside the skew — the connector 401 retry is the backstop there.
-const refreshSkew = 60 * time.Second
 
 func (c *credentials) Credential(ctx context.Context, tenantID uuid.UUID, name, provider string) (proxy.Secret, error) {
 	conn, err := c.store.GetConnection(ctx, tenantID, provider, name)
@@ -123,142 +112,25 @@ func (c *credentials) Credential(ctx context.Context, tenantID uuid.UUID, name, 
 	}
 }
 
-// resolve decrypts a connection into an injectable secret, refreshing
-// an oauth bundle whose access token is inside the expiry skew.
+// resolve decrypts a connection into an injectable secret. All kinds are
+// static now (llm_api_key, api_key) — there is nothing to refresh; a
+// credential revoked upstream surfaces as a 401, whose MarkBroken hook
+// demotes the row to needs_reauth until the user re-pastes.
 func (c *credentials) resolve(ctx context.Context, tenantID uuid.UUID, provider, name string, conn store.Connection) (proxy.Secret, error) {
-	if conn.Kind != "oauth" {
-		value, err := c.decrypt(ctx, tenantID, conn)
-		if err != nil {
-			return proxy.Secret{}, err
-		}
-		return proxy.Secret{Value: value}, nil
-	}
 	if conn.Status != "ok" {
 		return proxy.Secret{}, fmt.Errorf("proxyadapter: connection %s/%s needs re-authorization", provider, name)
 	}
-	raw, err := c.decrypt(ctx, tenantID, conn)
+	value, err := c.decrypt(ctx, tenantID, conn)
 	if err != nil {
 		return proxy.Secret{}, err
 	}
-	var b oauth.Bundle
-	if err := json.Unmarshal([]byte(raw), &b); err != nil {
-		return proxy.Secret{}, fmt.Errorf("proxyadapter: oauth bundle: %w", err)
-	}
-	if !c.needsRefresh(b) {
-		return c.secretFor(tenantID, provider, name, conn, b), nil
-	}
-	refreshed, err := c.refresh(ctx, tenantID, provider, name)
-	if err != nil {
-		return proxy.Secret{}, err
-	}
-	return refreshed, nil
-}
-
-func (c *credentials) needsRefresh(b oauth.Bundle) bool {
-	return !b.Expiry.IsZero() && time.Until(b.Expiry) < refreshSkew
-}
-
-// refresh runs the singleflight + advisory-lock refresh. The expiry
-// decision made before the lock is discarded: the holder re-reads the
-// connection inside the transaction and re-checks — a winner's fresh
-// bundle is used as-is; a row gone or demoted mid-flight fails the tool
-// call rather than retrying a possibly-rotated refresh token.
-func (c *credentials) refresh(ctx context.Context, tenantID uuid.UUID, provider, name string) (proxy.Secret, error) {
-	key := tenantID.String() + "/" + provider + "/" + name
-	v, err, _ := c.refreshes.Do(key, func() (any, error) {
-		// The flight serves every waiter, so it must not die with the
-		// first caller's context; detach it and bound it ourselves.
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		var out proxy.Secret
-		final, err := c.store.WithConnectionLock(ctx, tenantID, provider, name,
-			func(cur store.Connection) (*store.BundleUpdate, error) {
-				if cur.Status != "ok" {
-					return nil, fmt.Errorf("proxyadapter: connection %s/%s needs re-authorization", provider, name)
-				}
-				raw, err := c.decrypt(ctx, tenantID, cur)
-				if err != nil {
-					return nil, err
-				}
-				var b oauth.Bundle
-				if err := json.Unmarshal([]byte(raw), &b); err != nil {
-					return nil, fmt.Errorf("proxyadapter: oauth bundle: %w", err)
-				}
-				if !c.needsRefresh(b) {
-					// A concurrent winner already refreshed; use the
-					// stored bundle and refresh nothing.
-					return nil, nil
-				}
-				if c.oauth == nil {
-					return nil, errors.New("proxyadapter: oauth refresh unavailable")
-				}
-				nb, err := c.oauth.Refresh(ctx, provider, b)
-				if err != nil {
-					// Demote via epoch CAS OUTSIDE this transaction? No:
-					// the CAS targets the epoch this stale bundle was
-					// read under, and we hold the lock, so a direct
-					// demotion here cannot race a refresh. Mark and
-					// surface the failure as this tool call's error.
-					if applied, cerr := c.store.MarkConnectionNeedsReauth(ctx, tenantID, cur.ID, cur.Epoch); cerr != nil {
-						slog.Error("proxyadapter: mark needs_reauth", "err", cerr)
-					} else if applied {
-						slog.Warn("proxyadapter: connection demoted to needs_reauth", "provider", provider, "name", name)
-					}
-					return nil, fmt.Errorf("proxyadapter: refresh: %w", err)
-				}
-				bundleJSON, err := json.Marshal(nb)
-				if err != nil {
-					return nil, err
-				}
-				wrappedKEK, kekVersion, err := c.store.TenantKEK(ctx, tenantID)
-				if err != nil {
-					return nil, err
-				}
-				dek, ct, nonce, err := c.master.EncryptSecret(wrappedKEK, string(bundleJSON))
-				if err != nil {
-					return nil, err
-				}
-				meta, err := json.Marshal(oauth.Metadata{Scopes: nb.Scopes})
-				if err != nil {
-					return nil, err
-				}
-				return &store.BundleUpdate{
-					Kind: "oauth", DEKWrapped: dek, Ciphertext: ct, Nonce: nonce,
-					KEKVersion: kekVersion, Metadata: meta,
-				}, nil
-			})
-		if err != nil {
-			return proxy.Secret{}, err
-		}
-		raw, err := c.decrypt(ctx, tenantID, final)
-		if err != nil {
-			return proxy.Secret{}, err
-		}
-		var b oauth.Bundle
-		if err := json.Unmarshal([]byte(raw), &b); err != nil {
-			return proxy.Secret{}, err
-		}
-		out = c.secretFor(tenantID, provider, name, final, b)
-		return out, nil
-	})
-	if err != nil {
-		return proxy.Secret{}, err
-	}
-	return v.(proxy.Secret), nil
-}
-
-// secretFor builds the injectable secret with the 401-demotion hook:
-// MarkBroken CAS-demotes on the epoch this token was issued under, so a
-// stale 401 cannot demote a connection refreshed in the meantime.
-func (c *credentials) secretFor(tenantID uuid.UUID, provider, name string, conn store.Connection, b oauth.Bundle) proxy.Secret {
-	epoch := conn.Epoch
 	id := conn.ID
 	return proxy.Secret{
-		Value: b.AccessToken,
+		Value: value,
 		MarkBroken: func(ctx context.Context) (bool, error) {
-			return c.store.MarkConnectionNeedsReauth(ctx, tenantID, id, epoch)
+			return c.store.MarkConnectionNeedsReauth(ctx, tenantID, id)
 		},
-	}
+	}, nil
 }
 
 func (c *credentials) decrypt(ctx context.Context, tenantID uuid.UUID, conn store.Connection) (string, error) {
@@ -269,6 +141,30 @@ func (c *credentials) decrypt(ctx context.Context, tenantID uuid.UUID, conn stor
 		return "", err
 	}
 	return c.master.DecryptSecret(wrapped, conn.DEKWrapped, conn.Ciphertext, conn.Nonce)
+}
+
+type endpoints struct {
+	store *store.Store
+}
+
+// EndpointFor maps the stored record to the proxy's endpoint type; no
+// configured endpoint (a dev deployment in legacy env mode) is (nil, nil).
+func (e *endpoints) EndpointFor(ctx context.Context, tenantID uuid.UUID) (*endpoint.Endpoint, error) {
+	le, err := e.store.GetLLMEndpoint(ctx, tenantID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	conn := ""
+	if le.ConnectionName != nil {
+		conn = *le.ConnectionName
+	}
+	return &endpoint.Endpoint{
+		Preset: le.Preset, Kind: le.Kind, BaseURL: le.BaseURL,
+		Connection: conn, RunModel: le.RunModel, ZeroCost: le.ZeroCost,
+	}, nil
 }
 
 type events struct {

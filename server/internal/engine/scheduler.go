@@ -69,14 +69,38 @@ func (s *Scheduler) Run(ctx context.Context) {
 // Tick is one create+dispatch pass. Create and dispatch are separate so a
 // crash between them loses nothing: the next tick's dispatch step picks up
 // created-but-undispatched rows (with a fresh token — see Redispatch).
+//
+// The lookback is wake-aware ("The sleeping machine"): the persisted
+// last-completed-tick widens it to cover a sleep or downtime gap plus one
+// interval of margin, so a 3 AM occurrence still fires when the machine
+// wakes at 7:42 — once, because mostRecentDue returns only the latest
+// occurrence and the fire-time index keeps even that idempotent. The
+// heartbeat advances only after a clean create pass: advancing it past a
+// failed pass would put the missed occurrence permanently outside the
+// next tick's lookback.
 func (s *Scheduler) Tick(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("scheduler: tick panic", "panic", r)
 		}
 	}()
-	s.createDue(ctx)
+	now := s.now()
+	lookback := s.window()
+	if last, err := s.Store.GetSchedulerHeartbeat(ctx); err != nil {
+		slog.Error("scheduler: heartbeat load", "err", err) // fall back to the default window
+	} else if last != nil {
+		if gap := now.Sub(*last) + s.interval(); gap > lookback {
+			lookback = gap
+		}
+	}
+	ok := s.createDue(ctx, now, lookback)
 	s.dispatchPending(ctx)
+	if !ok {
+		return
+	}
+	if err := s.Store.SetSchedulerHeartbeat(ctx, now); err != nil {
+		slog.Error("scheduler: heartbeat save", "err", err)
+	}
 }
 
 // mostRecentDue returns the latest occurrence <= now, walking Next from
@@ -104,13 +128,17 @@ func mostRecentDue(sch *schedule.Schedule, now time.Time, window time.Duration) 
 	return due, found
 }
 
-func (s *Scheduler) createDue(ctx context.Context) {
+// createDue reports whether the pass completed cleanly — deliberate skips
+// (already fired, active run, over cap, corrupt schedule) count as clean;
+// an infrastructure failure (list error, a fire that errored) does not,
+// and the caller must then keep the old heartbeat.
+func (s *Scheduler) createDue(ctx context.Context, now time.Time, lookback time.Duration) bool {
 	workflows, err := s.Store.ListSchedulableWorkflows(ctx)
 	if err != nil {
 		slog.Error("scheduler: list schedulable", "err", err)
-		return
+		return false
 	}
-	now := s.now()
+	clean := true
 	for _, w := range workflows {
 		sch, err := schedule.Parse(w.Schedule)
 		if err != nil {
@@ -118,14 +146,22 @@ func (s *Scheduler) createDue(ctx context.Context) {
 			slog.Error("scheduler: unparseable schedule", "workflow", w.WorkflowID, "err", err)
 			continue
 		}
-		due, ok := mostRecentDue(sch, now, s.window())
+		due, ok := mostRecentDue(sch, now, lookback)
 		if !ok {
 			continue
 		}
 		if s.Caps != nil {
 			over, err := s.Caps.OverCap(ctx, w.TenantID)
-			if err != nil || over {
-				slog.Info("scheduler: skip (cap)", "tenant", w.TenantID, "workflow", w.WorkflowID, "err", err)
+			if err != nil {
+				// Infrastructure failure, not a deliberate skip: the pass is
+				// not clean, or the heartbeat would advance past an
+				// occurrence this workflow is still owed.
+				slog.Error("scheduler: cap check", "tenant", w.TenantID, "workflow", w.WorkflowID, "err", err)
+				clean = false
+				continue
+			}
+			if over {
+				slog.Info("scheduler: skip (over budget)", "tenant", w.TenantID, "workflow", w.WorkflowID)
 				continue
 			}
 		}
@@ -136,8 +172,10 @@ func (s *Scheduler) createDue(ctx context.Context) {
 			// Occurrence already exists, or a run is active: both are skips.
 		default:
 			slog.Error("scheduler: fire", "workflow", w.WorkflowID, "err", err)
+			clean = false
 		}
 	}
+	return clean
 }
 
 func (s *Scheduler) dispatchPending(ctx context.Context) {

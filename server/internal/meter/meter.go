@@ -1,5 +1,6 @@
 // Package meter enforces spend caps. It implements proxy.Hook, so the
-// monthly tenant cap is checked before every model request at the egress
+// monthly budget — the user's own cap on what Tomte may spend from
+// their key per month — is checked before every model request at the egress
 // proxy — the enforcement point the platform spec mandates. Fail closed:
 // if spend cannot be read, the request is denied.
 package meter
@@ -18,7 +19,7 @@ import (
 
 type Meter struct {
 	Store      *store.Store
-	DefaultCap int // cents per calendar month (UTC); 0 = unlimited
+	DefaultCap int // budget cents per calendar month (UTC); 0 = unlimited
 	Now        func() time.Time
 }
 
@@ -34,7 +35,7 @@ func MonthStartUTC(now time.Time) time.Time {
 	return time.Date(u.Year(), u.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
-// CapCents returns the tenant's monthly cap: its own override when set,
+// CapCents returns the monthly budget: the user's setting when set,
 // else the platform default. 0 means unlimited.
 func (m *Meter) CapCents(ctx context.Context, tenantID uuid.UUID) (int, error) {
 	tn, err := m.Store.GetTenant(ctx, tenantID)
@@ -74,7 +75,7 @@ func (m *Meter) Before(ctx context.Context, req proxy.HookRequest) error {
 		return proxy.HookError{Status: http.StatusForbidden, Msg: "metering unavailable"}
 	}
 	if over {
-		return proxy.HookError{Status: http.StatusTooManyRequests, Msg: "monthly spend cap reached"}
+		return proxy.HookError{Status: http.StatusTooManyRequests, Msg: "monthly budget reached"}
 	}
 	return nil
 }

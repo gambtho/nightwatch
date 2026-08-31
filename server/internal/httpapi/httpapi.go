@@ -11,8 +11,6 @@ import (
 
 	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/engine"
-	"github.com/gambtho/tomte/server/internal/mail"
-	"github.com/gambtho/tomte/server/internal/oauth"
 	"github.com/gambtho/tomte/server/internal/store"
 	"github.com/gambtho/tomte/server/internal/vault"
 )
@@ -21,26 +19,22 @@ type Deps struct {
 	Store  *store.Store
 	Engine *engine.Engine
 	Vault  *vault.Master
-	// PublicBaseURL is the canonical customer-facing origin
-	// (TOMTE_PUBLIC_BASE_URL): the single source for magic-link
-	// URLs, the Origin comparison, and redirect joining. Never inferred
-	// from Host or proxy headers.
+	// PublicBaseURL is the app's canonical origin — normally the
+	// auto-configured loopback origin derived from the bound listener,
+	// overridable via TOMTE_PUBLIC_BASE_URL (dev topologies like
+	// Vite-as-origin). Single source for the Origin comparison and
+	// redirect joining; never inferred from Host or proxy headers.
 	PublicBaseURL *url.URL
-	Mailer        mail.Sender
-	// RunProvider/RunModel are the platform-selected execution model
-	// (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) baked into the
-	// compiled document at approval time — decision 9 took provider and
-	// model out of the user's hands. Empty values fall back to the
-	// defaults below.
+	// RunProvider/RunModel (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) are the
+	// legacy env-mode execution pair, used only while no endpoint record
+	// is configured — the configured endpoint otherwise decides provider
+	// and model (decision 9 still holds: never the user, per approval).
+	// Empty values fall back to the defaults below.
 	RunProvider string
 	RunModel    string
 	// Catalog is the validated curated connector catalog. Version writes
 	// check permit connections against it; GET /v1/catalog serves it.
 	Catalog *catalog.Catalog
-	// OAuth + StateSigner drive the platform-app connect flow; nil
-	// disables the oauth routes (500 with a clear error).
-	OAuth       *oauth.Service
-	StateSigner *oauth.Signer
 }
 
 // Platform run-model defaults, used when the env leaves the choice to us:
@@ -75,10 +69,8 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	auth := func(h http.HandlerFunc) http.Handler {
 		return RequireSession(d.Store, h)
 	}
-	a := &authHandlers{d: d, ips: newIPLimiter(ipLimitMax, ipLimitWindow)}
-	mux.Handle("POST /v1/auth/magic-link", mut(http.HandlerFunc(a.magicLink)))
-	mux.Handle("GET /auth/verify", http.HandlerFunc(a.verifyPage))
-	mux.Handle("POST /v1/auth/verify", mut(http.HandlerFunc(a.verify)))
+	a := &authHandlers{d: d}
+	mux.Handle("GET /local/handoff", http.HandlerFunc(d.localHandoff))
 	mux.Handle("POST /v1/auth/logout", mut(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /v1/me", auth(a.me))
 	mux.Handle("POST /v1/workflows", mut(auth(d.createWorkflow)))
@@ -91,8 +83,12 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
 	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
 	mux.Handle("GET /v1/catalog", auth(d.getCatalog))
-	mux.Handle("POST /v1/connections/oauth/{connector}/start", mut(auth(d.oauthStart)))
-	mux.Handle("GET "+oauthCallbackPath, http.HandlerFunc(d.oauthCallback))
+	mux.Handle("GET /v1/settings/endpoint", auth(d.getEndpoint))
+	mux.Handle("PUT /v1/settings/endpoint", mut(auth(d.putEndpoint)))
+	mux.Handle("GET /v1/settings/prices", auth(d.listPrices))
+	mux.Handle("PUT /v1/settings/prices", mut(auth(d.putPrice)))
+	mux.Handle("GET /v1/settings/budget", auth(d.getBudget))
+	mux.Handle("PUT /v1/settings/budget", mut(auth(d.putBudget)))
 	mux.Handle("PUT /v1/connections/{name}", mut(auth(d.putConnection)))
 	mux.Handle("GET /v1/connections", auth(d.listConnections))
 	mux.Handle("DELETE /v1/connections/{name}", mut(auth(d.deleteConnection)))

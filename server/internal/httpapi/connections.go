@@ -9,27 +9,20 @@ import (
 	"github.com/gambtho/tomte/server/internal/store"
 )
 
-// connectionJSON deliberately has no field that could carry the secret;
-// metadata is the vetted non-secret face (granted scopes).
+// connectionJSON deliberately has no field that could carry the secret.
 type connectionJSON struct {
-	Name       string          `json:"name"`
-	Kind       string          `json:"kind"`
-	Provider   string          `json:"provider"`
-	Status     string          `json:"status"`
-	Metadata   json.RawMessage `json:"metadata,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	LastUsedAt *time.Time      `json:"last_used_at,omitempty"`
+	Name       string     `json:"name"`
+	Kind       string     `json:"kind"`
+	Provider   string     `json:"provider"`
+	Status     string     `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 func toConnectionJSON(c store.Connection) connectionJSON {
-	var meta json.RawMessage
-	if len(c.Metadata) > 0 && string(c.Metadata) != "{}" {
-		meta = c.Metadata
-	}
 	return connectionJSON{
-		Name: c.Name, Kind: c.Kind, Provider: c.Provider,
-		Status: c.Status, Metadata: meta,
+		Name: c.Name, Kind: c.Kind, Provider: c.Provider, Status: c.Status,
 		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, LastUsedAt: c.LastUsedAt,
 	}
 }
@@ -56,12 +49,11 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A PUT stores llm_api_key material; silently flipping an existing
-	// oauth connection's kind would destroy its bundle outside the
-	// refresh lock. Rotating an oauth credential is a re-consent (or a
-	// delete + reconnect), never a PUT.
+	// connector credential's kind would repurpose its secret. Replacing a
+	// connector credential is a delete + re-paste, never this PUT.
 	if existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name); gerr == nil && existing.Kind != "llm_api_key" {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "connection exists with kind " + existing.Kind + " — delete it first or re-connect via oauth",
+			"error": "connection exists with kind " + existing.Kind + " — delete it first",
 		})
 		return
 	}
@@ -106,14 +98,11 @@ func (d Deps) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider query parameter required"})
 		return
 	}
-	// Delete under the refresh advisory lock; revoke provider-side
-	// best-effort after the row is gone (in-flight runs lose the
-	// credential on their next request either way).
-	deleted, err := d.Store.DeleteConnectionLocked(r.Context(), claims.TenantID, provider, name)
-	if err != nil {
+	// In-flight runs lose the credential on their next request; nothing
+	// provider-side to revoke for pasted tokens.
+	if err := d.Store.DeleteConnection(r.Context(), claims.TenantID, provider, name); err != nil {
 		writeErr(w, err)
 		return
 	}
-	d.revokeOAuth(r, deleted)
 	w.WriteHeader(http.StatusNoContent)
 }

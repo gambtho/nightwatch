@@ -23,7 +23,7 @@ func TestGetCatalog(t *testing.T) {
 	resp, out := e.do(t, "GET", "/v1/catalog", nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	connectors := out["connectors"].([]any)
-	require.Len(t, connectors, 2)
+	require.Len(t, connectors, 1)
 
 	byID := map[string]map[string]any{}
 	for _, c := range connectors {
@@ -58,7 +58,7 @@ func TestGetCatalogConnectedFlag(t *testing.T) {
 	_, out := e.do(t, "GET", "/v1/catalog", nil)
 	for _, c := range out["connectors"].([]any) {
 		cm := c.(map[string]any)
-		want := cm["id"] == "slack" // Google Calendar stays unconnected.
+		want := cm["id"] == "slack"
 		require.Equal(t, want, cm["connected"], cm["id"])
 	}
 }

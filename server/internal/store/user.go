@@ -15,7 +15,7 @@ type User struct {
 }
 
 // NormalizeEmail is the one canonical email representation: every boundary
-// that accepts an email (magic-link request, UpsertUser, dev-session)
+// that accepts an email (UpsertUser, UserByEmail, dev-session)
 // applies it before touching the store, so lookup, conflict target, and
 // the global unique index all agree.
 func NormalizeEmail(email string) string {

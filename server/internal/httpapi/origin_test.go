@@ -53,7 +53,7 @@ func TestOriginPolicySkipsReadOnlyRoutes(t *testing.T) {
 
 func TestOriginPolicyOnAuthRoutes(t *testing.T) {
 	e := newEnv(t)
-	req, err := http.NewRequest("POST", e.ts.URL+"/v1/auth/magic-link", nil)
+	req, err := http.NewRequest("POST", e.ts.URL+"/v1/auth/logout", nil)
 	require.NoError(t, err)
 	req.Header.Set("Origin", "https://evil.test")
 	resp, err := http.DefaultClient.Do(req)

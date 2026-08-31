@@ -8,9 +8,13 @@ import (
 )
 
 type Tenant struct {
-	ID              uuid.UUID
-	Name            string
-	CreatedAt       time.Time
+	ID        uuid.UUID
+	Name      string
+	CreatedAt time.Time
+	// MonthlyCapCents is the user's local budget: how much Tomte may
+	// spend from their key per month. Same enforcement as ever (meter
+	// pre-call check, scheduler skip); Tomte meters only what goes
+	// through Tomte. nil = the serve-wide default.
 	MonthlyCapCents *int
 }
 

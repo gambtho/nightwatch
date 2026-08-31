@@ -7,12 +7,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"net/http/httptest"
-	"net/url"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,8 +24,6 @@ import (
 	"github.com/gambtho/tomte/server/internal/internalapi"
 	"github.com/gambtho/tomte/server/internal/llm"
 	"github.com/gambtho/tomte/server/internal/llm/llmtest"
-	"github.com/gambtho/tomte/server/internal/mail/mailtest"
-	"github.com/gambtho/tomte/server/internal/oauth"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/proxyadapter"
 	"github.com/gambtho/tomte/server/internal/store"
@@ -108,97 +102,6 @@ func TestEndToEndRun(t *testing.T) {
 	out = do("GET", "/v1/runs/"+runID+"/events", nil)
 	events := out["events"].([]any)
 	require.GreaterOrEqual(t, len(events), 2) // run.start, run.finish
-}
-
-// TestEndToEndMagicLinkLogin proves the identity flow under real cookie
-// attributes: fresh email → link → interstitial → consuming POST → tenant
-// + KEK + owner exist → /v1/me answers → logout → 401. It runs against a
-// TLS server with a cookie-jar client, so the Secure __Host- cookie is
-// shown to round-trip rather than being attached by hand.
-func TestEndToEndMagicLinkLogin(t *testing.T) {
-	s := store.New(testpg.New(t))
-	ctx := context.Background()
-
-	master, err := vault.NewMaster(bytes.Repeat([]byte{3}, 32))
-	require.NoError(t, err)
-	mailer := &mailtest.Recorder{}
-
-	mux := http.NewServeMux()
-	ts := httptest.NewTLSServer(mux)
-	t.Cleanup(ts.Close)
-	base, err := httpapi.ParsePublicBaseURL(ts.URL)
-	require.NoError(t, err)
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Vault: master, PublicBaseURL: base, Mailer: mailer})
-
-	jar, err := cookiejar.New(nil)
-	require.NoError(t, err)
-	client := ts.Client()
-	client.Jar = jar
-	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-
-	// Request a link.
-	resp, err := client.Post(ts.URL+"/v1/auth/magic-link", "application/json",
-		strings.NewReader(`{"email":"night@owl.test"}`))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusAccepted, resp.StatusCode)
-	msgs := mailer.Messages()
-	require.Len(t, msgs, 1)
-	i := strings.Index(msgs[0].Body, ts.URL)
-	require.GreaterOrEqual(t, i, 0)
-	link := msgs[0].Body[i:]
-	if end := strings.IndexAny(link, " \n"); end >= 0 {
-		link = link[:end]
-	}
-
-	// The interstitial renders the button and consumes nothing.
-	resp, err = client.Get(link)
-	require.NoError(t, err)
-	page, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	require.NoError(t, err)
-	require.Contains(t, string(page), "Continue to Tomte")
-
-	// The consuming POST: first login redirects to /build and sets the
-	// session cookie (into the jar, under its real attributes).
-	linkURL, err := url.Parse(link)
-	require.NoError(t, err)
-	client.CheckRedirect = noRedirect
-	resp, err = client.Post(ts.URL+"/v1/auth/verify", "application/x-www-form-urlencoded",
-		strings.NewReader(url.Values{"token": {linkURL.Query().Get("token")}}.Encode()))
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	require.Equal(t, ts.URL+"/build", resp.Header.Get("Location"))
-
-	// Tenant, KEK, and owner exist.
-	user, err := s.UserByEmail(ctx, "night@owl.test")
-	require.NoError(t, err)
-	require.Equal(t, "owner", user.Role)
-	tn, err := s.GetTenant(ctx, user.TenantID)
-	require.NoError(t, err)
-	require.Equal(t, "night", tn.Name)
-	_, _, err = s.TenantKEK(ctx, tn.ID)
-	require.NoError(t, err)
-
-	// The jar-held cookie authenticates /v1/me.
-	resp, err = client.Get(ts.URL + "/v1/me")
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Contains(t, string(body), "night@owl.test")
-
-	// Logout, then 401.
-	resp, err = client.Post(ts.URL+"/v1/auth/logout", "", nil)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
-	resp, err = client.Get(ts.URL + "/v1/me")
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
 // mintSession inserts a DB-backed session row and returns the cookie that
@@ -298,7 +201,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
 		RunProvider: "openai", RunModel: "gpt-4o-mini"})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
-	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"}, nil)
+	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()
 	route := cfg.Providers["openai"]
 	route.Base = upstream.URL // bare base: the SDK's emitted path arrives verbatim
@@ -504,7 +407,7 @@ func TestEndToEndConnectorToolRun(t *testing.T) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
 		RunProvider: "openai", RunModel: "gpt-4o-mini", Catalog: cat})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
-	adapters := proxyadapter.New(s, signer, master, nil, nil)
+	adapters := proxyadapter.New(s, signer, master, nil)
 	cfg := proxy.DefaultConfig()
 	cfg.ConnectorUpstreams = map[string]string{"slack": slackUpstream.URL}
 	ts := httptest.NewServer(mux)
@@ -522,18 +425,15 @@ func TestEndToEndConnectorToolRun(t *testing.T) {
 	require.NoError(t, err)
 	cookie := mintSession(t, s, tn.ID, user.ID)
 
-	// Seed the slack oauth credential straight into the vault: the
-	// connect flow has its own tests; what matters here is that the
-	// credential exists only there.
-	bundleJSON, err := json.Marshal(oauth.Bundle{AccessToken: "xoxb-vault-token"})
-	require.NoError(t, err)
+	// Seed the slack api_key credential straight into the vault (P2 adds
+	// the HTTP capture surface); what matters here is that the credential
+	// exists only there.
 	kek, kekVersion, err := s.TenantKEK(ctx, tn.ID)
 	require.NoError(t, err)
-	dek, ct, nonce, err := master.EncryptSecret(kek, string(bundleJSON))
+	dek, ct, nonce, err := master.EncryptSecret(kek, "xoxb-vault-token")
 	require.NoError(t, err)
-	_, err = s.UpsertConnectionBundle(ctx, tn.ID, "default", "slack", store.BundleUpdate{
-		Kind: "oauth", DEKWrapped: dek, Ciphertext: ct, Nonce: nonce, KEKVersion: kekVersion, Metadata: []byte(`{}`),
-	})
+	_, err = s.UpsertConnection(ctx, tn.ID, "default", "api_key", "slack",
+		dek, ct, nonce, kekVersion)
 	require.NoError(t, err)
 
 	do := newDoHelper(t, ts.URL, cookie)

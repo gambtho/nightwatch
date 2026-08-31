@@ -81,8 +81,10 @@ func Parse(raw []byte) (Doc, error) {
 
 // CompilerV stamps every compiled document so an audit can tell which
 // preamble generation produced it. A compiler change affects only future
-// approvals; migrated pre-decision-9 rows carry compiler_v 0.
-const CompilerV = 1
+// approvals; migrated pre-decision-9 rows carry compiler_v 0. v2 adds the
+// endpoint identity and resolved prices (P1 pivot); v1 docs stay loadable
+// and cost via the bundled table.
+const CompilerV = 2
 
 // Compiled is the execution form served by the internal run context. It
 // is a superset of the harness Steps shape (adds compiler_v), so the
@@ -94,6 +96,13 @@ type Compiled struct {
 	Model        string `json:"model"`
 	MaxTokens    int    `json:"max_tokens"`
 	CompilerV    int    `json:"compiler_v"`
+	// Approval records the endpoint identity (canonical base URL) and the
+	// prices it resolved — cost is computed from what was approved, and
+	// switching endpoints recompiles. Empty on legacy env-mode approvals.
+	Endpoint           string `json:"endpoint,omitempty"`
+	EndpointPreset     string `json:"endpoint_preset,omitempty"`
+	PriceInCentsPer1M  int    `json:"price_in_cents_per_1m,omitempty"`
+	PriceOutCentsPer1M int    `json:"price_out_cents_per_1m,omitempty"`
 }
 
 // Platform is the platform-selected execution policy: provider and model
@@ -103,6 +112,12 @@ type Platform struct {
 	Provider  string
 	Model     string
 	MaxTokens int
+	// Endpoint identity + resolved prices, copied through to Compiled;
+	// zero values on the legacy env-mode path.
+	Endpoint           string
+	EndpointPreset     string
+	PriceInCentsPer1M  int
+	PriceOutCentsPer1M int
 }
 
 // preamble is the fixed harness role and honesty rules. The escalation
@@ -133,12 +148,16 @@ func Compile(doc Doc, rubric json.RawMessage, p Platform) Compiled {
 		b.WriteString("\n")
 	}
 	return Compiled{
-		SystemPrompt: b.String(),
-		Kickoff:      "Carry out your steps now and report the outcome.",
-		Provider:     p.Provider,
-		Model:        p.Model,
-		MaxTokens:    p.MaxTokens,
-		CompilerV:    CompilerV,
+		SystemPrompt:       b.String(),
+		Kickoff:            "Carry out your steps now and report the outcome.",
+		Provider:           p.Provider,
+		Model:              p.Model,
+		MaxTokens:          p.MaxTokens,
+		CompilerV:          CompilerV,
+		Endpoint:           p.Endpoint,
+		EndpointPreset:     p.EndpointPreset,
+		PriceInCentsPer1M:  p.PriceInCentsPer1M,
+		PriceOutCentsPer1M: p.PriceOutCentsPer1M,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,10 +19,17 @@ import (
 
 // SessionCookieName carries the __Host- prefix: browsers accept it only
 // with Secure, Path=/, and no Domain attribute, which pins the cookie to
-// exactly our origin. Local dev over plain-HTTP localhost works in
-// browsers that extend Secure-cookie lenience to localhost (Chromium,
-// Firefox); Safari does not.
-const SessionCookieName = "__Host-tomte_session"
+// exactly our origin — the shape for HTTPS origins. The click-install
+// deployment serves plain HTTP on the loopback origin, where Safari
+// refuses Secure cookies outright (Chromium and Firefox extend lenience
+// to localhost; Safari does not), so an http public base uses
+// InsecureSessionCookieName without Secure instead — defended by the
+// loopback bind, the Origin check, and the Host allowlist. RequireSession
+// accepts either name; minting picks by the configured origin's scheme.
+const (
+	SessionCookieName         = "__Host-tomte_session"
+	InsecureSessionCookieName = "tomte_session"
+)
 
 // sessionCookieMaxAge mirrors the session row's 30-day absolute cap; the
 // row's 7-day idle window can end the session earlier than the cookie.
@@ -36,8 +44,8 @@ type SessionClaims struct {
 type claimsKey struct{}
 
 // NewOpaqueToken mints an opaque credential (used for both sessions and
-// magic-link tokens): the presented value is base64url of 256 random
-// bits, and only its SHA-256 reaches the database.
+// handoff tokens): the presented value is base64url of 256 random bits,
+// and only its SHA-256 reaches the database.
 func NewOpaqueToken() (value string, tokenHash []byte, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -53,6 +61,8 @@ func HashToken(value string) []byte {
 	return sum[:]
 }
 
+// SessionCookie is the HTTPS-origin shape; SessionCookieFor picks per
+// deployment.
 func SessionCookie(value string) *http.Cookie {
 	return &http.Cookie{
 		Name:     SessionCookieName,
@@ -65,10 +75,40 @@ func SessionCookie(value string) *http.Cookie {
 	}
 }
 
+// SessionCookieFor mints the deployment-appropriate cookie: __Host- +
+// Secure for an https public base; the insecure name without Secure for
+// the plain-HTTP loopback origin. nil defaults to the https shape.
+func SessionCookieFor(public *url.URL, value string) *http.Cookie {
+	c := SessionCookie(value)
+	if public != nil && public.Scheme == "http" {
+		c.Name = InsecureSessionCookieName
+		c.Secure = false
+	}
+	return c
+}
+
 func ClearSessionCookie() *http.Cookie {
 	c := SessionCookie("")
 	c.MaxAge = -1
 	return c
+}
+
+func ClearSessionCookieFor(public *url.URL) *http.Cookie {
+	c := SessionCookieFor(public, "")
+	c.MaxAge = -1
+	return c
+}
+
+// sessionCookieValue reads the session token under either deployment's
+// cookie name.
+func sessionCookieValue(r *http.Request) (string, bool) {
+	if c, err := r.Cookie(SessionCookieName); err == nil {
+		return c.Value, true
+	}
+	if c, err := r.Cookie(InsecureSessionCookieName); err == nil {
+		return c.Value, true
+	}
+	return "", false
 }
 
 // RequireSession authenticates the opaque cookie against the session
@@ -78,12 +118,12 @@ func ClearSessionCookie() *http.Cookie {
 // is NOT a 401: a database outage must not read as "session revoked".
 func RequireSession(s *store.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(SessionCookieName)
-		if err != nil {
+		value, ok := sessionCookieValue(r)
+		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		userID, tenantID, role, err := s.SessionUser(r.Context(), HashToken(cookie.Value))
+		userID, tenantID, role, err := s.SessionUser(r.Context(), HashToken(value))
 		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
