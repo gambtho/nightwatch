@@ -22,14 +22,72 @@ finishes, or a cross-cutting decision is taken.
 | Connectors                       | **Phases 1, 2, 4 merged.** Paused by design — phase 3 on call for the build lane; 5→6 deferred, 5 before 6 |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                             |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                           |
-| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                    |
+| Substrate verification spike     | **Merged** (PR #7) — value extracted; thread closed by the direction change                                |
 | Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                  |
-| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                  |
+| Plan 5 spec — Compute            | **Shelved by the direction change** — spec stays merged as a record; no implementation                     |
 | Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                  |
 | Docs corrections + roadmap       | **Merged** (PR #15)                                                                                        |
-| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                  |
+| Upstream Substrate egress PR     | **Closed** — the direction change ends the substrate thread                                                |
 | Frontend (`web/`) + CLI          | **`/setup` shipped** (PR #32) — the loop closes. CLI still not started                                     |
 | User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                        |
+
+## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
+
+Leadership decision, relayed by the user and confirmed in two answers to the
+coordinating session. This **reverses two recorded decisions** — "hosted,
+multi-tenant, operated by us" and "self-hosting is explicitly not a supported
+path" (platform design, 2026-08-30) — and both reversals are deliberate.
+The old rationale stands as history; do not relitigate it.
+
+The new shape:
+
+- **Nightshift is customer-deployed.** We ship the stack; we do not operate a
+  fleet. Plan 5 (Substrate + K8s Compute) is shelved, the substrate research
+  thread is closed, and the kagent question is moot.
+- **The egress proxy remains the enforcement point** — it ships _inside_ the
+  deployment. The blast-radius permit stays enforced, not advisory. This was
+  the load-bearing question and the user answered it explicitly.
+- **LLM-endpoint agnostic.** The provider layer already speaks Anthropic,
+  OpenAI, and OpenRouter; the pivot adds "any OpenAI-compatible base URL" as
+  deploy-time configuration.
+- **Identity, vault, and metering simplify dramatically** — the user's words.
+  Direction, not yet design: one deployment ≈ one tenant; per-tenant KEK
+  envelope collapses toward the single master key that already exists;
+  magic-link/Postmark yields to something a self-hosted operator can run
+  (the log-fallback path already exists); per-run and per-workflow spend caps
+  stay (they are the product's spend story), monthly tenant billing caps go.
+
+**Verified starting point:** `serve()` already runs the entire stack — API,
+proxy, scheduler, reaper, local compute — in one process against one
+Postgres, and the connector e2e passes in that shape. The pivot is mostly
+subtraction and packaging.
+
+Two clarifications from the user, after the coordinating session over-read
+"customer-deployed" as "technical user" — twice, and was corrected:
+
+- **Deployer == user, and the user is still the non-technical person.** The
+  bar is "click install" — a desktop-app-grade experience (no terminal, no
+  docker, no database administration), not an operator persona. The UX spec's
+  target user, the build conversation as front door, and all four surfaces
+  survive unchanged. The dev-persona research stays the companion study.
+- **OAuth is dropped entirely.** Consequences, verified: the `google-calendar`
+  curated connector dies (Google user data requires OAuth), so **curated v1 is
+  Slack alone** via pasted bot token; calendar/inbox arrive through remote MCP
+  servers that do their own auth — the deferred phases 5→6 become the main
+  connector road. Connector phase 2's OAuth machinery (~2,000 lines, landed
+  the same day) is sunk. And the deferred credential-capture UX problem is now
+  every connector's problem: token-paste for a non-technical user is exactly
+  the friction OAuth removed, so guided capture copy becomes load-bearing.
+
+Two hard problems this hands the pivot spec: **packaging** (the store is pgx
+throughout — bundled-invisible Postgres vs a SQLite rewrite is a real
+decision), and **the sleeping machine**. The second is half-solved already:
+`scheduler.mostRecentDue` fires the latest occurrence ≤ now and skips older,
+so a slept-through 3AM digest fires once on wake. The spec owes the honest
+product copy for that, and an always-on option for people who want true 3AM.
+
+**The serialized queue is FROZEN pending the pivot spec.** No session takes
+`server/` until the pivot spec merges and the queue is re-derived from it.
 
 ## The rule
 
