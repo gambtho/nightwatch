@@ -1,14 +1,16 @@
 import type { Workflow } from "../lib/types";
 
+// Dev-persona demo branch: export names kept from main to minimize the diff;
+// content re-voiced for a developer's recurring chores.
 export const supportDigest: Workflow = {
   id: "wf-digest",
-  name: "Weekly support digest",
+  name: "Weekly flake digest",
   schedule: { label: "Mondays at 9:00 AM", timezone: "America/New_York" },
-  steps: [{ id: "s1", text: "Summarize recurring support themes" }],
+  steps: [{ id: "s1", text: "Summarize recurring CI failures" }],
   permit: { capabilities: [], denied: [], maxCostCents: 200 },
   rubric: [
-    { id: "themes", text: "Groups complaints by theme, not by ticket" },
-    { id: "security", text: "Flags anything security-related separately" },
+    { id: "themes", text: "Groups failures by root cause, not by test" },
+    { id: "security", text: "Flags real product bugs separately" },
     { id: "length", text: "Fits in one screen" },
   ],
   runs: [
@@ -22,7 +24,7 @@ export const supportDigest: Workflow = {
         { ruleId: "security", passed: true },
         { ruleId: "length", passed: true },
       ],
-      summary: "Posted to #team-digest · met all 3 of your rules",
+      summary: "Posted to #eng-quality · met all 3 of your rules",
     },
   ],
   paused: false,
@@ -34,13 +36,13 @@ export const supportDigest: Workflow = {
 // hardcoding it.
 export const supportDigestDegraded: Workflow = {
   id: "wf-digest",
-  name: "Weekly support digest",
+  name: "Weekly flake digest",
   schedule: { label: "Mondays at 9:00 AM", timezone: "America/New_York" },
-  steps: [{ id: "s1", text: "Summarize recurring support themes" }],
+  steps: [{ id: "s1", text: "Summarize recurring CI failures" }],
   permit: { capabilities: [], denied: [], maxCostCents: 200 },
   rubric: [
-    { id: "themes", text: "Groups complaints by theme, not by ticket" },
-    { id: "security", text: "Flags anything security-related separately" },
+    { id: "themes", text: "Groups failures by root cause, not by test" },
+    { id: "security", text: "Flags real product bugs separately" },
     { id: "length", text: "Fits in one screen" },
   ],
   runs: [
@@ -54,7 +56,7 @@ export const supportDigestDegraded: Workflow = {
         { ruleId: "security", passed: false },
         { ruleId: "length", passed: true },
       ],
-      summary: "Posted to #team-digest · missed 1 of your 3 rules",
+      summary: "Posted to #eng-quality · missed 1 of your 3 rules",
     },
     {
       id: "r2",
@@ -66,7 +68,7 @@ export const supportDigestDegraded: Workflow = {
         { ruleId: "security", passed: false },
         { ruleId: "length", passed: true },
       ],
-      summary: "Posted to #team-digest · missed 1 of your 3 rules",
+      summary: "Posted to #eng-quality · missed 1 of your 3 rules",
     },
     {
       id: "r3",
@@ -78,7 +80,7 @@ export const supportDigestDegraded: Workflow = {
         { ruleId: "security", passed: false },
         { ruleId: "length", passed: true },
       ],
-      summary: "Posted to #team-digest · missed 1 of your 3 rules",
+      summary: "Posted to #eng-quality · missed 1 of your 3 rules",
     },
   ],
   paused: true,
@@ -86,11 +88,11 @@ export const supportDigestDegraded: Workflow = {
 
 export const renewals: Workflow = {
   id: "wf-renewals",
-  name: "Contract renewals coming up",
+  name: "Dependency updates worth reading",
   schedule: { label: "Every morning at 7:00 AM", timezone: "America/New_York" },
-  steps: [{ id: "s1", text: "Check for contracts due in 60 days" }],
+  steps: [{ id: "s1", text: "Triage yesterday's dependency updates" }],
   permit: { capabilities: [], denied: [], maxCostCents: 100 },
-  rubric: [{ id: "window", text: "Looks 60 days ahead" }],
+  rubric: [{ id: "window", text: "Only updates from the last 24 hours" }],
   runs: [
     {
       id: "r1",
@@ -98,7 +100,7 @@ export const renewals: Workflow = {
       status: "ok",
       costCents: 12,
       ruleResults: [{ ruleId: "window", passed: true }],
-      summary: "Nothing due in the next 60 days",
+      summary: "Nothing worth flagging today",
     },
   ],
   paused: false,
@@ -106,12 +108,12 @@ export const renewals: Workflow = {
 
 export const unanswered: Workflow = {
   id: "wf-unanswered",
-  name: "Unanswered customer questions",
+  name: "Stale PR nudges",
   schedule: { label: "Every day at 5:00 PM", timezone: "America/New_York" },
-  steps: [{ id: "s1", text: "Nudge threads with no reply" }],
+  steps: [{ id: "s1", text: "Nudge PRs with no review" }],
   permit: { capabilities: [], denied: [], maxCostCents: 100 },
   rubric: [
-    { id: "age", text: "Only threads older than 24 hours" },
+    { id: "age", text: "Only PRs idle more than 24 hours" },
     { id: "tone", text: "Nudges politely" },
   ],
   runs: [
@@ -124,7 +126,7 @@ export const unanswered: Workflow = {
         { ruleId: "age", passed: true },
         { ruleId: "tone", passed: true },
       ],
-      summary: "Nudged 2 threads · met all 2 of your rules",
+      summary: "Nudged 2 PRs · met all 2 of your rules",
     },
   ],
   paused: false,

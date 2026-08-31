@@ -1,4 +1,4 @@
-export type SystemId = "zendesk" | "slack" | "gmail" | "gcal" | "drive";
+export type SystemId = "zendesk" | "slack" | "gmail" | "gcal" | "drive" | "github";
 
 export type Access = "read" | "write";
 

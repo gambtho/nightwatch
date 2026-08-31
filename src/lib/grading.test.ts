@@ -19,7 +19,7 @@ function run(id: string, securityPassed: boolean): Run {
 function workflowWith(runs: Run[]): Workflow {
   return {
     id: "wf",
-    name: "Weekly support digest",
+    name: "Weekly flake digest",
     schedule: { label: "Mondays at 9:00 AM", timezone: "America/New_York" },
     steps: [],
     permit: { capabilities: [], denied: [], maxCostCents: 200 },
@@ -62,12 +62,12 @@ test("a workflow with no runs is not paused", () => {
   expect(shouldAutoPause(workflowWith([]))).toBe(false);
 });
 
-test("the healthy support digest fixture (shown on Home) has no failing streak", () => {
+test("the healthy flake digest fixture (shown on Home) has no failing streak", () => {
   expect(consecutiveFailures(supportDigest, "security")).toBe(0);
   expect(shouldAutoPause(supportDigest)).toBe(false);
 });
 
-test("the degraded support digest fixture (shown on Alert) has failed security 3 times running", () => {
+test("the degraded flake digest fixture (shown on Alert) has failed security 3 times running", () => {
   expect(consecutiveFailures(supportDigestDegraded, "security")).toBe(3);
   expect(shouldAutoPause(supportDigestDegraded)).toBe(true);
 });

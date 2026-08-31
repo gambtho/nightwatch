@@ -5,20 +5,20 @@ import { AUTO_PAUSE_THRESHOLD } from "../lib/grading";
 
 test("shows the workflow name and its schedule label", () => {
   render(<Approve onApproved={() => {}} />);
-  expect(screen.getByText("Weekly support digest")).toBeInTheDocument();
+  expect(screen.getByText("Weekly flake digest")).toBeInTheDocument();
   expect(screen.getByText(/Mondays at 9:00 AM/)).toBeInTheDocument();
 });
 
 test("shows the full permit, not a partial one", () => {
   render(<Approve onApproved={() => {}} />);
-  expect(screen.getByText("Zendesk tickets")).toBeInTheDocument();
-  expect(screen.getByText("Slack #support")).toBeInTheDocument();
-  expect(screen.getByText("Slack #team-digest")).toBeInTheDocument();
+  expect(screen.getByText("GitHub Actions runs")).toBeInTheDocument();
+  expect(screen.getByText("Slack #ci-alerts")).toBeInTheDocument();
+  expect(screen.getByText("Slack #eng-quality")).toBeInTheDocument();
 });
 
 test("nothing is highlighted as newly added on the approval screen", () => {
   render(<Approve onApproved={() => {}} />);
-  expect(screen.getByTestId("cap-zendesk-read")).not.toHaveClass("just-added");
+  expect(screen.getByTestId("cap-gha-read")).not.toHaveClass("just-added");
 });
 
 test("approving reports up", async () => {

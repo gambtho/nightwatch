@@ -3,9 +3,9 @@ import Home from "./Home";
 
 test("lists every workflow with its last summary", () => {
   render(<Home onNew={() => {}} />);
-  expect(screen.getByText("Weekly support digest")).toBeInTheDocument();
-  expect(screen.getByText("Contract renewals coming up")).toBeInTheDocument();
-  expect(screen.getByText("Unanswered customer questions")).toBeInTheDocument();
+  expect(screen.getByText("Weekly flake digest")).toBeInTheDocument();
+  expect(screen.getByText("Dependency updates worth reading")).toBeInTheDocument();
+  expect(screen.getByText("Stale PR nudges")).toBeInTheDocument();
 });
 
 test("tells the user they do not need to be here", () => {

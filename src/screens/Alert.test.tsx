@@ -6,7 +6,7 @@ import { supportDigestDegraded } from "../fixtures/workflows";
 test("names the failing rule and how long it has failed", () => {
   render(<Alert />);
   expect(
-    screen.getByText(/Flags anything security-related separately/),
+    screen.getByText(/Flags real product bugs separately/),
   ).toBeInTheDocument();
   expect(screen.getByText(/Failed 3 Mondays running/)).toBeInTheDocument();
 });

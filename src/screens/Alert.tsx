@@ -33,9 +33,9 @@ export default function Alert() {
       <div className="block block-access">
         <div className="label">WHY I THINK IT'S HAPPENING</div>
         <div>
-          Since Aug 4, almost every ticket has come through with an empty{" "}
-          <strong>category</strong> field. I've been guessing which ones are security
-          issues, and I've been guessing badly.
+          Since Aug 4, almost every failure has come through with empty{" "}
+          <strong>job annotations</strong>. I've been guessing which ones are real
+          product bugs, and I've been guessing badly.
         </div>
       </div>
 

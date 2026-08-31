@@ -14,18 +14,18 @@ export const buildScript: BuildTurn[] = [
   {
     id: "t1",
     speaker: "user",
-    text: "Every Monday, look at last week's support tickets and tell the team what keeps coming up.",
+    text: "Every Monday, look at last week's CI failures and tell the team what keeps flaking.",
     grants: [],
   },
   {
     id: "t2",
     speaker: "nightshift",
-    text: "Got it. I'll need to read your tickets — is that Zendesk, or the #support Slack channel?",
+    text: "Got it. I'll need to read your CI runs — is that GitHub Actions, or Buildkite?",
     grants: [
       {
-        id: "zendesk-read",
-        system: "zendesk",
-        label: "Zendesk tickets",
+        id: "gha-read",
+        system: "github",
+        label: "GitHub Actions runs",
         access: "read",
         detail: "read only",
       },
@@ -34,19 +34,19 @@ export const buildScript: BuildTurn[] = [
   {
     id: "t3",
     speaker: "user",
-    text: "Both. Post the summary in #team-digest.",
+    text: "Actions, plus whatever lands in #ci-alerts. Post the summary in #eng-quality.",
     grants: [
       {
-        id: "slack-support-read",
+        id: "slack-ci-alerts-read",
         system: "slack",
-        label: "Slack #support",
+        label: "Slack #ci-alerts",
         access: "read",
         detail: "last 7 days",
       },
       {
-        id: "slack-digest-write",
+        id: "slack-quality-write",
         system: "slack",
-        label: "Slack #team-digest",
+        label: "Slack #eng-quality",
         access: "write",
         detail: "post only",
       },
@@ -55,7 +55,7 @@ export const buildScript: BuildTurn[] = [
   {
     id: "t4",
     speaker: "nightshift",
-    text: "Done. What should I do if something looks like a security problem?",
+    text: "Done. What should I do if a failure looks like a real product bug, not a flake?",
     grants: [],
   },
   {

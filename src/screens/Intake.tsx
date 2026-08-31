@@ -2,9 +2,9 @@ import { useState } from "react";
 import "./screens.css";
 
 const STARTERS = [
-  "I keep forgetting to follow up on…",
-  "Someone should be watching…",
-  "Every month I have to put together…",
+  "Every Monday I dig through last week's CI failures…",
+  "Someone should be watching our dependency updates…",
+  "I keep forgetting to nudge stale PRs…",
 ];
 
 export default function Intake({ onSubmit }: { onSubmit: (text: string) => void }) {

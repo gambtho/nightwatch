@@ -9,7 +9,7 @@ export default function Approve({ onApproved }: { onApproved: () => void }) {
 
   return (
     <div className="screen screen-narrow">
-      <h2>Weekly support digest</h2>
+      <h2>Weekly flake digest</h2>
       <p className="dim">Runs Mondays at 9:00 AM · America/New_York</p>
 
       <PermitDiagram

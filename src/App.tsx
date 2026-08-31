@@ -25,7 +25,7 @@ export default function App() {
   return (
     <>
       <nav className="demo-nav">
-        <span className="demo-nav-title">🌙 Nightshift prototype</span>
+        <span className="demo-nav-title">🌙 Nightshift prototype · dev persona</span>
         {NAV.map((n) => (
           <button
             key={n.id}
