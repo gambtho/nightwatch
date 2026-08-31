@@ -1,0 +1,86 @@
+{
+  "id": "slack",
+  "name": "Slack",
+  "description": "Read channels and messages in your Slack workspace, and post messages to channels you approve.",
+  "auth": { "provider": "slack" },
+  "hosts": ["slack.com"],
+  "ops": [
+    {
+      "name": "list_channels",
+      "description": "List the channels in the workspace, with their names and IDs.",
+      "effect": "read",
+      "scopes": ["channels:read"],
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of channels to return."
+          }
+        },
+        "additionalProperties": false
+      },
+      "binding": {
+        "method": "GET",
+        "host": "slack.com",
+        "path": "/api/conversations.list",
+        "query": { "limit": "limit" }
+      }
+    },
+    {
+      "name": "read_messages",
+      "description": "Read the recent messages in one channel.",
+      "effect": "read",
+      "scopes": ["channels:history"],
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "Channel ID to read from."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of messages to return."
+          }
+        },
+        "required": ["channel"],
+        "additionalProperties": false
+      },
+      "binding": {
+        "method": "GET",
+        "host": "slack.com",
+        "path": "/api/conversations.history",
+        "query": { "channel": "channel", "limit": "limit" }
+      }
+    },
+    {
+      "name": "post_message",
+      "description": "Post a message to a channel you have approved.",
+      "effect": "write",
+      "scopes": ["chat:write"],
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "Channel ID to post to. Must be one of the approved channels."
+          },
+          "text": {
+            "type": "string",
+            "description": "Message text to post."
+          }
+        },
+        "required": ["channel", "text"],
+        "additionalProperties": false
+      },
+      "binding": {
+        "method": "POST",
+        "host": "slack.com",
+        "path": "/api/chat.postMessage",
+        "body": { "channel": "channel", "text": "text" }
+      },
+      "constraints": [{ "field": "channel" }]
+    }
+  ]
+}

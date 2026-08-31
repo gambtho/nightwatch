@@ -57,6 +57,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/db"
 	"github.com/gambtho/nightwatch/server/internal/engine"
@@ -165,6 +166,13 @@ func serve(ctx context.Context) error {
 	if _, isLog := mailer.(mail.LogSender); isLog {
 		slog.Warn("mail: no Postmark config; magic links go to the log (localhost dev mode)")
 	}
+	// The catalog refuses to load on invalid definitions or a
+	// reach-widening drift from its committed baseline — serve does not
+	// start with an unenforceable catalog.
+	cat, err := catalog.Load()
+	if err != nil {
+		return err
+	}
 	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
 	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
 	if err != nil {
@@ -238,6 +246,7 @@ func serve(ctx context.Context) error {
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
 		RunProvider: os.Getenv("NIGHTSHIFT_RUN_PROVIDER"),
 		RunModel:    os.Getenv("NIGHTSHIFT_RUN_MODEL"),
+		Catalog:     cat,
 	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 
@@ -247,7 +256,7 @@ func serve(ctx context.Context) error {
 	proxy.RegisterRoutes(mux, proxy.Deps{
 		Auth: adapters.Auth, Permits: adapters.Permits,
 		Credentials: adapters.Credentials, Events: adapters.Events,
-		Hook: m, Config: cfg,
+		Hook: m, Config: cfg, Catalog: cat,
 	})
 
 	loopCtx, cancelLoops := context.WithCancel(context.Background())
