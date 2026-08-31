@@ -71,8 +71,30 @@ CREATE TABLE build (
     updated_at timestamptz NOT NULL DEFAULT now(),
     FOREIGN KEY (tenant_id, created_by) REFERENCES app_user (tenant_id, id)
 );
+
+-- One row per build-agent model call: the metering ledger.
+CREATE TABLE build_call (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL,
+    build_id uuid NOT NULL,
+    tokens_in int NOT NULL,
+    tokens_out int NOT NULL,
+    cost_cents int NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (tenant_id, build_id) REFERENCES build (tenant_id, id)
+        ON DELETE CASCADE
+);
 ```
 
+- `cost_cents` on `build` is a denormalized display total; **`build_call`
+  is the authoritative spend record.** The tenant monthly cap sums runs by
+  `finished_at` (`store/run.go`); build spend joins that sum by
+  `build_call.created_at`, so a resumable build that crosses a month
+  boundary attributes each call to the month it actually happened in —
+  a cumulative per-build total could not. The ledger row is written in the
+  same transaction as the transcript append for its turn, so a crash
+  mid-turn loses the turn and its charge together, never one without the
+  other.
 - `drafts` is a list of one or two draft workflows (see
   [the mode split](#the-mode-split)); each draft holds a name, a mode, and
   the artifact set as far as it has been elicited, every mutation validated
@@ -86,11 +108,23 @@ CREATE TABLE build (
   `ok`) → `submitted` (workflows created). `abandoned` after 30 idle days,
   by the same kind of sweep as the reaper. Any pre-`submitted` state is
   resumable.
-- **Submit** creates each draft's workflow and version 1 through the same
-  store paths as `POST /v1/workflows`, then sends the user to the existing
-  approve surface. **The build never approves anything.** Approval stays the
-  one gate, on the existing endpoint, rendered from the stored version — not
-  from the conversation.
+- **Submit is atomic and idempotent.** It reuses the version API's
+  validation and store logic, but not its transaction boundaries: today
+  each `CreateWorkflow` commits independently (`store/workflow.go`), and a
+  two-draft submit through that path could fail after creating one
+  workflow — leaving the user half a split, or duplicates on retry. Submit
+  therefore runs **one transaction** that creates every draft's workflow
+  and version 1 and flips the build to `submitted` together (the store
+  grows a caller-supplied-transaction variant; the HTTP-path behavior is
+  unchanged). Each draft carries a stable `draft_id` minted at creation,
+  recorded on the created workflow, so a retry after a lost response finds
+  the build already `submitted` and returns the same workflows (`200`, not
+  a second creation). Partial creation is unrepresentable: all workflows
+  exist and the build is `submitted`, or neither.
+- After submit, the user lands on the existing approve surface. **The
+  build never approves anything.** Approval stays the one gate, on the
+  existing endpoint, rendered from the stored version — not from the
+  conversation.
 
 ### API
 
@@ -108,6 +142,20 @@ Session-authed, tenant-scoped, cross-tenant reads as `404` — house pattern
 throughout. Whether `messages` streams token-by-token or returns whole turns
 is a frontend latency call the API should not preclude (SSE on the same
 route); it changes nothing structural.
+
+**Agent turns are client-driven, not background jobs.** The verdict and
+every subsequent reply are generated inside the request that asked for
+them (`POST /v1/builds` for the verdict; `messages` thereafter) — there is
+no queue, no worker, and therefore no orphaned generation to reap. A
+provider failure or crash mid-turn surfaces as that request's error; the
+build's durable state is exactly what the last committed turn left
+(transcript, ledger row, and draft mutations commit together), and retry
+is the client re-issuing the request. A build in `intake` with no verdict
+is thus always actionable — the frontend shows the failure and a retry
+affordance, never a silent spinner — and "resumable across process
+restart" costs nothing beyond what is already in Postgres. Concurrent
+turns on one build are refused (`409`), the single-active-run idiom
+applied to conversations.
 
 ## The build agent
 
@@ -152,7 +200,8 @@ corruption, bounded by the same human presence the surface is built around.
 
 **Limits.** Turn cap per build (default 60; hitting it ends the
 conversation with a save-and-resume message, not an error), `OverCap`
-consult before every call, per-build `cost_cents` recorded and visible.
+consult before every call, every call recorded in the `build_call` ledger
+with the running total visible on the build.
 
 ## Intake and the honest verdict
 
@@ -405,12 +454,24 @@ cadence decision.
 The deferred "explained to someone who has never bought inference" item.
 The server proposes the per-run cap from the compiled form's model pricing
 and a token estimate; the conversation renders **money at the job's rhythm,
-never tokens**: "each run costs a few cents; I'll never spend more than
-50¢ on one run or about $2 a month on this job. If a run would go over,
-I stop it and tell you." The monthly figure is `cap × occurrences` from
-the schedule — derived, not a second cap. The user can raise or lower it;
-the number lands in `spend.per_run_cents` and is inside the approval
-diagram where the UX spec drew it.
+never tokens**: "each run costs a few cents; this job is budgeted at 50¢
+a run — about $2 a month. If a run goes over its budget, it stops before
+its next step and I tell you." The monthly figure is `cap × occurrences`
+from the schedule — derived, not a second cap. The user can raise or
+lower it; the number lands in `spend.per_run_cents` and is inside the
+approval diagram where the UX spec drew it.
+
+The phrasing is chosen to match what Plan 3 actually enforces, not a
+stronger promise: the per-run cap is checked **between** model requests
+(the hook seam, live once tool-loop runs make a run multi-turn), and a
+single request's cost is known only after it completes
+(`harness/harness.go` computes cost post-call; `max_tokens` bounds output
+tokens, not dollars). So one step can overshoot the budget by a bounded
+amount before the stop lands, and overruns are detected and reported at
+finalization (`spend.exceeded`, feeding Plan 4's pause trigger). "I'll
+never spend more than X" is exactly the kind of overclaim the
+[secrets section](#will-this-expose-my-secrets) forbids; "budgeted at X,
+stops when it goes over, tells you" is what the machinery delivers.
 
 ## Scoping decision 9: two forms of steps, resolved
 
@@ -527,12 +588,27 @@ Three claims, three moments, three handles:
    sign-ins stay on this side of the line." Checkable handle: the
    struck-through items — the user can see email, DMs, payments outside
    the line before ever trusting it.
+   **Precondition, stated as a gate:** this sentence is only as true as
+   "no direct egress" — the proxy is the guarantee exactly when actors
+   cannot go around it. That holds under Plan 5's default-deny
+   NetworkPolicy; under the dev `Local` compute backend the harness shares
+   the control plane's network and the boundary is advisory. This copy
+   must not ship to real users ahead of the enforced-egress backend — a
+   launch-gate dependency on Plan 5, not a wording choice.
 3. **"Everything it does is written down — including what it was refused."**
    Said on the approve screen and again in the first-run summary. The run
    trail records every request and every denial (`proxy.denied` is audit
    content by design). Checkable handle: "see everything it did" links to
    the run's event trail; a denied request appearing there is the fence
    _visibly holding_, which teaches more than any promise.
+   **Qualifier the implementation currently forces:** proxy audit appends
+   are best-effort — a denial is enforced even when recording it fails,
+   with only a server log left behind (`proxy/handler.go`, `emit`). Either
+   that path gets a durability story (retry/outbox) before this copy
+   ships, or the claim softens to "every action is checked; refusals are
+   enforced even in the rare case recording fails." Enforcement is never
+   best-effort; the _ledger_ of it currently is, and the copy may not
+   pretend otherwise.
 
 What the copy must **never** claim: content privacy ("we can't see your
 data" — false: the proxy sees request contents), or absolute safety. The
@@ -609,8 +685,9 @@ The server queue slot's checklist, in dependency order:
    validation moves to the platform-selected model; dev-data migration as
    above. Independent of everything else and unblocks freezing the v1
    contract.
-2. **The build resource** — table, statuses, abandon sweep, endpoints,
-   submit path reusing the version-creation stack.
+2. **The build resource** — tables (`build`, `build_call`), statuses,
+   abandon sweep, endpoints, and the atomic/idempotent submit path (the
+   store's caller-supplied-transaction variant of workflow creation).
 3. **The build agent loop** — control-plane LLM path with platform key,
    metering integration (`OverCap` pre-call, cost to monthly cap), turn
    cap, the closed tool surface, verdict schema validation including the
@@ -656,7 +733,16 @@ flows must exist); item 1 does not and should land first.
 - Steps v1: execution fields rejected; migration synthesizes user-facing
   steps and preserves old documents as `compiled`.
 - Build metering: model calls blocked once the tenant monthly cap is hit;
-  turn cap ends the conversation resumably.
+  turn cap ends the conversation resumably; a build spanning a UTC month
+  boundary attributes each `build_call` to the month it occurred in, and
+  the ledger row commits in the same transaction as its turn's transcript.
+- Submit atomicity: a two-draft submit that fails on the second workflow
+  creates neither and leaves the build re-submittable; a retried submit
+  after a lost response returns the already-created workflows without
+  creating more; concurrent submits produce exactly one set.
+- Turn failure: a provider error mid-turn leaves the build at its last
+  committed turn with no ledger row for the failed call; re-issuing the
+  request succeeds; concurrent turns on one build are refused (`409`).
 - Resumability: a build survives process restart and an OAuth round trip
   with transcript and drafts intact.
 - Cross-tenant: every build route reads as `404`, house pattern.
