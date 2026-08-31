@@ -51,6 +51,13 @@ possible solution, no Substrate), CLI rather than UI, and from there
 **transition to the full Tomte experience** (governance, defined
 connectors, etc.).
 
+A second verbatim leadership quote (relayed 2026-08-31, same change):
+**"having an artifact that shows my agent topology -- almost agent as code
+(ideally yaml template or something like that)"** — the template is not an
+internal config detail; it is a first-class, human-readable **agent-as-code
+YAML artifact** that shows the agent topology. The YAML is the deliverable
+leadership wants to be able to look at.
+
 Three shaping answers from the user, deliberate — do not relitigate:
 
 - **Phase-1 shape: CLI-local, agents on K8s.** No hosted control plane at
@@ -469,31 +476,44 @@ five never take it. Each prompt is self-contained.
 > three shaping decisions) before writing anything. Work in a linked
 > worktree; you take no `server/` lock and touch no existing top-level dir.
 >
-> The ask, verbatim: "a template for an agent that creates a hello world
-> agent running on a k8s cluster, then expand to leverage llm to enhance
-> the agent, allow connectors, etc — use a simple cli to get the agent
-> running on k8s." Simplest possible solution; no Substrate; CLI, not UI.
+> The ask, in two verbatim leadership quotes: "a template for an agent
+> that creates a hello world agent running on a k8s cluster, then expand
+> to leverage llm to enhance the agent, allow connectors, etc — use a
+> simple cli to get the agent running on k8s" and "having an artifact that
+> shows my agent topology — almost agent as code (ideally yaml template or
+> something like that)". Simplest possible solution; no Substrate; CLI,
+> not UI.
 >
-> **Phase K1 (this session): hello world on a cluster via a simple CLI.**
-> Brainstorm briefly, write a short plan (PR it to `main` or lead your
-> implementation PR with it — your call at this size), then build:
+> **Phase K1 (this session): hello world on a cluster via a simple CLI,
+> defined by an agent-as-code YAML.** Brainstorm briefly, write a short
+> plan (PR it to `main` or lead your implementation PR with it — your call
+> at this size), then build:
 >
-> 1. **An agent template**: the smallest scaffold that becomes a running
->    agent — a container entrypoint plus a manifest. The agent's behavior
->    (for K1, print/serve hello world on a loop) must come from a mounted
->    config/instructions file, not hardcode — that file is the seam that
->    later grows into LLM prompts (K2), connectors (K3), and eventually
->    Tomte's steps/permit shape. Keep the file's schema tiny and versioned.
+> 1. **The agent-as-code YAML — the centerpiece.** One human-readable,
+>    versioned YAML file (e.g. `agent.yaml`) IS the agent: its identity,
+>    what it does (for K1, print/serve hello world on a loop), and its
+>    topology — written so that reading the file shows the topology, and
+>    leadership can be handed the file itself as the artifact. Schema
+>    tiny but shaped for growth: a `version`, the agent's task/behavior,
+>    and empty-but-named slots where K2's `llm:` (endpoint kind/base_url +
+>    secret ref, vocabulary aligned with the board's five-preset enum) and
+>    K3's `connectors:` will land — so the file grows downward into
+>    Tomte's steps/permit shape without a rewrite. The running agent
+>    consumes this file mounted via ConfigMap — behavior comes from the
+>    YAML, never hardcoded in the image.
 > 2. **A simple CLI** (new top-level dir; propose the name — Go, matching
->    the repo): `init` scaffolds a new agent from the template; a
->    deploy/run command gets it onto the cluster the user's kubeconfig
->    points at; `status` and `logs` round it out. No CRDs, no operator, no
->    controller; a plain namespaced Deployment or Job via client-go or
+>    the repo): `init` scaffolds an `agent.yaml` from the template;
+>    deploy/run applies it to the cluster the user's kubeconfig points at
+>    (YAML → ConfigMap + Deployment/Job); `status` and `logs` round it
+>    out. The YAML is the single source of truth — the CLI derives all
+>    K8s objects from it; nobody hand-edits manifests. No CRDs, no
+>    operator, no controller; plain namespaced objects via client-go or
 >    shelling out to kubectl — pick the simplest that is honest, and say
 >    why. Helm only if it genuinely earns it (at K1 it probably doesn't).
 > 3. **Verification is a real cluster**: stand up kind (or k3d), run your
 >    own CLI end to end, and show `logs` returning hello world. A README
->    in the lane dir walks a newcomer through the same five minutes.
+>    in the lane dir walks a newcomer through the same five minutes and
+>    shows the `agent.yaml` up front — it is the pitch.
 >
 > **Known destination, not K1 scope**: K2 adds an LLM call (OpenAI-
 > compatible base URL + key from a K8s Secret; align the endpoint config
