@@ -20,7 +20,7 @@ no permission model) informs what is harvested and what is replaced.
 | Decision                                                  | Why                                                                                                                                                                                                                                                                                                                                             |
 | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Hybrid connector model from day one**                   | Curated `http` connectors carry the universal three (inbox, calendar, chat) with full per-operation enforcement; a `remote-mcp` kind answers the pluggable system-of-record without us authoring every connector. The permit degrades honestly, per kind, and the approval diagram says so.                                                     |
-| **Per-tool allowlist for remote MCP**                     | MCP over streamable HTTP puts the tool name inside the JSON-RPC body, so the proxy parses the envelope (shallow, size-capped, fail closed) and enforces a tool-name allowlist. Per-server-only grants would let a vendor adding a dangerous tool silently widen reach; read/write classification of vendor tools is unknowable and not claimed. |
+| **Per-tool allowlist for remote MCP**                     | MCP over streamable HTTP puts the tool name inside the JSON-RPC body, so the proxy parses the envelope (shallow, size-capped, fail-closed) and enforces a tool-name allowlist. Per-server-only grants would let a vendor adding a dangerous tool silently widen reach; read/write classification of vendor tools is unknowable and not claimed. |
 | **Platform OAuth apps, BYO designed-for**                 | The target user will not register an OAuth app. Nightshift owns one app per provider (and the Google CASA verification burden that follows); the schema and credential-resolution path carry an optional per-tenant client override from day one so enterprise BYO-app lands later without migration. Only the platform path is built.          |
 | **MCP registry + custom URLs**                            | A curated registry of known vendor MCP endpoints gives one-click adds; tenant-typed custom URLs keep "pluggable" genuine (including self-hosted) and activate the full SSRF defense set this spec designs. Registry entries get the identical defenses — trust does not fork the code path.                                                     |
 | **Resource-level constraints via declarative extractors** | The UX spec's flagship permit example — "only our support channel" — lives in a request body, not a URL. Curated write operations may declare a constraint binding (an argument field checked against a permit resource list, exact match only); the proxy enforces it. Without this the diagram's best promise is unenforced.                  |
@@ -53,7 +53,12 @@ Authored by us, in the repo. An entry declares:
   - `args_schema` — JSON Schema; this **is** the LLM tool definition.
   - `scopes` — the OAuth scopes this op requires.
   - `binding` — method, path template, and arg placement (path / query /
-    JSON body) that the proxy compiles the upstream request from.
+    JSON body) that the proxy compiles the upstream request from. Every
+    path-placed arg is **component-encoded after validation**: percent-encode
+    as a single path segment, so `/`, `?`, and `#` cannot alter the compiled
+    path or query, and a value that is (or decodes to) `.` or `..` is
+    rejected outright — a traversal segment can never reach the upstream
+    URL.
   - `constraints` (optional, write ops) — bindings of the form "arg field
     `channel` must appear in the permit's resource list for this op". Exact
     string match only; no predicate language.
@@ -137,10 +142,17 @@ Validation stays in `permit.Parse`, same fail-closed style as v1:
   allowing nothing is a mistake, not a deny-all — deny-all is the entry's
   absence).
 - `resources` keys must name listed ops; values are non-empty string lists.
-- At version-write time (`httpapi.decodeDoc`) every `http` key must exist in
-  the running catalog with every listed op present, and every `mcp:` key must
-  name an `mcp_server` row belonging to the tenant. A permit cannot reference
-  a connector that does not exist.
+- At version-write time, structural checks stay in `permit.Parse` (via
+  `httpapi.decodeDoc`), but catalog and ownership checks need the
+  authenticated tenant and the store, so they live in a separate
+  **`ValidateConnections(ctx, tenantID, permit)`** helper called by both
+  `createWorkflow` and `addVersion` after authentication and before
+  `CreateWorkflow`/`AddVersion`: every `http` key must exist in the running
+  catalog with every listed op present, and every `mcp:` key must name an
+  `mcp_server` row **belonging to that tenant** (another tenant's server id
+  is `ErrNotFound`, the house pattern — a cross-tenant reference is a test
+  case, not an assumption). A permit cannot reference a connector that does
+  not exist.
 - Each `remote_mcp` entry carries a required `snapshot` — the content hash of
   the discovered-tools snapshot revision the permit was approved against; the
   named revision must exist for that server, and every listed tool must
@@ -160,7 +172,7 @@ Two new route families reuse the existing pipeline verbatim — authenticate
 run token → resolve permit per request, no cache → `Hook.Before` → inject →
 forward streaming → append event. Fail closed at every step.
 
-```
+```text
 /proxy/connector/{connector}/{op}     curated op invocation (POST, JSON args)
 /proxy/mcp/{serverID}                 remote MCP pass-through (JSON-RPC)
 ```
@@ -184,7 +196,12 @@ Differences from the LLM routes:
   the op's binding (method, path template, arg placement), attaches the
   credential per the connector's auth spec (OAuth bearer; per-connector
   header placement replaces the current hard-coded provider switch in
-  `forward`), and forwards. The harness never constructs upstream URLs.
+  `forward`), and forwards. The upstream request's headers are **constructed
+  from an allowlist, not forwarded**: the proxy sets what the binding needs
+  (content type, accept, the injected credential) and drops every inbound
+  header — cookies, auth headers, and anything harness-supplied never reach
+  the upstream, so an inbound header can never conflict with or override the
+  injected credential. The harness never constructs upstream URLs.
 - **Authorize, remote MCP.** The JSON-RPC envelope is parsed under a 64 KiB
   scan cap: batch requests rejected, unparseable envelopes rejected. Allowed
   methods are an **exhaustive enumeration** — `initialize`, `tools/list`,
@@ -192,9 +209,15 @@ Differences from the LLM routes:
   `notifications/cancelled` — and nothing else; there is no
   `notifications/*` wildcard, so a vendor-defined notification with side
   effects is 403 like any other unknown method. `tools/call` additionally
-  requires `params.name` in the permit's tool allowlist. The proxy forwards
-  `Mcp-Session-Id` and SSE responses untouched — it parses the envelope for
-  enforcement but is not a stateful MCP participant.
+  requires `params.name` in the permit's tool allowlist. The supported
+  transport is pinned: **streamable HTTP only** (MCP protocol revision
+  `2025-06-18`; the deprecated HTTP+SSE transport is not supported). HTTP
+  methods are enumerated like everything else — `POST` carries JSON-RPC and
+  gets the envelope checks above; `GET` opens the server-initiated SSE
+  stream (no envelope, permitted as-is); `DELETE` terminates the session;
+  any other method is 405. `Mcp-Session-Id` and SSE responses are forwarded
+  untouched — the proxy parses the envelope for enforcement but is not a
+  stateful MCP participant.
 - **Hook widening.** `HookRequest` gains optional `Connector`/`Op` fields
   (additive), so Plan 3 metering can price tool calls without reopening the
   proxy. `Provider` stays for LLM routes.
@@ -219,19 +242,31 @@ registry entries get the identical treatment.
   **v4-mapped-v6 forms of all of these**. A vetted IP is pinned into
   `DialContext` and dialed directly, so a rebinding TTL flip between check
   and connect has nothing to flip. Every request re-resolves and re-vets;
-  nothing caches an approval of an IP.
-- **Redirects.** The proxy never follows them — a 3xx is relayed verbatim
-  and the injected credential was attached only to the original vetted
-  request (same posture as the LLM routes). If the harness's MCP client
-  follows one, the new request can only re-enter the proxy and is vetted
+  nothing caches an approval of an IP. The dialer lives in an **explicit
+  `http.Transport` with proxy selection disabled** (`Proxy: nil`) — never
+  `http.DefaultTransport` — so `HTTP_PROXY`/`HTTPS_PROXY` environment
+  variables cannot route a vetted, pinned dial through an unvetted
+  intermediary.
+- **Redirects.** Nothing follows them. The proxy relays a 3xx verbatim —
+  the injected credential was attached only to the original vetted request
+  (same posture as the LLM routes) — and the **control-plane discovery
+  client refuses redirects outright** (`CheckRedirect` returns an error),
+  since it is a real HTTP client that would otherwise chase absolute or
+  relative targets past the vetting. If the harness's MCP client follows a
+  relayed 3xx, the new request can only re-enter the proxy and is vetted
   from scratch; a redirect target that is not a registered server has no
   route at all.
 - **TLS.** Verified against system roots **for the canonical hostname** —
   SNI and SAN checks use the registered name even though the dial is by
   pinned IP, so a vetted address serving a different certificate fails.
-- **Response hygiene.** Per-request timeout, response size cap, and an SSE
-  idle timeout, so a hostile server cannot hold a run's resources open
-  indefinitely.
+- **Response hygiene.** All timers are **proxy-owned and composed**: a
+  connect/TLS timeout and response-header timeout on the transport, a
+  per-request deadline for ordinary responses, and an idle timeout (time
+  since last event) instead of a total deadline for SSE. The harness's
+  per-tool timeout rides the request context, and **downstream cancellation
+  propagates**: when the client goes away or a timer fires, the upstream
+  request context is cancelled and its response body closed — a hostile
+  server cannot hold a run's resources open past its caller.
 - The in-cluster denies (this platform's own control plane, proxy, and
   actor addresses) are covered by the private-range filters plus
   NetworkPolicy under Plan 5; the conformance test there gains a case: an
@@ -267,9 +302,10 @@ OAuth is not the only capture path. The existing write endpoint hard-codes
 **widens**: `PUT /v1/connections/{name}` gains an optional `kind` in the body
 (default `llm_api_key`, for compatibility) and accepts `api_key` with a
 `provider` of `mcp:{server-uuid}` — this is how a remote MCP server's bearer
-secret is stored. Registering an MCP server with `auth: api_key` and no
-matching connection is accepted but the server is unusable until the secret
-arrives; `GET /v1/catalog` shows the missing-credential state. Connection
+secret is **rotated**. Initial capture rides registration: `POST
+/v1/mcp-servers` carries the secret for `auth: api_key` servers and stores it
+before the probe (see Discovery), so a registered server always has its
+credential. Connection
 identity is **always provider-qualified** — the unique key is
 `(tenant_id, provider, name)` and every route that names a connection takes
 the provider (the existing `DELETE …?provider=` shape), so `{name}` alone is
@@ -306,10 +342,20 @@ the row is gone or marked `needs_reauth`, it fails the tool call rather than
 retrying with a stale (possibly rotated) refresh token. The new bundle is
 persisted in the same transaction that holds the lock, before use. This is the one place the vault gains a **write on the
 proxy request path** — stated plainly, extending the parent spec's
-decrypt-only claim. Refresh failure, or an upstream 401 on a request, marks
-the connection `needs_reauth`, fails the tool call as a **tool-level error**
-(the model sees it; the run can finish degraded), and appends a
-`connection.broken` run event — the alerting hook for Plan 4.
+decrypt-only claim.
+
+State transitions are guarded by a **credential epoch**: every bundle write
+bumps an integer epoch on the connection, and injection records the epoch of
+the token it used. Refresh failure, or an upstream 401, marks the connection
+`needs_reauth` **only via compare-and-swap on that epoch** — a 401 earned by
+stale token A cannot demote a connection already refreshed to token B (the
+CAS misses and the request simply retries against the current bundle once).
+Deletion takes the same per-connection advisory lock, so a revoke that lands
+mid-refresh cannot be followed by the refresh persisting credentials for a
+row that no longer exists. When the demotion does apply, the tool call fails
+as a **tool-level error** (the model sees it; the run can finish degraded)
+and a `connection.broken` run event is appended — the alerting hook for
+Plan 4.
 
 ### Revocation
 
@@ -327,9 +373,15 @@ security page) surfaces as the 401 → `needs_reauth` path above.
   required scopes), per-tenant connection status for each, and the tenant's
   registered MCP servers with their discovered-tools snapshots. This grounds
   the verdict's "I'd need access to" and the build agent's step proposals.
-- **`POST /v1/mcp-servers`** registers a registry or custom URL — running
-  canonicalization and a connect probe through the hardened dialer before
-  the row exists.
+- **`POST /v1/mcp-servers`** registers a registry or custom URL. Ordering is
+  defined so no orphaned state survives a failure: canonicalization first
+  (reject before anything persists); then the row is created and, for
+  `auth: api_key`, the request-supplied secret is stored in the vault under
+  the freshly minted `mcp:{server-uuid}` namespace; then the connect probe
+  runs through the hardened dialer **with that credential**. A failed probe
+  deletes both the row and the stored secret and returns the error — a
+  registration either exists probe-verified with its credential in place, or
+  not at all.
 - **`POST /v1/mcp-servers/{id}/refresh-tools`** runs `initialize` +
   `tools/list` via a **control-plane MCP client** — session-authed, not the
   run-token proxy path, same hardened dialer — and stores a **new immutable
@@ -402,24 +454,36 @@ the run. Unknown/finalized run tokens → 401, unchanged.
   vendor-defined notifications) — every one 403 + a recorded `proxy.denied`;
   and the MCP route reaches only the registered endpoint URL regardless of
   request path.
+- **Compilation hygiene:** path args containing `/`, `?`, `#`, or `..`
+  arrive upstream component-encoded or rejected — never as extra path
+  segments; inbound requests carrying cookies or credential-shaped headers
+  reach the upstream with only allowlisted headers and the injected
+  credential winning.
 - **Snapshot pinning:** after a `refresh-tools` that changes a tool's schema,
   a run fired from a previously approved version still projects the pinned
   revision's schemas; adopting the new revision requires a re-approved
   version.
 - **SSRF suite** with a fake resolver: rebinding flip between check and dial
   (must be inert — the dial is pinned); metadata IP; v4-mapped v6 private
-  ranges; IP-literal registration; redirect relayed not followed; TLS name
-  mismatch against a vetted IP.
+  ranges; IP-literal registration; redirect relayed not followed by the
+  proxy, and the discovery client refusing both absolute and relative
+  redirect targets; TLS name mismatch against a vetted IP; a pinned dial
+  ignoring `HTTP_PROXY`/`HTTPS_PROXY` set in the environment; a client abort
+  mid-SSE cancelling the upstream request and closing its body.
 - **OAuth:** refresh race under concurrent runs (singleflight + advisory
   lock: one refresh, both proceed); expired-token refresh persisted before
-  use; refresh failure marks `needs_reauth` and the API shows it; revocation
-  kills the credential for in-flight runs on their next request.
+  use; refresh failure marks `needs_reauth` and the API shows it; a stale
+  401 (earned by an epoch already superseded) does **not** demote the
+  connection; a revoke landing mid-refresh leaves neither row nor secret
+  behind; revocation kills the credential for in-flight runs on their next
+  request.
 - **Discovery isolation:** the control-plane MCP client's endpoints reject
   run tokens; `refresh-tools` for another tenant's server is `ErrNotFound`
   (the house pattern).
 - **Catalog:** startup validation rejects duplicate ops, dangling constraint
   bindings, malformed schemas; version-write rejects permits naming unknown
-  connectors/ops.
+  connectors/ops, and a permit naming **another tenant's** `mcp_server` is
+  rejected as `ErrNotFound` (cross-tenant reference test).
 - **e2e:** a run against a fake Slack upstream completes a read op and a
   channel-constrained write op with zero credentials in the harness, and a
   write to an unlisted channel is denied and audited.
