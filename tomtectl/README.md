@@ -41,7 +41,7 @@ local one, [kind](https://kind.sigs.k8s.io/) does:
 kind create cluster
 ```
 
-Build the CLI (Go 1.26+) and run the agent:
+Build the CLI (Go 1.26.2+) and run the agent:
 
 ```sh
 cd tomtectl && go build -o tomtectl .
@@ -52,7 +52,7 @@ cd tomtectl && go build -o tomtectl .
 ./tomtectl logs --follow   # hello world, every 30s
 ```
 
-```
+```text
 tomte agent starting: waking every 30s
 2026-08-31T21:04:11Z Hello, world — from the hello agent.
 2026-08-31T21:04:41Z Hello, world — from the hello agent.

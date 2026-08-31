@@ -56,6 +56,12 @@ func run(args []string) error {
 	if err := fs.Parse(rest); err != nil {
 		return err
 	}
+	// No command takes positional arguments — the agent always comes
+	// from -f. Silently ignoring one (`tomtectl down other-agent`)
+	// would act on a different agent than the user named.
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q — the agent is picked by -f, not by name (see `tomtectl help`)", fs.Arg(0))
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
 
@@ -101,6 +103,16 @@ func (a *Agent) validate() error {
 	}
 	if !dns1123Label.MatchString(a.Metadata.Name) {
 		return fmt.Errorf("metadata.name %q must be a lowercase DNS label (a-z, 0-9, hyphens)", a.Metadata.Name)
+	}
+	// Labels are copied onto every derived object; an invalid one would
+	// otherwise surface as an opaque API-server rejection at `up`.
+	for k, v := range a.Metadata.Labels {
+		if errs := validation.IsQualifiedName(k); len(errs) > 0 {
+			return fmt.Errorf("metadata.labels: invalid key %q: %s", k, strings.Join(errs, "; "))
+		}
+		if errs := validation.IsValidLabelValue(v); len(errs) > 0 {
+			return fmt.Errorf("metadata.labels[%q]: invalid value %q: %s", k, v, strings.Join(errs, "; "))
+		}
 	}
 	if len(a.Spec.Steps) == 0 {
 		return fmt.Errorf("spec.steps must list at least one step")

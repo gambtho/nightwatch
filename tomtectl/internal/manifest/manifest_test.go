@@ -87,6 +87,24 @@ func TestRunScriptReadsTheMountedFile(t *testing.T) {
 	}
 }
 
+// TestRunScriptCleansScalarsLikeTheParser: trailing comments and
+// single quotes must not leak into sleep arguments or printed text.
+func TestRunScriptCleansScalarsLikeTheParser(t *testing.T) {
+	doc := strings.Replace(string(agentfile.Template), "every: 30s", "every: 1s # wake fast", 1)
+	doc = strings.Replace(doc, "text: Hello, world — from the hello agent.", "text: 'single-quoted' # note", 1)
+
+	got, ranUntilDeadline := runScriptAgainst(t, doc)
+	if !ranUntilDeadline {
+		t.Fatalf("script exited on its own — the comment likely leaked into sleep:\n%s", got)
+	}
+	if !strings.Contains(got, "waking every 1s\n") {
+		t.Errorf("trailing comment leaked into the schedule:\n%s", got)
+	}
+	if !strings.Contains(got, "Z single-quoted\n") {
+		t.Errorf("single quotes or comment leaked into the text:\n%s", got)
+	}
+}
+
 // TestRunScriptFailsLoudly: a missing file or missing schedule must
 // crash the container visibly, never fall back to a silent default.
 func TestRunScriptFailsLoudly(t *testing.T) {

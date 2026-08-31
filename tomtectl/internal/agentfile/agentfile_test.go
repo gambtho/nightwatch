@@ -78,6 +78,12 @@ func TestParseRejects(t *testing.T) {
 		{"unknown field", func(s string) string {
 			return strings.Replace(s, "  schedule:", "  shedule:", 1)
 		}, ""},
+		{"bad label key", func(s string) string {
+			return strings.Replace(s, "  name: hello", "  name: hello\n  labels:\n    team name: night", 1)
+		}, "invalid key"},
+		{"bad label value", func(s string) string {
+			return strings.Replace(s, "  name: hello", "  name: hello\n  labels:\n    team: night shift", 1)
+		}, "invalid value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

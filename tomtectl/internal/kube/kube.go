@@ -64,6 +64,7 @@ func New(kubeContext, namespace string) (*Client, error) {
 // a concurrent writer (the deployment controller, another tomtectl)
 // costs a retry, not a failure.
 func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.Deployment) error {
+	name := cm.Labels[manifest.AgentLabel]
 	cms := c.cs.CoreV1().ConfigMaps(c.Namespace)
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := cms.Get(ctx, cm.Name, metav1.GetOptions{})
@@ -72,6 +73,9 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 			return err
 		}
 		if err != nil {
+			return err
+		}
+		if err := owned(existing.Labels, name, "ConfigMap", cm.Name); err != nil {
 			return err
 		}
 		existing.Labels = cm.Labels
@@ -91,6 +95,9 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 			return err
 		}
 		if err != nil {
+			return err
+		}
+		if err := owned(existing.Labels, name, "Deployment", dep.Name); err != nil {
 			return err
 		}
 		existing.Labels = dep.Labels
@@ -119,6 +126,9 @@ func (c *Client) Status(ctx context.Context, name string, out io.Writer) error {
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err := owned(dep.Labels, name, "Deployment", name); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "agent %s (namespace %s): %d/%d ready\n",
@@ -176,27 +186,58 @@ func (c *Client) Logs(ctx context.Context, name string, follow bool, out io.Writ
 
 // Delete removes the agent's objects. Missing objects are tolerated,
 // but the caller is told whether anything actually existed — "removed"
-// on a wrong namespace would leave the real agent running.
+// on a wrong namespace would leave the real agent running. Only
+// objects carrying tomtectl's ownership labels are deleted, and the
+// fetched UID is a delete precondition so a same-name replacement
+// created between Get and Delete survives.
 func (c *Client) Delete(ctx context.Context, name string) (bool, error) {
 	removed := false
-	err := c.cs.AppsV1().Deployments(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	dep, err := c.cs.AppsV1().Deployments(c.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
-		removed = true
+		if err := owned(dep.Labels, name, "Deployment", name); err != nil {
+			return removed, err
+		}
+		opts := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &dep.UID}}
+		err = c.cs.AppsV1().Deployments(c.Namespace).Delete(ctx, name, opts)
+		if err == nil {
+			removed = true
+		} else if !apierrors.IsNotFound(err) {
+			return removed, fmt.Errorf("deleting Deployment: %w", err)
+		}
 	} else if !apierrors.IsNotFound(err) {
-		return removed, fmt.Errorf("deleting Deployment: %w", err)
+		return removed, fmt.Errorf("reading Deployment: %w", err)
 	}
-	err = c.cs.CoreV1().ConfigMaps(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	cm, err := c.cs.CoreV1().ConfigMaps(c.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err == nil {
-		removed = true
+		if err := owned(cm.Labels, name, "ConfigMap", name); err != nil {
+			return removed, err
+		}
+		opts := metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &cm.UID}}
+		err = c.cs.CoreV1().ConfigMaps(c.Namespace).Delete(ctx, name, opts)
+		if err == nil {
+			removed = true
+		} else if !apierrors.IsNotFound(err) {
+			return removed, fmt.Errorf("deleting ConfigMap: %w", err)
+		}
 	} else if !apierrors.IsNotFound(err) {
-		return removed, fmt.Errorf("deleting ConfigMap: %w", err)
+		return removed, fmt.Errorf("reading ConfigMap: %w", err)
 	}
 	return removed, nil
 }
 
+// owned rejects a same-name object that tomtectl does not manage —
+// mutating or deleting a bystander would be far worse than stopping.
+func owned(labels map[string]string, agent, kind, objName string) error {
+	if labels[manifest.AgentLabel] == agent && labels[manifest.ManagedByLabel] == manifest.ManagedByValue {
+		return nil
+	}
+	return fmt.Errorf("a %s named %q exists but is not managed by tomtectl for agent %q — refusing to touch it", kind, objName, agent)
+}
+
 func (c *Client) pods(ctx context.Context, name string) ([]corev1.Pod, error) {
 	list, err := c.cs.CoreV1().Pods(c.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: manifest.AgentLabel + "=" + name,
+		LabelSelector: manifest.AgentLabel + "=" + name +
+			"," + manifest.ManagedByLabel + "=" + manifest.ManagedByValue,
 	})
 	if err != nil {
 		return nil, err

@@ -11,7 +11,7 @@ A newcomer with a kubeconfig runs four commands and watches a hello-world
 agent, defined entirely by one human-readable `agent.yaml`, log from a real
 cluster:
 
-```
+```sh
 tomtectl init
 tomtectl up
 tomtectl status

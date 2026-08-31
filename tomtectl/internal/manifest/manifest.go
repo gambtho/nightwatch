@@ -16,9 +16,12 @@ import (
 )
 
 const (
-	// AgentLabel marks every object tomtectl manages for an agent.
-	AgentLabel = "tomte.dev/agent"
-	managedBy  = "app.kubernetes.io/managed-by"
+	// AgentLabel marks every object tomtectl manages for an agent; the
+	// ManagedBy pair is the ownership check that keeps tomtectl from
+	// ever mutating a same-name bystander object.
+	AgentLabel     = "tomte.dev/agent"
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+	ManagedByValue = "tomtectl"
 
 	// Image is the K1 placeholder runtime: a stock shell image running
 	// RunScript. K2 replaces it with the real Tomte agent runtime; the
@@ -43,8 +46,21 @@ const RunScript = `#!/bin/sh
 # schedule is a loud crash, never a silent default.
 set -eu
 FILE=` + mountPath + `/agent.yaml
+# Trim a YAML scalar the way the CLI's parser reads it: quoted values
+# keep everything inside the quotes; unquoted values lose a trailing
+# " # comment".
+clean() {
+  v=$1
+  case "$v" in
+    \"*) v=${v#\"}; v=${v%%\"*} ;;
+    \'*) v=${v#\'}; v=${v%%\'*} ;;
+    *) v=${v%% #*} ;;
+  esac
+  printf '%s' "$v"
+}
 read_every() {
-  every=$(sed -n 's/^[[:space:]]*every:[[:space:]]*//p' "$FILE" | head -n1 | tr -d '"')
+  every=$(sed -n 's/^[[:space:]]*every:[[:space:]]*//p' "$FILE" | head -n1)
+  every=$(clean "$every")
   if [ -z "$every" ]; then
     echo "tomte agent: no schedule.every found in $FILE" >&2
     exit 1
@@ -55,10 +71,7 @@ read_every
 echo "tomte agent starting: waking every $every"
 while true; do
   sed -n 's/^[[:space:]]*text:[[:space:]]*//p' "$FILE" | while IFS= read -r line; do
-    case "$line" in
-      \"*\") line=${line#\"}; line=${line%\"} ;;
-    esac
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $line"
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(clean "$line")"
   done
   read_every
   sleep "$every"
@@ -68,8 +81,8 @@ done
 // Labels returns the label set shared by every object of an agent.
 func Labels(name string) map[string]string {
 	return map[string]string{
-		AgentLabel: name,
-		managedBy:  "tomtectl",
+		AgentLabel:     name,
+		ManagedByLabel: ManagedByValue,
 	}
 }
 
