@@ -34,12 +34,22 @@ the connections manager are designed but not yet built.
 
 ## Repository layout
 
+- `tomtectl/` — the current focus: the K8s agent track's CLI. An
+  agent-as-code `agent.yaml` plus `tomtectl init/up/status/logs/down` to run
+  an agent on a Kubernetes cluster.
 - `server/` — the Go control plane: public `/v1` API, enforcement proxy,
   scheduler, vault, and metering. See [server/README.md](server/README.md).
-- `web/` — the SPA frontend. See [web/README.md](web/README.md).
-- `src/` + the root Vite files — the retired early prototype, kept for
-  reference; not shared code.
+- `web/` — the SPA frontend. Idle: its pivot surfaces are built; wire-up
+  resumes when the server work it consumes lands. See
+  [web/README.md](web/README.md).
+- `app/` — the desktop packaging shell. Paused by the K8s-first direction
+  change; kept as the record of the Wails v3 decision and boot spike. See
+  [app/README.md](app/README.md).
 - `docs/` — API contract, design specs, and coordination documents.
+
+The early React prototype that previously lived at the repo root (`src/`
+plus the root Vite files) was removed after the pivots; it survives in git
+history and on the demo branches (`demo/dev-persona`, `demo/tomte-pivot`).
 
 ## Developing
 

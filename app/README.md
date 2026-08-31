@@ -1,5 +1,12 @@
 # app/ — Tomte desktop shell (packaging lane)
 
+> **PAUSED** (2026-08-31, direction change 2): the near-term path is the
+> K8s agent track (`tomtectl/`), not the desktop shell. This code stays as
+> the record of the Wails v3 decision and boot spike. The coordination
+> board
+> ([`docs/superpowers/plans/2026-08-31-parallel-sessions.md`](../docs/superpowers/plans/2026-08-31-parallel-sessions.md))
+> is the authority on lane status.
+
 Spike stage. See the plan:
 [`docs/superpowers/plans/2026-08-31-packaging-shell-plan.md`](../docs/superpowers/plans/2026-08-31-packaging-shell-plan.md).
 
