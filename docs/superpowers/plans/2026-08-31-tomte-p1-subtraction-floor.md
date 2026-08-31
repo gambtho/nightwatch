@@ -39,7 +39,7 @@ Confirmed facts the plan builds on:
 ## Decisions taken (recorded, autonomous, spec-derived)
 
 1. **Endpoint record persists in the DB** (`llm_endpoint`, one row per tenant), not a config file: the server enforces routing, pricing, and the switch-time gate, and the frontend needs an API. The shell's non-secret config file may mirror it later.
-2. **No endpoint row = legacy env mode**: `approveVersion` and the proxy behave exactly as on `main` today (`RunProvider`/`RunModel` env, bundled pricing, static route table). First-run always creates a row; this keeps dev workflows and ~all existing tests valid.
+2. **No endpoint row = legacy env mode**: `approveVersion` and the proxy behave exactly as on `main` today (`RunProvider`/`RunModel` env, bundled pricing, static route table). First-run always creates a row; this keeps dev workflows and ~all existing tests valid. (Codex flagged this as beyond the spec; it is kept deliberately — it is the same posture as the spec's surviving `TOMTE_VAULT_KEY` dev/headless path: a development convenience that adds no product surface and preserves, rather than adds, behavior.)
 3. **Approval bakes endpoint identity _and_ resolved prices into the compiled doc** (`steps.Compiled` gains `endpoint`, `endpoint_preset`, `price_in_cents_per_1m`, `price_out_cents_per_1m`; `CompilerV = 2`). The harness costs runs from the compiled prices (v<2 docs fall back to the bundled table), so no runtime price plumbing exists and "switching re-runs the gate" is simply "switching recompiles".
 4. **Endpoint switch = gate + recompile + governance event**: every approved version is recompiled against the new endpoint (the `ApproveVersion` doc comment's recompile-not-copy rule), and a `tenant_event` row `endpoint.switched` records it.
 5. **Handoff is a GET that consumes**: `GET /local/handoff?token=…` atomically consumes (login_token's single-use UPDATE shape), mints the session in the same tx, sets the cookie, 303-redirects. The scanner-proof interstitial existed for _emailed_ links; a loopback URL minted seconds earlier by the shell has no scanner in the path.
@@ -47,6 +47,9 @@ Confirmed facts the plan builds on:
 7. **Five presets** (board amendment, 2026-08-31, relayed by the coordinating session): Anthropic, OpenAI, OpenRouter, **GitHub Models**, **Azure AI Foundry**, plus custom and local. Verified against current vendor docs:
    - **GitHub Models**: fixed base URL `https://models.github.ai/inference`, OpenAI-compatible chat/completions, auth `Authorization: Bearer <PAT>` (fine-grained PAT with `models:read`). Billing is **two-mode** (board correction, 2026-08-31): the free included quota is subscription-included/rate-limited, but **opt-in pay-as-you-go exists** (token units × per-model multipliers; personal accounts default to a $0 spending limit but can raise it), so a blanket $0 classification would be silent unmetered spend — the exact thing the gate exists to prevent. Resolution: **zero-cost is an explicit per-endpoint flag, never preset-inferred.** The github preset asks "free included quota, or paid usage enabled?": free → `zero_cost = true`, gate skipped, cost recorded 0, copy "included with your GitHub plan — if you later enable paid usage, update this in settings"; paid → `zero_cost = false` and the normal user-entered (base URL, model) price path (link GitHub's pricing page). Flipping the flag later is an ordinary endpoint switch through `PUT /v1/settings/endpoint` — a recorded governance event that re-runs the gate and recompiles. `local` is always `zero_cost = true`. Sources: GitHub REST models-inference docs; GitHub changelog 2025-06-24 (paid usage beyond free limits); docs.github.com "About billing for GitHub Models".
    - **Azure AI Foundry**: **per-resource** base URL — Tomte pins the **v1 API**: `https://<resource>.openai.azure.com/openai/v1` or `https://<resource>.services.ai.azure.com/openai/v1`, which is OpenAI-compatible chat/completions with **no `api-version` parameter** (v1 GA). API keys are sent in an **`api-key` header** (Bearer is Entra-token-only, out of scope). Validation: HTTPS, host suffix ∈ {`.openai.azure.com`, `.services.ai.azure.com`}, path exactly `/openai/v1`. No bundled prices (Azure pricing is per-deployment) — the user-entered price path is Azure's pricing story. Source: MS Learn "Azure OpenAI v1 API" (api-version-lifecycle).
+
+8. **Deployment-aware session cookie** (Codex review F4): the repo itself documents that Safari refuses `Secure` cookies over plain-HTTP localhost (`session.go:19-24`), and the auto-configured loopback origin is plain HTTP — so a hardcoded `__Host-` cookie would lock macOS browsers out. `SessionCookie`/`ClearSessionCookie` become origin-aware: an `https` public base keeps today's `__Host-tomte_session` + `Secure`; the `http` loopback origin uses `tomte_session` with `Secure: false` (still `HttpOnly`, `SameSite=Lax`, `Path=/`), defended by the loopback bind + Origin check + Host allowlist. Browser-level (webview/Safari) verification is the packaging lane's and is flagged in the delta sheet.
+9. **First-run key verification** (the spec's "one live, minimal call" at paste time) is **out of P1 scope**: it is a first-run surface with no owner in the P1 item list; routed to the board for ownership (likely P2 alongside connector capture-verify, which needs the same session-authed verify path).
 
 ---
 
@@ -76,10 +79,15 @@ SHRINK: httpapi/{auth.go,auth_test.go,httpapi.go,connections.go,catalog.go,workf
 
 **DDL (verbatim):**
 
+**Authoring order (Codex review, F1):** the migration file is authored incrementally inside the branch so every commit keeps the suite green: Task 1 lands the file with the **additive** DDL below (new tables) plus the new store methods; the `login_token` drop lands in the Task 3 commit that deletes `store/auth.go`, and the `connection` changes land in the Task 2 commit that deletes the epoch machinery. The file is unreleased until the PR merges, so evolving it within the branch is safe. Final content:
+
 ```sql
 -- +goose Up
 DROP TABLE login_token;
 
+-- OAuth credentials are dead with the pivot; delete rows BEFORE narrowing the
+-- kind check, or the constraint fails on any upgraded install that has one.
+DELETE FROM connection WHERE kind = 'oauth';
 ALTER TABLE connection DROP COLUMN metadata, DROP COLUMN epoch;
 ALTER TABLE connection DROP CONSTRAINT connection_kind_check;
 ALTER TABLE connection ADD CONSTRAINT connection_kind_check
@@ -93,7 +101,7 @@ CREATE TABLE scheduler_heartbeat (
 
 -- Single-use, short-TTL browser handoff (login_token's consume shape, minus email).
 CREATE TABLE handoff_token (
-  token_hash text PRIMARY KEY,
+  token_hash bytea PRIMARY KEY, -- same representation as session/login_token (httpapi.HashToken output)
   tenant_id uuid NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
   user_id uuid NOT NULL,
   expires_at timestamptz NOT NULL,
@@ -145,8 +153,8 @@ CREATE TABLE tenant_event (
 **Produces (store API):**
 
 - `GetSchedulerHeartbeat(ctx) (*time.Time, error)` / `SetSchedulerHeartbeat(ctx, t time.Time) error` (`INSERT … ON CONFLICT (id) DO UPDATE`) — `// System query:` comments; the single documented exception to the tenant-scoping rule for tables (precedent: the three System-query list methods).
-- `CreateHandoffToken(ctx, tokenHash string, tenantID, userID uuid.UUID, ttl time.Duration) error` — inline sweep `DELETE FROM handoff_token WHERE expires_at < now() - interval '1 hour'` on the write path (login_token's trick).
-- `ConsumeHandoffToken(ctx, tokenHash, sessionTokenHash string) (tenantID, userID uuid.UUID, err error)` — one tx: claim via `UPDATE … SET consumed_at = now() WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now() RETURNING tenant_id, user_id`, then the existing unexported `createSession`, commit. `pgx.ErrNoRows` → `ErrHandoffTokenInvalid` (new sentinel).
+- `CreateHandoffToken(ctx, tokenHash []byte, tenantID, userID uuid.UUID, ttl time.Duration) error` — inline sweep `DELETE FROM handoff_token WHERE expires_at < now() - interval '1 hour'` on the write path (login_token's trick).
+- `ConsumeHandoffToken(ctx, tokenHash, sessionTokenHash []byte) (tenantID, userID uuid.UUID, err error)` — one tx: claim via `UPDATE … SET consumed_at = now() WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now() RETURNING tenant_id, user_id`, then the existing unexported `createSession`, commit. `pgx.ErrNoRows` → `ErrHandoffTokenInvalid` (new sentinel).
 - `GetLLMEndpoint(ctx, tenantID) (*LLMEndpoint, error)` (`ErrNotFound` when unset) / `PutLLMEndpoint(ctx, tenantID, e LLMEndpoint) error` (upsert) with `type LLMEndpoint struct { Preset, Kind, BaseURL string; ConnectionName *string; RunModel string; ZeroCost bool }`.
 - `GetModelPrice(ctx, tenantID, baseURL, model string) (inCents, outCents int, err error)` / `UpsertModelPrice(ctx, tenantID, baseURL, model string, inCents, outCents int) error` / `ListModelPrices(ctx, tenantID) ([]ModelPrice, error)`.
 - `AppendTenantEvent(ctx, tenantID, eventType string, payload json.RawMessage) error`.
@@ -202,15 +210,19 @@ func (s *Scheduler) Tick(ctx context.Context) {
             lookback = gap // sleep/downtime gap plus one interval of margin ("The sleeping machine")
         }
     }
-    s.createDue(ctx, now, lookback)
+    ok := s.createDue(ctx, now, lookback)
     s.dispatchPending(ctx)
+    if !ok {
+        return // Codex review F2: a failed create pass must NOT advance the heartbeat,
+               // or the missed occurrence is permanently outside the next lookback.
+    }
     if err := s.Store.SetSchedulerHeartbeat(ctx, now); err != nil {
         slog.Error("scheduler: heartbeat save", "err", err)
     }
 }
 ```
 
-`createDue` gains `(now, lookback)` params (drops its own `s.now()`/`s.window()` calls); `mostRecentDue` unchanged. Idempotence stays index-enforced (`run_workflow_firetime_unique`), so a long lookback cannot double-fire.
+`createDue` gains `(now, lookback)` params (drops its own `s.now()`/`s.window()` calls) and **returns `bool`**: false when `ListSchedulableWorkflows` fails or any `Engine.Fire` fails with a non-sentinel error (the sentinel skips — `ErrAlreadyFired`, `ErrActiveRun`, cap skips, unparseable schedules — still count as a completed pass, exactly as they are non-errors today). `mostRecentDue` unchanged. New test: `TestTickFailedCreatePassKeepsHeartbeat` (fire error → heartbeat row unchanged → next tick still sees the old occurrence). Idempotence stays index-enforced (`run_workflow_firetime_unique`), so a long lookback cannot double-fire.
 
 Tests: **`TestTickFiresOccurrenceHoursOldAfterWake`** — the case that never fires today: daily `0 3 * * *` schedule, heartbeat seeded at 02:59, `Now` fixed at 07:42 → exactly one run with `fire_time` = 03:00; a second `Tick` creates nothing. `TestTickStalenessWindowSkipsOldOccurrences` re-framed as `TestTickNoHeartbeatKeepsDefaultWindow` (first-ever tick, no heartbeat row → old occurrence still outside the 5-minute window). Existing tests get a heartbeat-free setup (nil heartbeat ⇒ behavior identical to today).
 
@@ -247,6 +259,8 @@ func Validate(preset, rawBaseURL string) (Endpoint, error)
 
 `proxyadapter` implements `EndpointSource` over `store.GetLLMEndpoint` (`ErrNotFound` → `nil, nil`).
 
+**One source of truth for the LLM credential (Codex review F5):** when an endpoint record exists, the **endpoint's** `Connection` names the credential — the proxy resolves it (under the endpoint's provider namespace) and `permit.llm.connection` is ignored; approval and the switch gate validate the endpoint's connection and skip the permit-connection check. `permit.llm.connection` remains meaningful only in legacy env mode, where today's behavior (including the `"default"` platform-key fallback) is unchanged. Test: `TestProxyEndpointConnectionWins` — endpoint with a named connection + permit naming a different one → the endpoint's credential is injected, end to end through approve → fire → proxy.
+
 ### Task 7: Pricing-gate rework + endpoint switch + settings API
 
 **Files:** Modify `steps/steps.go`, `llm/pricing.go`, `httpapi/workflows.go`, `harness/harness.go`, `internalapi` (only if compile shape assertions exist). Create `httpapi/settings.go` + `settings_test.go`.
@@ -279,7 +293,13 @@ PriceOutCentsPer1M int   `json:"price_out_cents_per_1m,omitempty"`
 **`httpapi/settings.go`** (all session-authed; mutations Origin-wrapped via `mut(auth(...))`):
 
 - `GET /v1/settings/endpoint` → `{preset, kind, base_url, connection, run_model, zero_cost, connected}` or 404 when unset.
-- `PUT /v1/settings/endpoint` `{preset, base_url, connection, run_model, zero_cost}` (`zero_cost` accepted only for `github` — `local` forces true, everything else forces false; a flip of the flag alone is still a full switch) → `endpoint.Validate`; then the **switch-time gate**: for every approved version, resolve the new (provider, model) price exactly as approveVersion does; any miss → `409 {"error": "unpriced_models", "models": [{"model": …, "base_url": …}]}` and **no write**. On success: `PutLLMEndpoint`, recompile every approved version (`steps.Parse` the stored draft → `steps.Compile` with the new Platform → `UpdateApprovedCompiled`), `AppendTenantEvent(…, "endpoint.switched", {"from": old.BaseURL|null, "to": new.BaseURL, "preset": new.Preset})`. The recorded governance act.
+- `PUT /v1/settings/endpoint` `{preset, base_url, connection, run_model, zero_cost}` (`zero_cost` accepted only for `github` — `local` forces true, everything else forces false; a flip of the flag alone is still a full switch) → `endpoint.Validate`; then the **switch-time gate** (Codex review F3/F5 — three checks, all before any write):
+  1. **Pricing**: for every approved version, resolve the new (provider, model) price exactly as approveVersion does; any miss → `409 {"error": "unpriced_models", "models": [{"model": …, "base_url": …}]}`.
+  2. **Permit compatibility**: every approved version's permit must `AllowsProvider(newProvider)` — the proxy enforces the allowlist at run time, so an incompatible switch would break approved workflows at 3 AM; violations → `409 {"error": "provider_not_permitted", "workflows": […]}`.
+  3. **Credential**: non-`local` endpoints require the named `llm_api_key` connection to exist (`GetConnection`) → `409 {"error": "connection_missing"}`.
+
+  On success the whole switch is **one store transaction** — new `store.SwitchLLMEndpoint(ctx, tenantID, e LLMEndpoint, recompiled []CompiledUpdate, eventPayload json.RawMessage) error` (with `type CompiledUpdate struct { WorkflowID uuid.UUID; Version int; Compiled json.RawMessage }`): upsert the endpoint row, apply every `UpdateApprovedCompiled`, append the `endpoint.switched` tenant_event, commit — or nothing changes. The handler computes the recompilations (pure `steps.Parse` → `steps.Compile`) outside the tx and hands them over; transactions stay internal to store methods, the package's grain. The recorded governance act.
+
 - `GET /v1/settings/prices` / `PUT /v1/settings/prices` `{base_url, model, input_cents_per_1m, output_cents_per_1m}` (explicit `base_url` so switch-time pricing can target the _new_ endpoint before switching).
 - `GET /v1/settings/budget` → `{monthly_cap_cents}`; `PUT /v1/settings/budget` `{monthly_cap_cents}` → `SetTenantMonthlyCap` (first HTTP caller; the budget is user-owned now).
 
@@ -337,7 +357,7 @@ Tests (`serve_test.go`, testpg-backed): `TestStartBootsAndServes` — `Start` wi
 
 ## Delta sheet (published to consuming lanes on completion)
 
-**Packaging lane** — the library seam: `server.Options` / `server.Start(ctx, Options) (*Server, error)` / `Server.{Addr, BaseURL, MintLocalSession, HandoffURL, Shutdown, Err}` exactly as Task 9. `TOMTE_PUBLIC_BASE_URL` optional; Host allowlist automatic.
+**Packaging lane** — the library seam: `server.Options` / `server.Start(ctx, Options) (*Server, error)` / `Server.{Addr, BaseURL, MintLocalSession, HandoffURL, Shutdown, Err}` exactly as Task 9. `TOMTE_PUBLIC_BASE_URL` optional; Host allowlist automatic. **Owed verification**: on the http loopback origin the session cookie is `tomte_session` (not `__Host-`, not Secure) — webview/Safari cookie acceptance must be verified at the browser level in the shell (decision 8).
 
 **Frontend lane** — API shapes: settings endpoints + error contracts exactly as Task 7 (`unpriced_model` / `unpriced_models` bodies are the price-form triggers); preset enum `anthropic|openai|openrouter|github|azure|custom|local` (azure/custom/local take a user base URL; `zero_cost` is an explicit per-endpoint flag — local always, github by free-vs-paid choice on the capture card, togglable later via the endpoint settings switch); login/magic-link routes gone; `GET /local/handoff?token=&next=` sets the session cookie; `/v1/me`, logout, Origin rules unchanged.
 
