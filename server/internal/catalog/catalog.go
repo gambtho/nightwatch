@@ -50,8 +50,9 @@ type Connector struct {
 	ops map[string]*Op
 }
 
-// Auth names the OAuth credential namespace for the connector. Distinct
-// connectors may share one, so one consent can cover them all.
+// Auth names the credential namespace for the connector (the provider a
+// pasted api_key connection is stored under). Distinct connectors may
+// share one, so one pasted token can cover them all.
 type Auth struct {
 	Provider string `json:"provider"`
 }

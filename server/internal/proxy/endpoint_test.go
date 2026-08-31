@@ -133,8 +133,10 @@ func TestProxyAzureEndpointInjectsAPIKeyHeader(t *testing.T) {
 	require.Empty(t, cap.auth)
 }
 
-// An endpoint lookup failure fails closed, and an endpoint for a
-// different provider plays no part (legacy route table still applies).
+// An endpoint lookup failure fails closed, and a configured endpoint for
+// a DIFFERENT provider also fails the request closed — no fallback to the
+// static route table, which could route to an upstream the tenant never
+// configured on the platform key.
 func TestProxyEndpointLookupFailureAndMismatch(t *testing.T) {
 	p := mustPermit(t, `{"v":1,"llm":{"providers":["custom"]},"connections":{}}`)
 	events := &fakeEvents{}
@@ -151,11 +153,22 @@ func TestProxyEndpointLookupFailureAndMismatch(t *testing.T) {
 	resp := postLLM(t, ts, "custom", "chat/completions")
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
-	// custom has no static route; with no matching endpoint it is 403.
+	// A configured endpoint mismatching the requested provider: 403 even
+	// for a provider with a static route (anthropic) — fail closed.
 	creds := &recordingCreds{}
-	ts2, _, _ := endpointEnv(t, p,
+	p2 := mustPermit(t, `{"v":1,"llm":{"providers":["anthropic","custom"]},"connections":{}}`)
+	ts2, _, _ := endpointEnv(t, p2,
 		&endpoint.Endpoint{Preset: "openai", Kind: "openai_compatible", Connection: "default", RunModel: "m"}, creds)
-	resp = postLLM(t, ts2, "custom", "chat/completions")
-	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	for _, provider := range []string{"custom", "anthropic"} {
+		req, err := http.NewRequestWithContext(context.Background(), "POST",
+			ts2.URL+"/proxy/llm/"+provider+"/"+map[string]string{"custom": "chat/completions", "anthropic": "v1/messages"}[provider], nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer run-token")
+		req.Header.Set("x-api-key", "run-token")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusForbidden, resp.StatusCode, provider)
+	}
 	require.Zero(t, creds.calls)
 }

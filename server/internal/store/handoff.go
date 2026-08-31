@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,8 @@ var ErrHandoffTokenInvalid = errors.New("store: handoff token expired or already
 func (s *Store) CreateHandoffToken(ctx context.Context, tokenHash []byte, tenantID, userID uuid.UUID, ttl time.Duration) error {
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM handoff_token WHERE expires_at < now() - interval '1 hour'`); err != nil {
-		return err
+		// Best-effort for real: a failed sweep must not block the mint.
+		slog.Error("store: handoff sweep", "err", err)
 	}
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO handoff_token (token_hash, tenant_id, user_id, expires_at)

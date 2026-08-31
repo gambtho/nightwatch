@@ -257,6 +257,10 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 	case ep != nil && ep.Preset == endpoint.PresetLocal:
 	case ep != nil:
 		if _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, provider, ep.Connection); cerr != nil {
+			if !errors.Is(cerr, store.ErrNotFound) {
+				writeErr(w, cerr) // an infrastructure fault is not "paste the key"
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "endpoint connection " + ep.Connection + " does not exist for " + provider + " — paste the key first",
 			})
@@ -264,6 +268,10 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	case p.LLM.Connection != "default":
 		if _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, provider, p.LLM.Connection); cerr != nil {
+			if !errors.Is(cerr, store.ErrNotFound) {
+				writeErr(w, cerr)
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "permit names llm connection " + p.LLM.Connection + " which does not exist for " + provider,
 			})

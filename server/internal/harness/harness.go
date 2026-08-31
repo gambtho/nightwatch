@@ -44,9 +44,10 @@ type Steps struct {
 	Provider     string `json:"provider"`
 	Model        string `json:"model"`
 	MaxTokens    int    `json:"max_tokens"`
-	// Endpoint-era compiled docs (compiler_v >= 2) carry the prices
-	// approval resolved; cost is computed from them. Older docs cost via
-	// the bundled table.
+	// A compiled doc that records an endpoint carries the prices approval
+	// resolved; cost is computed from them. Docs without one (older
+	// compiler generations, legacy env-mode approvals) cost via the
+	// bundled table.
 	EndpointPreset     string `json:"endpoint_preset"`
 	PriceInCentsPer1M  int    `json:"price_in_cents_per_1m"`
 	PriceOutCentsPer1M int    `json:"price_out_cents_per_1m"`

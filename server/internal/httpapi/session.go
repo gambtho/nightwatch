@@ -44,8 +44,8 @@ type SessionClaims struct {
 type claimsKey struct{}
 
 // NewOpaqueToken mints an opaque credential (used for both sessions and
-// magic-link tokens): the presented value is base64url of 256 random
-// bits, and only its SHA-256 reaches the database.
+// handoff tokens): the presented value is base64url of 256 random bits,
+// and only its SHA-256 reaches the database.
 func NewOpaqueToken() (value string, tokenHash []byte, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

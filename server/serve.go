@@ -241,6 +241,11 @@ func Start(ctx context.Context, o Options) (*Server, error) {
 func hostAllowlist(allowed map[string]bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !allowed[r.Host] {
+			// Loud on purpose: this is either DNS rebinding or a
+			// misconfigured origin (localhost vs 127.0.0.1) — both worth
+			// an operator-visible line, and indistinguishable from a dead
+			// server otherwise.
+			slog.Warn("server: request rejected by host allowlist", "host", r.Host, "path", r.URL.Path)
 			http.Error(w, "unknown host", http.StatusForbidden)
 			return
 		}
@@ -284,10 +289,17 @@ func (s *Server) HandoffURL(ctx context.Context) (string, error) {
 func (s *Server) Err() <-chan error { return s.errCh }
 
 // Shutdown stops the background loops, drains the HTTP server, and closes
-// the pool.
+// the pool. A serve-loop failure that happened before Shutdown (a dead
+// listener) is joined into the result rather than left unread in Err.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.cancelLoops()
 	err := s.httpServer.Shutdown(ctx)
+	select {
+	case serveErr := <-s.errCh:
+		err = errors.Join(err, serveErr)
+		s.errCh <- nil // keep Err() non-blocking for callers that also wait on it
+	default:
+	}
 	s.pool.Close()
 	return err
 }

@@ -1,16 +1,19 @@
 package llm
 
 // pricePer1M is USD cents per 1,000,000 tokens, as fixed-point integers.
-// 75 means $0.75. Azure AI Foundry is omitted — that provider is BYOK and
-// the customer is billed by Azure directly, so we do not compute cost.
+// 75 means $0.75. This bundled table covers the fixed-base presets only;
+// azure and custom endpoints are priced by user-entered rows
+// (store.ModelPrice), resolved at approval time.
 type pricePer1M struct{ in, out int }
 
 // priceTable is a minimal lookup for public-list pricing as of 2026-Q1.
 // Unknown (provider, model) combinations return 0 rather than erroring —
 // a run must not fail because we haven't catalogued a new model. Operators
 // can PR new rows; stale rows are harmless (they just under/over-report).
-// Workflow validation makes unknown (provider, model) pairs unreachable for
-// approved workflows, so CostCents returning 0 for an unknown model is safe.
+// On the legacy env-mode path, approval fails closed on unpriced pairs, so
+// CostCents returning 0 for an unknown model is safe there; endpoint-era
+// approvals record their own prices in the compiled doc and never reach
+// this table at run time.
 var priceTable = map[string]map[string]pricePer1M{
 	"openai": {
 		"gpt-4o-mini": {in: 15, out: 60},
@@ -58,12 +61,10 @@ func CostCents(provider, model string, u Usage) int {
 	return int(numerator / 1_000_000)
 }
 
-// Priced reports whether a (provider, model) pair has a price row. The
-// workflow API fails closed on unpriced pairs at approval time, which is
-// what makes spend caps meaningful — CostCents returning 0 for an unknown
-// model must be unreachable for approved workflows, not a loophole. Since
-// decision 9 the pair is the platform-selected run model, so a failure
-// here is an operator misconfiguration, not user input.
+// Priced reports whether a (provider, model) pair has a bundled price
+// row — the legacy env-mode approval gate (endpoint-era approvals resolve
+// prices through resolvePrices instead: bundled row, then user-entered
+// row, then a 400 that asks for one).
 func Priced(provider, model string) bool {
 	_, ok := priceTable[provider][model]
 	return ok

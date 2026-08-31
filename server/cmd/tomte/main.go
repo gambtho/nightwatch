@@ -23,9 +23,9 @@
 //	                        platform model credentials, per provider — injected
 //	                        by the egress proxy, never visible to the harness
 //	TOMTE_RUN_PROVIDER, TOMTE_RUN_MODEL
-//	                        platform-selected execution model compiled into
-//	                        every approved version (decision 9); defaults
-//	                        anthropic / claude-haiku-4-5. Must be a priced
+//	                        legacy env-mode execution pair, used only while
+//	                        no endpoint is configured; defaults anthropic /
+//	                        claude-haiku-4-5, and must then be a priced
 //	                        pair or approvals 400.
 //	TOMTE_RUN_TOKEN_TTL  Go duration, default 1h
 //	TOMTE_RUN_DEADLINE   Go duration, default 2h; must exceed

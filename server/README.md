@@ -60,9 +60,10 @@ Tomte). The user edits it at `PUT /v1/settings/budget`.
 
 `internal/engine.Scheduler` ticks on an interval, looking for workflows
 whose versioned `schedule` artifact (see [`docs/api/v1.md`](../docs/api/v1.md))
-is due. It creates and dispatches a run for the current occurrence only —
-a schedule that was down for a while does not catch up on missed
-occurrences — and admits at most one active run per workflow at a time,
+is due. Its lookback is wake-aware: a persisted heartbeat widens it to
+cover sleep or downtime, so a missed occurrence fires once on wake — the
+latest occurrence only, never a backlog — and it admits at most one
+active run per workflow at a time,
 via a store-level admission index rather than an in-process queue. A tick
 that finds cap-exceeded or already-active workflows simply skips them.
 
@@ -101,9 +102,9 @@ run's sole point of egress. The harness carries only its run token (in the
 provider-native auth-header slot the SDK would otherwise put an API key
 in); the proxy verifies that token, resolves the run's approved permit,
 checks the requested provider against the permit's allowlist and against
-one hardcoded (method, path) per provider, then injects the real
-credential — either a tenant's stored connection or the operator's
-platform-default key — and forwards. Every accepted or denied request is
+the endpoint's one allowed (method, path), then injects the real
+credential in the endpoint's native header — the endpoint's stored
+connection, or nothing at all on a local endpoint — and forwards. Every accepted or denied request is
 recorded as a run event. See
 [`docs/superpowers/specs/2026-08-30-nightshift-egress-proxy-design.md`](../docs/superpowers/specs/2026-08-30-nightshift-egress-proxy-design.md)
 for the full design, including this caveat: **on Local compute (today) the
@@ -134,7 +135,6 @@ server/
   internal/schedule/            cron + IANA timezone schedule artifact
   internal/meter/               the monthly budget meter, wired as the proxy Hook
   internal/httpapi/             public /v1 API: DB-backed sessions, local handoff, Origin policy
-  internal/mail/                transactional email seam: Postmark sender + dev log sender
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)
   internal/llm/                  ported providers + pricing; llmtest/ fake

@@ -152,8 +152,16 @@ func (s *Scheduler) createDue(ctx context.Context, now time.Time, lookback time.
 		}
 		if s.Caps != nil {
 			over, err := s.Caps.OverCap(ctx, w.TenantID)
-			if err != nil || over {
-				slog.Info("scheduler: skip (cap)", "tenant", w.TenantID, "workflow", w.WorkflowID, "err", err)
+			if err != nil {
+				// Infrastructure failure, not a deliberate skip: the pass is
+				// not clean, or the heartbeat would advance past an
+				// occurrence this workflow is still owed.
+				slog.Error("scheduler: cap check", "tenant", w.TenantID, "workflow", w.WorkflowID, "err", err)
+				clean = false
+				continue
+			}
+			if over {
+				slog.Info("scheduler: skip (over budget)", "tenant", w.TenantID, "workflow", w.WorkflowID)
 				continue
 			}
 		}

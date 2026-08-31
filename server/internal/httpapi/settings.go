@@ -96,8 +96,16 @@ func (d Deps) getEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	connected := e.Preset == endpoint.PresetLocal
 	if !connected {
-		_, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, e.Provider(), e.Connection)
-		connected = cerr == nil
+		switch _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, e.Provider(), e.Connection); {
+		case cerr == nil:
+			connected = true
+		case errors.Is(cerr, store.ErrNotFound):
+		default:
+			// An infrastructure error must not read as "key missing" — the
+			// UI would tell the user to re-paste a key that is stored.
+			writeErr(w, cerr)
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"endpoint": endpointJSON(e, connected)})
 }
@@ -165,7 +173,15 @@ func (d Deps) putEndpoint(w http.ResponseWriter, r *http.Request) {
 	var updates []store.CompiledUpdate
 	for _, v := range versions {
 		p, perr := permit.Parse(v.Doc.Permit)
-		if perr != nil || !p.AllowsProvider(e.Provider()) {
+		if perr != nil {
+			// Corruption is not "not permitted": naming it keeps the user
+			// from chasing a permit edit that can never satisfy the gate.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "invalid_permit", "workflow": v.WorkflowID.String(),
+			})
+			return
+		}
+		if !p.AllowsProvider(e.Provider()) {
 			notPermitted = append(notPermitted, v.WorkflowID.String())
 			continue
 		}

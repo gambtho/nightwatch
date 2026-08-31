@@ -90,11 +90,18 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider str
 		}
 	}
 	route, known := h.d.Config.Providers[provider]
-	if ep != nil && ep.Provider() == provider {
+	switch {
+	case ep != nil && ep.Provider() == provider:
 		base, method, path := ep.Route()
 		route, known = ProviderRoute{Base: base, Method: method, Path: path}, true
-	} else {
-		ep = nil // an endpoint for a different provider plays no part in this request
+	case ep != nil:
+		// A configured endpoint IS the endpoint (spec: one endpoint,
+		// switchable). A request naming any other provider does not fall
+		// back to the static table — that could route to an upstream the
+		// tenant never configured, on the platform key. Fail closed.
+		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider, "reason": "endpoint_mismatch"})
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
 	if !known || !p.AllowsProvider(provider) {
 		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider})

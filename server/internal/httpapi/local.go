@@ -89,9 +89,10 @@ func NewHandoffToken(ctx context.Context, s *store.Store, tenantID, userID uuid.
 // localHandoff implements GET /local/handoff?token=&next=. The GET
 // consumes: unlike an emailed magic link, this URL was minted seconds ago
 // by the shell on this machine — no scanner sits in the path. The token
-// is the credential, so the route carries no session middleware, and
-// RequireSession still guards every /v1 route; nothing unauthenticated
-// exists beyond this one exchange.
+// is the credential, so the route carries no session middleware.
+// RequireSession still guards every authenticated /v1 route (logout is
+// deliberately sessionless-tolerant); no other unauthenticated surface
+// joins this exchange.
 func (d Deps) localHandoff(w http.ResponseWriter, r *http.Request) {
 	value, sessionHash, err := NewOpaqueToken()
 	if err != nil {

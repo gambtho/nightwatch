@@ -25,11 +25,11 @@ type Deps struct {
 	// Vite-as-origin). Single source for the Origin comparison and
 	// redirect joining; never inferred from Host or proxy headers.
 	PublicBaseURL *url.URL
-	// RunProvider/RunModel are the platform-selected execution model
-	// (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) baked into the
-	// compiled document at approval time — decision 9 took provider and
-	// model out of the user's hands. Empty values fall back to the
-	// defaults below.
+	// RunProvider/RunModel (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) are the
+	// legacy env-mode execution pair, used only while no endpoint record
+	// is configured — the configured endpoint otherwise decides provider
+	// and model (decision 9 still holds: never the user, per approval).
+	// Empty values fall back to the defaults below.
 	RunProvider string
 	RunModel    string
 	// Catalog is the validated curated connector catalog. Version writes
