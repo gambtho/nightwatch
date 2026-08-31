@@ -183,6 +183,20 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
 		return
 	}
+	// Re-check pricing at approval, not just at write time: a draft persisted
+	// before a price-table change could otherwise become approved with a
+	// model CostCents no longer knows, silently under-recording spend.
+	cur, err := d.Store.GetVersion(r.Context(), claims.TenantID, id, number)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if !llm.Priced(cur.Doc.Steps.Provider, cur.Doc.Steps.Model) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "no pricing for " + cur.Doc.Steps.Provider + "/" + cur.Doc.Steps.Model + " — spend caps require a priced model",
+		})
+		return
+	}
 	v, err := d.Store.ApproveVersion(r.Context(), claims.TenantID, id, number, claims.UserID)
 	if err != nil {
 		writeErr(w, err)

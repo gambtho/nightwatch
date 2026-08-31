@@ -6,6 +6,7 @@ package meter
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -65,7 +66,11 @@ func (m *Meter) OverCap(ctx context.Context, tenantID uuid.UUID) (bool, error) {
 func (m *Meter) Before(ctx context.Context, req proxy.HookRequest) error {
 	over, err := m.OverCap(ctx, req.Identity.TenantID)
 	if err != nil {
-		// No spend visibility, no spend.
+		// No spend visibility, no spend. Log it: this denial hits every
+		// provider call, and operators must be able to tell "store down"
+		// from "cap reached".
+		slog.Error("meter: spend check failed, denying request",
+			"tenant_id", req.Identity.TenantID, "err", err)
 		return proxy.HookError{Status: http.StatusForbidden, Msg: "metering unavailable"}
 	}
 	if over {

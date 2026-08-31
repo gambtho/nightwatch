@@ -98,11 +98,15 @@ same lesson and redispatches pending rows). A 60-second ticker in `serve()`:
 2. **Dispatch**: select scheduled runs with `status = 'pending' AND
 dispatched_at IS NULL` (including rows created by a previous, crashed
    process), call `EnsureActor` + `Invoke`, and set `dispatched_at` on
-   success. A row with `dispatched_at IS NULL` provably never reached an
-   actor — no model call happened — so redispatch is safe. A crash _after_
-   `Invoke` (dispatched but the process died with the work queued) is the
-   reaper's case: that run becomes a **visible** `failed/orphaned`, not a
-   silent skip.
+   success. For a crash _before_ `Invoke`, `dispatched_at IS NULL` means no
+   model call happened, so redispatch is safe. One narrow path breaks that
+   equivalence: `Invoke` succeeds but the `dispatched_at` write fails — the
+   implementation retries the write once on a cancel-free context, and if
+   the retry also fails it logs an explicit double-dispatch warning (the
+   next tick may redispatch a live run). A crash _after_ `Invoke` and its
+   acknowledgment (dispatched but the process died with the work queued) is
+   the reaper's case: that run becomes a **visible** `failed/orphaned`, not
+   a silent skip.
 
 `engine.Fire` is the extracted core of today's `fireRun` (sign token →
 `CreateRun` → dispatch), shared by the HTTP handler and the tick, with an

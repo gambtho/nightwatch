@@ -5,18 +5,18 @@
 
 The platform spec is too large for one implementation plan. This roadmap records the
 decomposition into plans that each produce working, testable software, plus the scoping
-decisions made while cutting it. Each plan is written when we reach it; only Plan 1
-exists today.
+decisions made while cutting it. Each plan is written when we reach it; Plans 1-3
+are written and shipped.
 
 ## The sequence
 
-| #   | Plan                                                                                                              | Delivers                                                                                                                                                                                                             | Status      |
-| --- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| 1   | **Foundation** ([`2026-08-30-nightshift-platform-foundation.md`](./2026-08-30-nightshift-platform-foundation.md)) | `server/` Go module: real tenancy, public v1 API (workflows, versions, approval, runs), the `Compute` seam with a local implementation, the harvested harness (tool-less), run records pushed over the internal API. | Written     |
-| 2   | **Egress proxy + credential vaulting**                                                                            | Governance primitive #1. The proxy that enforces the permit, credential injection at the boundary, per-tenant DEKs (rework of cronfoundry `internal/secrets`), `internal/redact` port.                               | Not started |
-| 3   | **Scheduling + spend metering**                                                                                   | Cron + IANA timezone scheduler with per-tenant fairness; metering checked before each model request; per-run and per-tenant caps.                                                                                    | Not started |
-| 4   | **Rubric grading + alerting**                                                                                     | Independent grader scoring each run per criterion; auto-pause after 3 consecutive failures; alert delivery (port of `internal/publish` lands here).                                                                  | Not started |
-| 5   | **Substrate + Kubernetes-Jobs `Compute` implementations**                                                         | The two cluster-facing implementations of the seam Plan 1 defines. Deferred to last deliberately: Substrate is pre-1.0 and needs a fleet; the seam is designed so it slots in.                                       | Not started |
+| #   | Plan                                                                                                                               | Delivers                                                                                                                                                                                                             | Status      |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1   | **Foundation** ([`2026-08-30-nightshift-platform-foundation.md`](./2026-08-30-nightshift-platform-foundation.md))                  | `server/` Go module: real tenancy, public v1 API (workflows, versions, approval, runs), the `Compute` seam with a local implementation, the harvested harness (tool-less), run records pushed over the internal API. | Shipped     |
+| 2   | **Egress proxy + credential vaulting** ([`2026-08-30-nightshift-egress-proxy.md`](./2026-08-30-nightshift-egress-proxy.md))        | Governance primitive #1. The proxy that enforces the permit, credential injection at the boundary, per-tenant DEKs (rework of cronfoundry `internal/secrets`), `internal/redact` port.                               | Shipped     |
+| 3   | **Scheduling + spend metering** ([`2026-08-31-nightshift-scheduling-metering.md`](./2026-08-31-nightshift-scheduling-metering.md)) | Cron + IANA timezone scheduler with per-tenant fairness; metering checked before each model request; per-run and per-tenant caps.                                                                                    | Shipped     |
+| 4   | **Rubric grading + alerting**                                                                                                      | Independent grader scoring each run per criterion; auto-pause after 3 consecutive failures; alert delivery (port of `internal/publish` lands here).                                                                  | Not started |
+| 5   | **Substrate + Kubernetes-Jobs `Compute` implementations**                                                                          | The two cluster-facing implementations of the seam Plan 1 defines. Deferred to last deliberately: Substrate is pre-1.0 and needs a fleet; the seam is designed so it slots in.                                       | Not started |
 
 **Prerequisite specs (not plans) still owed:**
 
