@@ -47,3 +47,23 @@ func TestPriced(t *testing.T) {
 		t.Fatal("unknown provider must not be priced")
 	}
 }
+
+func TestMaxTokensForBudget(t *testing.T) {
+	// claude-haiku-4-5 out price is 500 cents/1M: 50 cents buys 100k tokens,
+	// clamped to the 8192 ceiling.
+	if got := MaxTokensForBudget("anthropic", "claude-haiku-4-5", 50); got != 8192 {
+		t.Fatalf("clamped budget: got %d, want 8192", got)
+	}
+	// claude-opus-4-6 out price 7500: 1 cent buys 133 tokens.
+	if got := MaxTokensForBudget("anthropic", "claude-opus-4-6", 1); got != 133 {
+		t.Fatalf("small budget: got %d, want 133", got)
+	}
+	// No spend cap: platform default.
+	if got := MaxTokensForBudget("anthropic", "claude-haiku-4-5", 0); got != 4096 {
+		t.Fatalf("no cap: got %d, want 4096", got)
+	}
+	// Unpriced pair falls back to the default, never zero.
+	if got := MaxTokensForBudget("anthropic", "unknown", 50); got != 4096 {
+		t.Fatalf("unpriced: got %d, want 4096", got)
+	}
+}

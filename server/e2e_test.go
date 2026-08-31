@@ -82,11 +82,8 @@ func TestEndToEndRun(t *testing.T) {
 	out := do("POST", "/v1/workflows", map[string]any{
 		"name": "weekly digest",
 		"steps": map[string]any{
-			"system_prompt": "You prepare the weekly support digest.",
-			"kickoff":       "Summarize last week's tickets.",
-			"provider":      "anthropic",
-			"model":         "claude-sonnet-5",
-			"max_tokens":    2048,
+			"v":     1,
+			"steps": []map[string]any{{"id": "digest", "text": "Summarize last week's tickets."}},
 		},
 		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 	})
@@ -294,7 +291,8 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
+		RunProvider: "openai", RunModel: "gpt-4o-mini"})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()
@@ -321,11 +319,8 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	out := do("POST", "/v1/workflows", map[string]any{
 		"name": "proxied digest",
 		"steps": map[string]any{
-			"system_prompt": "You prepare the weekly support digest.",
-			"kickoff":       "Summarize last week's tickets.",
-			"provider":      "openai",
-			"model":         "gpt-4o-mini",
-			"max_tokens":    256,
+			"v":     1,
+			"steps": []map[string]any{{"id": "digest", "text": "Summarize last week's tickets."}},
 		},
 		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"openai"}}, "connections": map[string]any{}},
 	})
@@ -406,11 +401,8 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	out := do("POST", "/v1/workflows", map[string]any{
 		"name": "daily digest",
 		"steps": map[string]any{
-			"system_prompt": "You prepare the daily digest.",
-			"kickoff":       "Summarize.",
-			"provider":      "anthropic",
-			"model":         "claude-sonnet-5",
-			"max_tokens":    64,
+			"v":     1,
+			"steps": []map[string]any{{"id": "digest", "text": "Summarize."}},
 		},
 		"permit":   map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 		"schedule": map[string]any{"cron": "0 9 * * *", "tz": "UTC"},

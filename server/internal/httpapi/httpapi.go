@@ -25,6 +25,32 @@ type Deps struct {
 	// from Host or proxy headers.
 	PublicBaseURL *url.URL
 	Mailer        mail.Sender
+	// RunProvider/RunModel are the platform-selected execution model
+	// (NIGHTSHIFT_RUN_PROVIDER / NIGHTSHIFT_RUN_MODEL) baked into the
+	// compiled document at approval time — decision 9 took provider and
+	// model out of the user's hands. Empty values fall back to the
+	// defaults below.
+	RunProvider string
+	RunModel    string
+}
+
+// Platform run-model defaults, used when the env leaves the choice to us:
+// the cheapest priced Anthropic pair. Per-tenant override is a
+// designed-for seam, not built.
+const (
+	DefaultRunProvider = "anthropic"
+	DefaultRunModel    = "claude-haiku-4-5"
+)
+
+func (d Deps) runModel() (provider, model string) {
+	provider, model = d.RunProvider, d.RunModel
+	if provider == "" {
+		provider = DefaultRunProvider
+	}
+	if model == "" {
+		model = DefaultRunModel
+	}
+	return provider, model
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {

@@ -46,12 +46,12 @@ func newEnv(t *testing.T) *env {
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "digest", store.VersionDoc{
-		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "m", MaxTokens: 100},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))

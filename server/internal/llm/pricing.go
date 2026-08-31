@@ -59,10 +59,44 @@ func CostCents(provider, model string, u Usage) int {
 }
 
 // Priced reports whether a (provider, model) pair has a price row. The
-// workflow API fails closed on unpriced pairs at create/approve time, which
-// is what makes spend caps meaningful — CostCents returning 0 for an
-// unknown model must be unreachable for approved workflows, not a loophole.
+// workflow API fails closed on unpriced pairs at approval time, which is
+// what makes spend caps meaningful — CostCents returning 0 for an unknown
+// model must be unreachable for approved workflows, not a loophole. Since
+// decision 9 the pair is the platform-selected run model, so a failure
+// here is an operator misconfiguration, not user input.
 func Priced(provider, model string) bool {
 	_, ok := priceTable[provider][model]
 	return ok
+}
+
+// Token bounds for the compiled max_tokens: the default when no spend cap
+// was approved, and a ceiling so a generous cap cannot compile a
+// max_tokens beyond what the catalogued models' output limits accept.
+const (
+	defaultBudgetTokens = 4096
+	maxBudgetTokens     = 8192
+)
+
+// MaxTokensForBudget derives the compiled max_tokens from the approved
+// per-run spend cap against the model's output price: the largest output
+// whose cost alone cannot exceed the cap, clamped to [1, 8192]. A version
+// with no spend cap (perRunCents <= 0) gets the platform default. Callers
+// must have checked Priced first; an unpriced pair falls back to the
+// default rather than an arbitrary value.
+func MaxTokensForBudget(provider, model string, perRunCents int) int {
+	if perRunCents <= 0 {
+		return defaultBudgetTokens
+	}
+	p, ok := priceTable[provider][model]
+	if !ok || p.out <= 0 {
+		return defaultBudgetTokens
+	}
+	tokens := int64(perRunCents) * 1_000_000 / int64(p.out)
+	if tokens > maxBudgetTokens {
+		return maxBudgetTokens
+	}
+	if tokens < 1 {
+		return 1
+	}
+	return int(tokens)
 }
