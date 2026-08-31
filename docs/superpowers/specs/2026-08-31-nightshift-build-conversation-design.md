@@ -69,6 +69,8 @@ CREATE TABLE build (
     cost_cents int NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, id), -- referenced by build_call's composite FK,
+                            -- the 00003_workflow.sql pattern
     FOREIGN KEY (tenant_id, created_by) REFERENCES app_user (tenant_id, id)
 );
 
@@ -91,23 +93,40 @@ CREATE TABLE build_call (
   `finished_at` (`store/run.go`); build spend joins that sum by
   `build_call.created_at`, so a resumable build that crosses a month
   boundary attributes each call to the month it actually happened in —
-  a cumulative per-build total could not. The ledger row is written in the
-  same transaction as the transcript append for its turn, so a crash
-  mid-turn loses the turn and its charge together, never one without the
-  other.
+  a cumulative per-build total could not. **The ledger records money spent,
+  not turns succeeded**: a ledger row is committed whenever a provider call
+  actually completed — including a call that returned an error after
+  reporting usage, or a structurally unusable reply — even though the
+  failed turn's transcript entry and draft mutations are discarded. Only a
+  call the provider never received leaves no row. A crash between the
+  provider's response and the commit can undercount by at most that one
+  call — the same bounded gap Plan 3 accepts for runs, accepted and stated
+  rather than papered over.
 - `drafts` is a list of one or two draft workflows (see
-  [the mode split](#the-mode-split)); each draft holds a name, a mode, and
-  the artifact set as far as it has been elicited, every mutation validated
-  by the same parsers the version API uses (`permit.Parse`,
-  `rubric.Parse`, schedule validation, objective validation) plus
-  `ValidateConnections`. A draft that would be rejected at version creation
-  cannot exist inside a build — invalid state is unrepresentable, and submit
-  cannot fail on shape.
+  [the mode split](#the-mode-split)); each draft holds a stable `draft_id`
+  minted at creation, a name, a mode, and the artifact set as far as it
+  has been elicited. **The partial-draft contract has two levels.**
+  Per-artifact: an artifact may be absent while shaping, but every artifact
+  that is present must pass its version-API parser (`permit.Parse`,
+  `rubric.Parse`, schedule validation, objective validation) — a `propose`
+  that fails returns to the model as a tool error and never lands.
+  Whole-draft: completeness (all required artifacts present, objective
+  present iff goal mode), `ValidateConnections`, and connection status are
+  checked at the `ready` gate and **re-checked inside submit's
+  transaction** — `ready` is a claim about the past, and the world
+  (connections, catalog) can move under it. So a shaping draft is never
+  rejected for being unfinished, and a submitted draft is never accepted
+  on stale validation.
 - `status`: `intake` (text received, verdict pending) → `shaping`
   (conversation in progress) → `ready` (artifacts complete, connections
-  `ok`) → `submitted` (workflows created). `abandoned` after 30 idle days,
-  by the same kind of sweep as the reaper. Any pre-`submitted` state is
-  resumable.
+  `ok`) → `submitted` (workflows created). **The idle clock is
+  `updated_at`**, bumped by every authenticated action on the build —
+  message turns, `options`, `select`, and the OAuth return. After 30 idle
+  days a sweep (the reaper's shape) marks the build `abandoned` — a soft
+  archive: transcript and drafts are retained, the build leaves the
+  default "waiting on you" list, and nothing is deleted. A new message to
+  an abandoned build revives it to `shaping`; only `submitted` is
+  terminal.
 - **Submit is atomic and idempotent.** It reuses the version API's
   validation and store logic, but not its transaction boundaries: today
   each `CreateWorkflow` commits independently (`store/workflow.go`), and a
@@ -116,11 +135,16 @@ CREATE TABLE build_call (
   therefore runs **one transaction** that creates every draft's workflow
   and version 1 and flips the build to `submitted` together (the store
   grows a caller-supplied-transaction variant; the HTTP-path behavior is
-  unchanged). Each draft carries a stable `draft_id` minted at creation,
-  recorded on the created workflow, so a retry after a lost response finds
-  the build already `submitted` and returns the same workflows (`200`, not
-  a second creation). Partial creation is unrepresentable: all workflows
-  exist and the build is `submitted`, or neither.
+  unchanged). **The serialization point is the status flip itself**: a
+  conditional `UPDATE … SET status = 'submitted' WHERE status = 'ready'`
+  inside the transaction — the request whose update matches a row creates
+  the workflows; a concurrent or repeated submit matches nothing, reads
+  the build as `submitted`, and replays. The `draft_id → workflow_id`
+  mapping is persisted in the same transaction (written back onto the
+  `drafts` document), so a retry after a lost response returns the same
+  workflows (`200`, not a second creation). Partial creation is
+  unrepresentable: all workflows exist, the mapping is recorded, and the
+  build is `submitted` — or none of it.
 - After submit, the user lands on the existing approve surface. **The
   build never approves anything.** Approval stays the one gate, on the
   existing endpoint, rendered from the stored version — not from the
@@ -128,15 +152,15 @@ CREATE TABLE build_call (
 
 ### API
 
-| Method & path                   | Body                                         | Response                                                            |
-| ------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
-| `POST /v1/builds`               | `{text}`                                     | `201 {build}` — verdict generation begins                           |
-| `GET /v1/builds`                | —                                            | `200 {builds: [...]}` (drives the "waiting on you" list)            |
-| `GET /v1/builds/{id}`           | —                                            | `200 {build}` — transcript, verdict, drafts, connection checklist   |
-| `POST /v1/builds/{id}/messages` | `{text}`                                     | `200 {reply, drafts}` — one agent turn; drafts reflect any mutation |
-| `POST /v1/builds/{id}/options`  | `{draft, connector, op, constraint}`         | `200 {options: [...]}` — see constraint elicitation                 |
-| `POST /v1/builds/{id}/select`   | `{draft, connector, op, constraint, values}` | `200 {drafts}` — structural pick, no model in the loop              |
-| `POST /v1/builds/{id}/submit`   | —                                            | `201 {workflows: [...]}`; `409` unless status is `ready`            |
+| Method & path                   | Body                                         | Response                                                                                                                                                    |
+| ------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/builds`               | `{text, request_id}`                         | `201 {build}` — the verdict is generated inside this request and included; on provider failure the build persists in `intake` and the error returns with it |
+| `GET /v1/builds`                | —                                            | `200 {builds: [...]}` (drives the "waiting on you" list)                                                                                                    |
+| `GET /v1/builds/{id}`           | —                                            | `200 {build}` — transcript, verdict, drafts, connection checklist                                                                                           |
+| `POST /v1/builds/{id}/messages` | `{text, request_id}`                         | `200 {reply, drafts}` — one agent turn; drafts reflect any mutation. An empty `text` on an `intake` build with no verdict retries verdict generation        |
+| `POST /v1/builds/{id}/options`  | `{draft, connector, op, constraint}`         | `200 {options: [...]}` — see constraint elicitation                                                                                                         |
+| `POST /v1/builds/{id}/select`   | `{draft, connector, op, constraint, values}` | `200 {drafts}` — structural pick, no model in the loop                                                                                                      |
+| `POST /v1/builds/{id}/submit`   | —                                            | `201 {workflows: [...]}` on creation; `200 {workflows: [...]}` on an idempotent replay of a `submitted` build; `409` otherwise                              |
 
 Session-authed, tenant-scoped, cross-tenant reads as `404` — house pattern
 throughout. Whether `messages` streams token-by-token or returns whole turns
@@ -149,13 +173,23 @@ them (`POST /v1/builds` for the verdict; `messages` thereafter) — there is
 no queue, no worker, and therefore no orphaned generation to reap. A
 provider failure or crash mid-turn surfaces as that request's error; the
 build's durable state is exactly what the last committed turn left
-(transcript, ledger row, and draft mutations commit together), and retry
-is the client re-issuing the request. A build in `intake` with no verdict
+(a turn's transcript and draft mutations commit together; the spend
+ledger records any call that was actually made, per the ledger rules
+above), and retry is the client re-issuing the request. A build in `intake` with no verdict
 is thus always actionable — the frontend shows the failure and a retry
-affordance, never a silent spinner — and "resumable across process
-restart" costs nothing beyond what is already in Postgres. Concurrent
-turns on one build are refused (`409`), the single-active-run idiom
-applied to conversations.
+affordance (an empty-`text` `messages` call), never a silent spinner — and
+"resumable across process restart" costs nothing beyond what is already in
+Postgres. Concurrent turns on one build are refused (`409`), the
+single-active-run idiom applied to conversations.
+
+**Retries are identified, not guessed.** `POST /v1/builds` and `messages`
+carry a required client-minted `request_id` (UUID), persisted with the
+committed build or turn. A re-issued request whose `request_id` matches a
+committed result returns that stored result — no second build, no second
+model call, no second ledger charge — closing the lost-response window
+that "just re-issue the request" would otherwise leave open. An unknown
+`request_id` on a build whose last turn failed is a fresh attempt, which
+is the retry path working as intended.
 
 ## The build agent
 
@@ -341,8 +375,15 @@ a paraphrase at the end.
 ### Permit
 
 Derived from steps, minimally: every step maps to the catalog ops it needs,
-and nothing is granted that no step uses. Write ops trigger the constraint
-conversation:
+and the agent proposes nothing that no step uses. **Minimality is a
+derivation discipline, not a submit blocker.** The step↔op mapping is
+model judgment, so a hard gate on it would make submit fail on a
+heuristic; instead an unmapped grant raises a lint the conversation must
+surface ("nothing you described uses this — drop it?") before `ready`,
+and the user's answer stands. The security floor does not depend on the
+lint: every grant is on the diagram, individually approved, and enforced
+by the proxy regardless of whether a step mentions it. Write ops trigger
+the constraint conversation:
 
 - The agent asks in job language ("where should the summary go?").
 - For a constraint slot whose catalog binding declares an option source
@@ -372,9 +413,14 @@ free text and the flagship constraint is a typo away from wrong.
 **MCP snapshot freshness (resolving the connectors spec's staleness
 question):** when the conversation first grants a tool from a registered
 MCP server, the build triggers `refresh-tools` and the draft pins the fresh
-snapshot revision. The permit then carries a snapshot at most one
-conversation old, and the approval screen never shows tools a vendor has
-since removed.
+snapshot revision. First-grant alone is not enough — a build can pause for
+weeks after the grant — so the **`ready` gate revalidates**: if the pinned
+revision is older than the build's last idle gap (or a granted tool is
+missing from a newer snapshot), the gate refreshes, re-pins, and — when a
+granted tool has vanished — drops the draft back to `shaping` with the
+gap named in conversation. Submit re-checks the pin inside its
+transaction like every other `ready` claim. The approval screen therefore
+never shows a tool the vendor had already removed by submission time.
 
 **Hesitation is a feature.** When the user balks at a write grant — the
 graduated-permits spec's founding observation — the agent offers the ladder
@@ -461,15 +507,23 @@ from the schedule — derived, not a second cap. The user can raise or
 lower it; the number lands in `spend.per_run_cents` and is inside the
 approval diagram where the UX spec drew it.
 
-The phrasing is chosen to match what Plan 3 actually enforces, not a
-stronger promise: the per-run cap is checked **between** model requests
-(the hook seam, live once tool-loop runs make a run multi-turn), and a
-single request's cost is known only after it completes
+The phrasing is chosen to match what is actually enforced, not a stronger
+promise — and the between-steps check is named as a dependency, not
+claimed as shipped. Today the per-run cap is **detected at finalization**
+(`spend.exceeded`, feeding Plan 4's pause trigger); Plan 3 deliberately
+deferred pre-request per-run enforcement to multi-turn runs, and the
+current seam cannot carry it — `proxy.HookRequest` holds only run
+identity and provider, and `meter.Meter.Before` consults only the tenant
+monthly cap. So the copy's "stops before its next step" requires a
+**named widening that must land with the tool loop**: the hook consults
+the run's accumulated cost (its `build_call`-shaped run ledger) against
+`spend.per_run_cents` before each request — listed in
+[what this needs from server/](#what-this-needs-from-server). A single
+request's cost is still known only after it completes
 (`harness/harness.go` computes cost post-call; `max_tokens` bounds output
-tokens, not dollars). So one step can overshoot the budget by a bounded
-amount before the stop lands, and overruns are detected and reported at
-finalization (`spend.exceeded`, feeding Plan 4's pause trigger). "I'll
-never spend more than X" is exactly the kind of overclaim the
+tokens, not dollars), so one step can overshoot the budget by a bounded
+amount before the stop lands. "I'll never spend more than X" is exactly
+the kind of overclaim the
 [secrets section](#will-this-expose-my-secrets) forbids; "budgeted at X,
 stops when it goes over, tells you" is what the machinery delivers.
 
@@ -560,6 +614,15 @@ left the screens here.
   only clock.
 - **Submission blocks** until the checklist is all-`ok` (scope decision
   above). The block is a checklist, not an error.
+- **Approval re-checks what submit checked.** Time passes between submit
+  and approval, and a connection can be revoked in the gap — today
+  `approveVersion` re-validates pricing but not connections, so an
+  approved version can name a connection that no longer resolves and the
+  first run dies with a 500 at credential injection. Approval gains the
+  same connection-resolution check submit runs (a widening of the existing
+  approval-time re-validation pattern in `httpapi/workflows.go`), so "the
+  approve screen must be true" holds at the moment it is acted on, not
+  just when the build ended.
 
 ## "Will this expose my secrets?"
 
@@ -705,10 +768,21 @@ The server queue slot's checklist, in dependency order:
 7. **OAuth return-path support** — the connect flow's `state`/redirect
    carrying a front-end return location back to the build.
 8. **MCP snapshot refresh hook** — build-initiated `refresh-tools` on
-   first grant from a server (endpoint exists; the build calls it).
+   first grant from a server (endpoint exists; the build calls it), plus
+   the `ready`-gate revalidation described under
+   [Permit](#permit).
+9. **Approval-time connection re-validation** — `approveVersion` extends
+   its pricing re-check to connection resolution for every connection the
+   permit names (LLM and connector alike).
+10. **Per-run cap consult at the hook seam** — `proxy.HookRequest` (or the
+    hook's data source) widens so `meter.Before` can weigh the run's
+    accumulated cost against `spend.per_run_cents` before each request.
+    Required before the spend copy's "stops before its next step" ships;
+    lands with the tool loop.
 
 Items 2–8 depend on the connectors implementation (the catalog and connect
-flows must exist); item 1 does not and should land first.
+flows must exist); items 9–10 amend existing `server/` paths and can land
+with Plan 3/4 follow-ups; item 1 depends on nothing and should land first.
 
 ## Testing
 
@@ -716,8 +790,9 @@ flows must exist); item 1 does not and should land first.
   with an empty `wrong` block is rejected.
 - The computed access block contains only catalog copy for ops referenced
   by `can` — never model text.
-- A draft permit granting an op no step references fails the minimality
-  lint (warn), and one naming an unknown op is impossible (validator).
+- A draft permit granting an op no step references raises the minimality
+  lint, the conversation surfaces it before `ready`, and a user-confirmed
+  keep survives submit; one naming an unknown op is impossible (validator).
 - `select` writes exact values; a constraint value that never appeared in
   the options response is rejected (the model cannot smuggle one through).
 - The options endpoint rejects write ops, run tokens, and other tenants'
@@ -725,7 +800,19 @@ flows must exist); item 1 does not and should land first.
 - Submit: blocked while any connection is not `ok`; a goal draft without
   an objective (or a standing draft with one) cannot reach `ready`; a
   two-draft build creates two workflows with distinct permits; created
-  versions are `draft` and unapproved.
+  versions are `draft` and unapproved; a connection revoked after `ready`
+  fails inside submit's transaction, not at first run.
+- Partial drafts: a shaping draft missing artifacts is valid; a present
+  artifact failing its parser never lands; the `ready` gate rejects
+  incompleteness.
+- Lifecycle: every mutating route bumps `updated_at`; the sweep marks
+  `abandoned` without deleting transcript or drafts; a message revives an
+  abandoned build to `shaping`.
+- Snapshot revalidation: a granted MCP tool removed upstream while the
+  build idles drops the draft to `shaping` at the `ready` gate; submit
+  re-checks the pin.
+- Approval: approving a version whose permit names a deleted connection is
+  rejected — LLM connection and connector connection alike.
 - Compiler: deterministic (same inputs, byte-identical output); approved
   steps and rubric text appear verbatim in `compiled.system_prompt`;
   compiling at approval means a later compiler change does not alter an
@@ -738,11 +825,14 @@ flows must exist); item 1 does not and should land first.
   the ledger row commits in the same transaction as its turn's transcript.
 - Submit atomicity: a two-draft submit that fails on the second workflow
   creates neither and leaves the build re-submittable; a retried submit
-  after a lost response returns the already-created workflows without
-  creating more; concurrent submits produce exactly one set.
-- Turn failure: a provider error mid-turn leaves the build at its last
-  committed turn with no ledger row for the failed call; re-issuing the
-  request succeeds; concurrent turns on one build are refused (`409`).
+  after a lost response returns the mapped workflows (`200`) without
+  creating more; concurrent submits race the conditional `ready →
+submitted` update and produce exactly one set.
+- Turn failure: a call the provider never received leaves no ledger row; a
+  call that failed after reporting usage leaves its ledger row even though
+  the turn's transcript and mutations roll back; a replayed `request_id`
+  returns the stored result with no new model call or charge; concurrent
+  turns on one build are refused (`409`).
 - Resumability: a build survives process restart and an OAuth round trip
   with transcript and drafts intact.
 - Cross-tenant: every build route reads as `404`, house pattern.
