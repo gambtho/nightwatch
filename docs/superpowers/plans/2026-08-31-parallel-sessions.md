@@ -71,6 +71,28 @@ change with no queue position yet. It most likely rides with connectors.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
 
+## Rule: outward-facing actions
+
+Added 2026-08-31 after an issue was opened on a third-party repository
+(`agent-substrate/substrate#1332`) that the user had not meant to authorize.
+It was closed eleven minutes later; the footprint was one issue and nothing
+else.
+
+**For any lane touching a repository we do not own**, an approval must name
+the exact artifact being published. A paraphrase, a pronoun, or a near-miss —
+"open the pr" when only a drafted issue exists — is not approval. It is a
+question to ask.
+
+The failure mode to avoid is reasoning that one interpretation is "safe under
+every reading." When an instruction is ambiguous **and** the action is
+irreversible **and** it is public **and** it runs under the user's identity,
+the ambiguity is itself the stop signal. Quote the words back and wait; it
+costs one message.
+
+This project tracks its own work in docs, not issues. An external issue
+tracker is only ever the required entry protocol for contributing upstream —
+never our own bookkeeping.
+
 ## Cross-cutting decisions
 
 Recorded so the next session doesn't rediscover them. Each was settled by one
