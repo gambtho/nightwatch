@@ -36,6 +36,7 @@ finishes, or a cross-cutting decision is taken.
 | P1 — Subtraction and floor       | **Next: owns `server/` at launch** — prompt below                                                          |
 | CI / catalog gate                | **Lane opened, pivot-critical** — prompt below                                                             |
 | Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
+| Pivot demo (`demo/tomte-pivot`)  | **Lane opened** — prototype re-skin telling the click-install story; not for merge; prompt below           |
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
@@ -170,8 +171,8 @@ stays merged as a record.
 
 ## Ready-to-paste prompts (2026-08-31, post-pivot-merge)
 
-Four sessions can launch in parallel. P1 holds the `server/` lock; the other
-three never take it. Each prompt is self-contained.
+Five sessions can launch in parallel. P1 holds the `server/` lock; the other
+four never take it. Each prompt is self-contained.
 
 ### Prompt — P1: subtraction and floor (owns `server/`)
 
@@ -322,6 +323,44 @@ three never take it. Each prompt is self-contained.
 > local session) merges with P1; sequence login retirement behind that merge
 > and coordinate through the board. PRs to `main` per surface; keep them
 > independent.
+
+### Prompt — Pivot demo (`demo/tomte-pivot`, parallel, not for merge)
+
+> You own the demo lane for Tomte: a runnable `npm run dev` demo that tells
+> the click-install pivot story end to end, on fake data, for leadership and
+> user testing. Read the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` (especially
+> "First run", "The sleeping machine", "Credentials without OAuth", and
+> "Enforcement posture") and the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` first.
+>
+> Follow the established demo pattern (`demo/dev-persona` is the precedent):
+> a branch off `main` named `demo/tomte-pivot`, re-skinning the root
+> prototype (`src/`, root `npm run dev`) — **a permanent demo variant, never
+> merged to `main`**. On this branch, rebrand the prototype to Tomte freely
+> (on `main` the prototype deliberately stays nightshift-branded). You touch
+> no `server/` code and take no lock; everything is faked in the frontend.
+>
+> The demo walks the pivot's happy path as one continuous story:
+> 1. First run: choose where your AI runs (Anthropic / OpenAI / OpenRouter /
+>    "another service" / "on this computer"), paste a key via the guided
+>    capture card, see the disclosed test-call verify succeed, set the
+>    monthly budget ("how much Tomte may spend from your key per month").
+> 2. Build conversation: describe a job in plain words (reuse the
+>    existing demo scenario), connect Slack once through the connections
+>    manager (paste an xoxb- token, watch it verify), and get the verdict.
+> 3. Approve: the blast-radius picture with the softened enforcement copy
+>    ("it can only act through Tomte's checkpoint, and every request is
+>    checked against this picture") and the spend line.
+> 4. The quiet home: a run history where one row reads
+>    "scheduled 3:00 AM · ran 7:42 AM, when your computer woke", plus a
+>    budget meter and an alert example.
+>
+> Keep every claim on screen consistent with the spec — the demo is a
+> promise leadership will repeat. Where the spec softens or renames copy
+> (enforcement posture, budget wording), use the spec's words verbatim.
+> Verify `npm run dev` boots clean from a fresh checkout of the branch and
+> the walkthrough needs no narration to follow.
 
 ## Pivot spec MERGED (PR #37); name FINAL
 
