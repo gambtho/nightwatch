@@ -53,10 +53,12 @@ that finds cap-exceeded or already-active workflows simply skips them.
 
 `internal/engine.Reaper` sweeps runs stuck past `NIGHTSHIFT_RUN_DEADLINE`
 and finalizes them as failed, recovering from harness crashes and lost
-dispatches. A run's deadline is measured from its creation time, so by
-the time the reaper is allowed to sweep it, its token (minted at
-creation, with the shorter TTL) has already expired — the deadline>TTL
-invariant above guarantees that for reaping itself.
+dispatches. A run's deadline is measured from its latest dispatch
+episode (`dispatched_at`, falling back to `created_at` for runs that
+never dispatched), so by the time the reaper is allowed to sweep it, the
+most recently signed token for it — minted at or before that episode,
+with the shorter TTL — has already expired; the deadline>TTL invariant
+above guarantees that for reaping itself.
 
 That guarantee doesn't cover a narrower path one layer up, in
 `internal/engine.Engine.dispatch`: if `Invoke` succeeds but the
