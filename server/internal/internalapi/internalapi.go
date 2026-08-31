@@ -110,6 +110,15 @@ func (d Deps) runContext(w http.ResponseWriter, r *http.Request, claims token.Ru
 		d.fail(w, err)
 		return
 	}
+	// Unmarshal accepts JSONB null and shape-mismatched documents by
+	// zeroing fields; an empty provider or model cannot run, so refuse
+	// before marking the run running rather than hand the harness an
+	// unusable context. (Migrated compiler_v 0 rows always carry both —
+	// the old API's pricing gate required them.)
+	if compiled.Provider == "" || compiled.Model == "" {
+		d.fail(w, fmt.Errorf("run %s: version %d compiled document lacks provider/model", run.ID, run.Version))
+		return
+	}
 	compiled.Kickoff += "\n\n" + occasion(run)
 	if err := d.Store.MarkRunRunning(ctx, claims.TenantID, claims.RunID); err != nil {
 		d.fail(w, err)

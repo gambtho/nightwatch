@@ -17,11 +17,15 @@ SET compiled = steps || '{"compiler_v": 0}'::jsonb,
             'id', 'job',
             'text', coalesce(steps ->> 'kickoff', ''))));
 
--- Approved implies compiled — enforced by the database, not by
--- application discipline (the pattern 00003 set for this table). Safe
--- against existing data: the backfill above populated every row.
+-- Approved implies a compiled document — enforced by the database, not by
+-- application discipline (the pattern 00003 set for this table). The
+-- jsonb_typeof check also rejects JSONB null and non-object values, which
+-- would satisfy a bare IS NOT NULL yet decode to an unusable zero-valued
+-- context. Safe against existing data: the backfill above populated every
+-- row with an object.
 ALTER TABLE workflow_version ADD CONSTRAINT workflow_version_approved_compiled
-    CHECK (status <> 'approved' OR compiled IS NOT NULL);
+    CHECK (status <> 'approved'
+           OR (compiled IS NOT NULL AND jsonb_typeof(compiled) = 'object'));
 
 -- +goose Down
 ALTER TABLE workflow_version DROP CONSTRAINT workflow_version_approved_compiled;

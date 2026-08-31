@@ -90,3 +90,28 @@ func TestWorkflowCrossTenantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, list)
 }
+
+// TestApproveVersionRejectsJSONBNullCompiled: the DB constraint requires
+// an approved row's compiled document to be a JSON object — SQL NULL and
+// JSONB null both fail, so an approval can never persist an execution
+// form that decodes to zero values.
+func TestApproveVersionRejectsJSONBNullCompiled(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+	tn, err := s.CreateTenant(ctx, "acme", testKEK)
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
+	require.NoError(t, err)
+	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "weekly digest", testDoc())
+	require.NoError(t, err)
+
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, json.RawMessage(`null`))
+	require.Error(t, err)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, nil)
+	require.Error(t, err)
+
+	// The draft was not promoted and still approves with a real document.
+	v, err := s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
+	require.NoError(t, err)
+	require.Equal(t, "approved", v.Status)
+}
