@@ -3,7 +3,7 @@
 **Status:** Design approved; UX prototype not yet built
 **Date:** 2026-08-28
 **Author:** gambtho
-**Supersedes:** nothing. CronFoundry (`~/workspace/cronfoundry`) is explicitly *not* a
+**Supersedes:** nothing. CronFoundry (`~/workspace/cronfoundry`) is explicitly _not_ a
 starting point — see [Relationship to CronFoundry](#relationship-to-cronfoundry).
 
 ## One-line pitch
@@ -20,7 +20,7 @@ There is a category of work that never gets done:
 
 Zapier and n8n can't do it — they can move data but not decide what matters. A person
 doesn't do it — it's tedious, low-status, and due again next week. Claude Desktop
-*could* do it, but you have to be there, remember to ask, and paste in the context by
+_could_ do it, but you have to be there, remember to ask, and paste in the context by
 hand. So the work sits undone: the support themes nobody summarizes, the renewals
 nobody tracks, the follow-ups nobody chases.
 
@@ -55,7 +55,7 @@ making it abstract, and means we do **not** need to pick a vertical to start.
 
 - Developers who would rather write the YAML. They're served by the substrate directly.
 - Anyone needing sub-minute latency, event-driven triggers, or human-in-the-loop
-  approval *during* a run (see [Runtime gates](#why-there-is-no-runtime-approval-gate)).
+  approval _during_ a run (see [Runtime gates](#why-there-is-no-runtime-approval-gate)).
 
 ## What makes something a Nightshift job
 
@@ -71,15 +71,21 @@ Five tests. A candidate job should pass all five; the fifth is the value proposi
 
 ## Core model: three artifacts
 
+> **Amended 2026-08-31.** The core model is now **four** artifacts — Steps · Permit ·
+> Rubric · **Objective** — see
+> [`2026-08-31-nightshift-objectives-design.md`](./2026-08-31-nightshift-objectives-design.md).
+> The objective is a terminal completion condition, not a rubric rule; standing
+> workflows are unchanged and simply have none.
+
 A build conversation produces three artifacts, not one. Users already speak all three
 fluently, just not in that order — the interview's job is to notice which one it's
 hearing and sort it.
 
-| Artifact | In the user's words | What it becomes |
-|---|---|---|
-| **Steps** | "summarize last week's tickets" | Agent system prompt + kickoff message |
+| Artifact   | In the user's words                                   | What it becomes                                        |
+| ---------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| **Steps**  | "summarize last week's tickets"                       | Agent system prompt + kickoff message                  |
 | **Permit** | "only our support channel, don't let it email anyone" | Egress-proxy allowlist + credential grants + spend cap |
-| **Rubric** | "never miss a security issue, keep it under a page" | Gradeable criteria scored per run by a separate grader |
+| **Rubric** | "never miss a security issue, keep it under a page"   | Gradeable criteria scored per run by a separate grader |
 
 The **rubric is what makes the alerting honest** (see [The four
 surfaces](#4-the-alert)). Without it, "something looks off" is guesswork. With it, the
@@ -90,7 +96,7 @@ product can name a specific broken promise and how long it's been broken.
 ### 1. First run — intake and verdict
 
 **Decision: no interview, no gallery.** The user arrives with a problem; take it. One
-box: *"What do you want taken care of?"* — "describe it how you'd describe it to a
+box: _"What do you want taken care of?"_ — "describe it how you'd describe it to a
 coworker." Starter phrasings are offered for anyone who freezes, all in job language.
 Nothing is connected and nothing runs at this stage.
 
@@ -119,7 +125,7 @@ carries the product), and inline per-capability consent prompts (highest compreh
 but turns the approval screen into a formality and adds clicks everywhere else).
 
 The diagram updates live and highlights newly added capability, so scope is something
-the user *feels while describing*, not something they audit at the end.
+the user _feels while describing_, not something they audit at the end.
 
 ### 3. Approve — the blast radius
 
@@ -144,6 +150,12 @@ the primary model).
 
 #### Why there is no runtime approval gate
 
+> **Amended 2026-08-31** by
+> [`2026-08-31-nightshift-escalation-design.md`](./2026-08-31-nightshift-escalation-design.md),
+> which keeps this section's objection intact by making the wait **asynchronous**: a
+> waiting run holds no thread, no credential, and no worker — a suspended actor, not a
+> stall. Approve-once remains the default; escalation is opt-in per workflow.
+
 A runtime approval gate — pausing a run until a human confirms a tool call — is a
 **stall, not a safeguard** on a scheduled 3AM run: the workflow goes idle and waits for
 someone who is asleep. Approve-once is therefore correct for unattended work, and the
@@ -158,8 +170,8 @@ runtime mechanism.
 **Decision: silence is good; alert on trouble; reach the user outside the app.**
 
 The quiet home lists workflows with last run, cost, rule-compliance, and next run — and
-tells the user explicitly: *"You don't need to check this page. If something goes wrong,
-we'll come find you."* That line is load-bearing; it's what stops an anxious non-AI user
+tells the user explicitly: _"You don't need to check this page. If something goes wrong,
+we'll come find you."_ That line is load-bearing; it's what stops an anxious non-AI user
 from checking, which is the behavior the whole model depends on.
 
 The alert reaches them by email and push. Four blocks:
@@ -191,16 +203,16 @@ Substrate supplies **isolation and lifecycle only**. It is deliberately harness-
 and has no notion of budgets, credentials, scheduling, versioning, or grading. So
 everything this design treats as a governance guarantee is **ours to build**:
 
-| Nightshift concept | Where it is enforced |
-|---|---|
+| Nightshift concept                            | Where it is enforced                                                                                                                                                               |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | What it may reach, and with which credentials | An **egress proxy we operate**. Actors get no direct egress; the proxy holds the permit and substitutes credentials at the boundary, so no customer credential enters the sandbox. |
-| Which tools it may use | The harness, bounded by the proxy. |
-| Spend cap | Our metering, checked before each model request. |
-| Isolation | Substrate — gVisor or microVM, with state reset between actors. |
-| Schedule | Our scheduler. |
-| Proof it ran | Run records **pushed** by the harness — Substrate exposes no log or event API. |
-| Change control | Our workflow versioning, coupled to Substrate's immutable ActorTemplates. |
-| Rule grading | Our grader. This is what lets an alert name a *specific broken promise*. |
+| Which tools it may use                        | The harness, bounded by the proxy.                                                                                                                                                 |
+| Spend cap                                     | Our metering, checked before each model request.                                                                                                                                   |
+| Isolation                                     | Substrate — gVisor or microVM, with state reset between actors.                                                                                                                    |
+| Schedule                                      | Our scheduler.                                                                                                                                                                     |
+| Proof it ran                                  | Run records **pushed** by the harness — Substrate exposes no log or event API.                                                                                                     |
+| Change control                                | Our workflow versioning, coupled to Substrate's immutable ActorTemplates.                                                                                                          |
+| Rule grading                                  | Our grader. This is what lets an alert name a _specific broken promise_.                                                                                                           |
 
 Two consequences the UX must not paper over:
 
