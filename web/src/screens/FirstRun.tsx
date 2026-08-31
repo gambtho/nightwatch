@@ -71,16 +71,21 @@ export default function FirstRun() {
   }
 
   async function keyVerified(preset: EndpointPreset) {
-    await saveEndpoint(recordFor(preset, normalizedBaseUrl(preset)));
+    let url = preset.baseUrl ?? "";
+    if (preset.needsBaseUrl) {
+      const checked = validateBaseUrl(baseUrl, {
+        requireLoopback: preset.requireLoopback,
+      });
+      if (!checked.ok) {
+        // verifyKey already re-checks the URL, so this shouldn't fire —
+        // but an unvalidated address is never persisted on a race.
+        setBaseUrlError(checked.message);
+        return;
+      }
+      url = checked.url;
+    }
+    await saveEndpoint(recordFor(preset, url));
     setPhase({ step: "budget", preset });
-  }
-
-  function normalizedBaseUrl(preset: EndpointPreset): string {
-    if (!preset.needsBaseUrl) return preset.baseUrl ?? "";
-    const checked = validateBaseUrl(baseUrl, {
-      requireLoopback: preset.requireLoopback,
-    });
-    return checked.ok ? checked.url : baseUrl;
   }
 
   async function finishLocal(preset: EndpointPreset) {
@@ -90,8 +95,12 @@ export default function FirstRun() {
       return;
     }
     setSaving(true);
-    await saveEndpoint(recordFor(preset, checked.url));
-    navigate("/build");
+    try {
+      await saveEndpoint(recordFor(preset, checked.url));
+      navigate("/build");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function finishBudget() {
@@ -103,8 +112,12 @@ export default function FirstRun() {
     }
     setBudgetError(null);
     setSaving(true);
-    await saveBudget(Math.round(dollars * 100));
-    navigate("/build");
+    try {
+      await saveBudget(Math.round(dollars * 100));
+      navigate("/build");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (phase.step === "choose") {

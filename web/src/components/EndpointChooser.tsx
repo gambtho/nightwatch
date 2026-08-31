@@ -1,9 +1,10 @@
 import { ENDPOINT_PRESETS, type PresetId } from "../local/endpoints";
 
 // "Choose where your AI runs" — the five hosted presets plus "another
-// service" and "on this computer", each a single click into its capture
-// card. Copy over configuration: the blurb says what the choice means,
-// not what protocol it speaks.
+// service" and "on this computer", each a single click into its setup
+// step (a key-capture card, or the address-only screen for a local
+// model). Copy over configuration: the blurb says what the choice
+// means, not what protocol it speaks.
 
 export default function EndpointChooser({
   onChoose,

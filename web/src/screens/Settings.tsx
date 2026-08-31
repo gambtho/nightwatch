@@ -148,19 +148,24 @@ export default function Settings() {
   async function confirmSwitch() {
     if (sw?.step !== "confirm" || !pricesValid) return;
     setSwitching(true);
-    for (const model of sw.unpriced) {
-      const draft = prices[model]!;
-      await savePrice(
-        sw.record.base_url,
-        model,
-        Math.round(parseDollars(draft.in)! * 100),
-        Math.round(parseDollars(draft.out)! * 100),
-      );
+    // The fake seam never rejects; the finally keeps the dialog usable
+    // once these become real API calls under P1.
+    try {
+      for (const model of sw.unpriced) {
+        const draft = prices[model]!;
+        await savePrice(
+          sw.record.base_url,
+          model,
+          Math.round(parseDollars(draft.in)! * 100),
+          Math.round(parseDollars(draft.out)! * 100),
+        );
+      }
+      await saveEndpoint(sw.record);
+      setConfig((c) => (c ? { ...c, endpoint: sw.record } : c));
+      setSw(null);
+    } finally {
+      setSwitching(false);
     }
-    await saveEndpoint(sw.record);
-    setConfig((c) => (c ? { ...c, endpoint: sw.record } : c));
-    setSw(null);
-    setSwitching(false);
   }
 
   async function submitBudget() {
@@ -179,7 +184,8 @@ export default function Settings() {
   async function toggleAutostart() {
     if (!config) return;
     const next = !config.autostart;
-    setConfig({ ...config, autostart: next }); // optimistic; the store can't fail
+    // Optimistic: the fake seam's writes never reject (see local/config).
+    setConfig({ ...config, autostart: next });
     await setAutostart(next);
   }
 
@@ -290,7 +296,19 @@ export default function Settings() {
               <div className="endpoint-prices">
                 <p className="dim">
                   Tomte doesn't know this service's prices, and it never spends unmetered
-                  — enter them from the service's pricing page to switch.
+                  — enter them from the service's{" "}
+                  {presetById(sw.record.preset).pricingUrl ? (
+                    <a
+                      href={presetById(sw.record.preset).pricingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      pricing page
+                    </a>
+                  ) : (
+                    "pricing page"
+                  )}{" "}
+                  to switch.
                 </p>
                 {sw.unpriced.map((model) => (
                   <div key={model} className="endpoint-price-row">

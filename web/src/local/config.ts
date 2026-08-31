@@ -39,9 +39,13 @@ function delay(ms = 250): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// localStorage in the browser; an in-memory map where it's missing (the
-// jsdom test environment exposes no localStorage). Both are throwaway —
-// the whole store goes when P1's API replaces this seam.
+// localStorage in the browser; an in-memory map where it's missing —
+// this vitest jsdom setup exposes no global `localStorage`, so the map
+// is what the tests exercise. Writes also fall back to the map on a
+// storage failure (quota, private mode), so the seam never rejects: the
+// screens fire saves without catch handlers on that guarantee, and real
+// error handling arrives with P1's real API, not against a fake. Both
+// backends are throwaway with the rest of this seam.
 const memory = new Map<string, string>();
 
 function hasLocalStorage(): boolean {
@@ -63,11 +67,15 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson(key: string, value: unknown): void {
   const raw = JSON.stringify(value);
-  if (hasLocalStorage()) {
-    localStorage.setItem(key, raw);
-  } else {
-    memory.set(key, raw);
+  try {
+    if (hasLocalStorage()) {
+      localStorage.setItem(key, raw);
+      return;
+    }
+  } catch {
+    // storage refused the write — keep the never-rejects guarantee
   }
+  memory.set(key, raw);
 }
 
 /** Clears the fake store — for tests only. */
