@@ -24,19 +24,25 @@ func (s *Store) CreateTenant(ctx context.Context, name string, wrappedKEK []byte
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	err = tx.QueryRow(ctx,
+	if t, err = createTenant(ctx, tx, name, wrappedKEK); err != nil {
+		return t, err
+	}
+	return t, tx.Commit(ctx)
+}
+
+func createTenant(ctx context.Context, q querier, name string, wrappedKEK []byte) (Tenant, error) {
+	var t Tenant
+	err := q.QueryRow(ctx,
 		`INSERT INTO tenant (name) VALUES ($1) RETURNING id, name, created_at, monthly_cap_cents`,
 		name,
 	).Scan(&t.ID, &t.Name, &t.CreatedAt, &t.MonthlyCapCents)
 	if err != nil {
 		return t, err
 	}
-	if _, err := tx.Exec(ctx,
+	_, err = q.Exec(ctx,
 		`INSERT INTO tenant_kek (tenant_id, wrapped_kek) VALUES ($1, $2)`,
-		t.ID, wrappedKEK); err != nil {
-		return t, err
-	}
-	return t, tx.Commit(ctx)
+		t.ID, wrappedKEK)
+	return t, err
 }
 
 // TenantKEK returns the current (highest-version) KEK — the encrypt path.
