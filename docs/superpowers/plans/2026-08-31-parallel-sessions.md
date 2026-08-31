@@ -11,25 +11,25 @@ finishes, or a cross-cutting decision is taken.
 
 ## State of the world
 
-| Thread                           | State                                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Plan 1 — Foundation              | **Merged** (PR #1)                                                                                                       |
-| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                                                                       |
-| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                                                                      |
-| Identity spec                    | **Merged** (PR #6)                                                                                                       |
-| Identity implementation          | **Merged** (PR #17)                                                                                                      |
-| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
-| Connectors                       | **In flight** — phase 1 merged; phase 2 re-landing as PR #31; phase 4 as PR #30; **owns `server/`**                      |
-| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
-| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
-| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
-| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                                |
-| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                                |
-| Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                                |
-| Docs corrections + roadmap       | **Merged** (PR #15)                                                                                                      |
-| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                                |
-| Frontend (`web/`) + CLI          | **First slice merged** (PR #21) — `web/` exists; login, approve, quiet home. Rest blocked on connectors. CLI not started |
-| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                                      |
+| Thread                           | State                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Plan 1 — Foundation              | **Merged** (PR #1)                                                                                         |
+| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                                                         |
+| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                                                        |
+| Identity spec                    | **Merged** (PR #6)                                                                                         |
+| Identity implementation          | **Merged** (PR #17)                                                                                        |
+| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                 |
+| Connectors                       | **Phases 1, 2, 4 merged.** Paused by design — phase 3 on call for the build lane; 5→6 deferred, 5 before 6 |
+| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                             |
+| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                           |
+| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                    |
+| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                  |
+| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                  |
+| Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                  |
+| Docs corrections + roadmap       | **Merged** (PR #15)                                                                                        |
+| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                  |
+| Frontend (`web/`) + CLI          | **`/setup` shipped** (PR #32) — the loop closes. CLI still not started                                     |
+| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                        |
 
 ## The rule
 
@@ -43,6 +43,12 @@ it extends the existing `server/cmd/nightshift` binary
 (`migrate` / `serve` / `dev-session`).
 
 ### Serialized `server/` queue
+
+**`server/` is FREE and unassigned.** The connectors lane has paused by design,
+not stalled. Highest-value next occupant per the dependency map below: the
+**build-conversation lane** (its `server/` checklist items 2, 3, 6 — the build
+resource, the build agent loop, and the verdict demand signal), because the
+frontend's remaining ten checklist items all wait on the build resource.
 
 1. ~~**Plan 3**~~ (merged, PR #10) →
 2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
@@ -137,6 +143,35 @@ costs one message.
 This project tracks its own work in docs, not issues. An external issue
 tracker is only ever the required entry protocol for contributing upstream —
 never our own bookkeeping.
+
+## The loop is closed (2026-08-31)
+
+Recorded because it was the project's open question for most of the day: can a
+person use this, rather than can its parts pass tests.
+
+**They can, end to end, on `main` today** — verified against the tree, not
+against merge statuses:
+
+- **Sign in** — magic link, `__Host-` session cookie, `/v1/me` bootstrap.
+- **Create** — `web/src/screens/Setup.tsx` at `/setup`, posting real steps v1,
+  schedule, and permit to `POST /v1/workflows`, wired to `GET /v1/catalog`.
+  Deliberately a **developer setup path, not the product's front door** — the
+  build conversation replaces it.
+- **Approve** — the blast-radius diagram, driven only by the permit document.
+- **Run** — `POST /v1/workflows/{id}/runs` or the scheduler.
+- **Do something real** — the harness tool loop projects permit-granted ops as
+  tools (`internalapi` joins the approved permit with the catalog; the harness
+  never sees the permit or a credential), calls them through the enforcing
+  proxy with credentials injected at the boundary, and returns tool-level
+  failures to the model as `IsError`.
+- **See it** — the quiet home, run history, events.
+
+`TestEndToEndConnectorToolRun` proves the thesis rather than asserting it: a
+constrained write succeeds on an approved channel, an unlisted channel is
+denied and audited, and no credential ever reaches the harness.
+
+What is still missing is the _product_, not the loop: the build conversation,
+so that a non-technical person can describe a job instead of filling a form.
 
 ## Blocking defects
 
