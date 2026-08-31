@@ -3,10 +3,27 @@
 **Status:** Design approved in conversation; spec awaiting review
 **Date:** 2026-08-31
 **Author:** gambtho
-**Parent:** [`2026-08-30-nightshift-platform-design.md`](./2026-08-30-nightshift-platform-design.md) — this designs governance
-primitives 3 (spend metering and caps) and 4 (scheduling), Plan 3 of the
+**Parent:** [`2026-08-30-nightshift-platform-design.md`](./2026-08-30-nightshift-platform-design.md) — this designs the
+**v1 slice** of governance primitives 3 (spend metering and caps) and 4
+(scheduling), Plan 3 of the
 [roadmap](../plans/2026-08-30-nightshift-platform-roadmap.md). It closes roadmap
 decision 10 (the orphaned-run reaper and the run-token TTL vs queueing revisit).
+
+## Delivery boundary — what of primitives 3 and 4 lands now
+
+Stated up front so the milestone claims exactly what it delivers:
+
+- **Delivered**: the tenant monthly cap enforced before every model request
+  (fail closed); the per-run cap as approved, priced-model-validated data with
+  transactional overrun detection; cron+IANA scheduling with at-least-once
+  dispatch recovery; DB-enforced single-active-run admission; the reaper.
+- **Deliberately narrowed, with the gate named**: pre-request enforcement of
+  the _per-run_ cap waits for multi-turn runs (today a run is one model call,
+  so there is no "before the next request" moment inside a run — the hook
+  seam is ready and unchanged when that arrives); scheduler fairness/quotas
+  beyond cap-skip wait for a load level where one tick can exceed a tick
+  interval (see Open questions). These are narrowings of the parent's
+  primitives, not silent omissions.
 
 ## Scope decisions
 
@@ -41,52 +58,75 @@ Validation at the workflow API, fail closed, permit-style:
 
 ## Firing
 
-### Idempotency (migration)
+### Idempotency and admission (migration)
 
-`run` gains `fire_time timestamptz` (NULL for manual fires), plus:
+`run` gains `fire_time timestamptz` (NULL for manual fires) and
+`dispatched_at timestamptz` (set when `Invoke` succeeds), plus:
 
 ```sql
 CREATE UNIQUE INDEX run_workflow_firetime_unique
     ON run (workflow_id, fire_time) WHERE fire_time IS NOT NULL;
+-- One active run per workflow, DB-enforced: the parent spec's "default to
+-- serialize" as an admission rule, not a check-then-fire race. Applies to
+-- manual and scheduled fires alike.
+CREATE UNIQUE INDEX run_one_active_per_workflow
+    ON run (workflow_id) WHERE status IN ('pending', 'running');
 ALTER TABLE run ADD CONSTRAINT run_fire_reason_time_consistent
     CHECK ((fire_reason = 'schedule') = (fire_time IS NOT NULL));
 ```
 
-This is cronfoundry's proven idempotent-tick shape, harvested deliberately.
-A duplicate fire attempt — second process, restart mid-tick, clock skew —
-loses on the index and is treated as success (a specific `ErrAlreadyFired`
-maps to a no-op). **The index is the coordination**; there is no leader
-election at this scale.
+The `fire_time` index is cronfoundry's proven idempotent-tick shape; the
+active-run index is new and load-bearing: a manual fire while a run is active
+gets **409 "a run is already active"** (a person is watching), and a
+scheduled fire maps the violation to a skip. **The indexes are the
+coordination** — no leader election, and no window between checking and
+firing.
 
-### The tick
+### The tick — create, then dispatch (at-least-once)
 
-A 60-second ticker in `serve()`:
+Row creation and dispatch are **separate steps**, because a crash between
+them must not lose the occurrence (the unique index alone gives idempotent
+_row creation_, not reliable _dispatch_ — cronfoundry's scheduler learned the
+same lesson and redispatches pending rows). A 60-second ticker in `serve()`:
 
-1. Load workflows with an approved version carrying a schedule.
-2. For each, compute the most recent due occurrence in the schedule's own
-   zone (`cron.Next` walked from the last observed minute boundary).
-3. For anything due in the window, run the pre-fire checks (below), then call
-   `engine.Fire(ctx, tenantID, workflowID, version, "schedule", fireTime)`.
+1. **Create**: load workflows with an approved version carrying a schedule;
+   for each, compute the most recent due occurrence in the schedule's own
+   zone; if it is due and within the staleness window (below), and the
+   pre-fire checks pass, insert the run row (token signed, `fire_time` set,
+   `dispatched_at` NULL). Unique-index violations — either index — are
+   skips, not errors.
+2. **Dispatch**: select scheduled runs with `status = 'pending' AND
+dispatched_at IS NULL` (including rows created by a previous, crashed
+   process), call `EnsureActor` + `Invoke`, and set `dispatched_at` on
+   success. A row with `dispatched_at IS NULL` provably never reached an
+   actor — no model call happened — so redispatch is safe. A crash _after_
+   `Invoke` (dispatched but the process died with the work queued) is the
+   reaper's case: that run becomes a **visible** `failed/orphaned`, not a
+   silent skip.
 
-`engine.Fire` is the extracted core of today's `fireRun`: sign run token →
-`CreateRun` (now with `fireTime`) → `EnsureActor` → `Invoke` → `failDispatch`
-on dispatch errors. The engine takes an injectable `Now func() time.Time` so
-tests drive the clock.
+`engine.Fire` is the extracted core of today's `fireRun` (sign token →
+`CreateRun` → dispatch), shared by the HTTP handler and the tick, with an
+injectable `Now func() time.Time`. The manual path keeps create+dispatch in
+one call; only the scheduler exploits the split.
 
-### Catch-up policy: skip
+### Catch-up policy: skip, deterministically
 
-Missed occurrences while the server was down do not replay — only the current
-due occurrence fires. A Monday digest arriving twelve times after an outage is
-the worse failure; skipped occurrences are visible as gaps in run history.
+Only the **most recent** due occurrence is ever considered, and only while it
+is younger than the staleness window `W = max(2 × tick interval, 5 minutes)`.
+Older occurrences never fire, regardless of restarts — no persistent cursor,
+no "last observed boundary" state: the rule is a pure function of (schedule,
+now). A Monday digest arriving twelve times after an outage is the worse
+failure; skipped occurrences are visible as gaps in run history.
 
-### Overlap policy: skip-while-active
+### Overlap: admission, not a check
 
-If the workflow already has a run in `pending`/`running`, the tick skips this
-occurrence (the parent spec's "default to serialize" applied at the scheduling
-layer — the per-actor lock already serializes execution; this prevents a
-backlog forming behind a stuck run, which also protects the run-token TTL).
-Skips log through the redacting handler with workflow/tenant IDs; a durable
-skip record is deliberately deferred until Plan 4's alerting needs one.
+Single-active-run is enforced by the `run_one_active_per_workflow` index at
+insert time (see above) — there is no separate skip-while-active check to
+race. A consequence worth stating: a run can no longer _queue_ behind an
+active run at the run level at all, which is what makes the token-TTL
+question tractable (below). Scheduled skips log through the redacting handler
+with workflow/tenant IDs; a durable skip record is deliberately deferred
+until Plan 4's alerting needs one.
 
 ### Pre-fire checks
 
@@ -105,24 +145,50 @@ Permit v1 gains an optional object (a deliberate schema change in
 { "v": 1, "llm": { ... }, "spend": { "per_run_cents": 50 }, "connections": {} }
 ```
 
-**Enforcement honesty.** Runs are single-model-call today, so `Hook.Before`
-sees zero accumulated spend for the current run — the per-run cap cannot block
-its own run's only request. In v1 it is enforced post-hoc: finalization
-compares `cost_cents` to the cap and appends a `spend.exceeded` run event,
-which is precisely the input Plan 4's alerting consumes ("which rule it's
-missing"). Pre-request enforcement becomes real when multi-turn runs arrive
-(connector work) — through this same hook, with no proxy changes.
+**Priced models are a precondition — without this, both caps are vacuous.**
+Today a workflow's model is an unrestricted string and `llm.CostCents`
+deliberately returns 0 for unknown (provider, model) pairs, so an unpriced
+model would spend real money that no cap ever sees. Therefore: `llm` gains
+`Priced(provider, model) bool`, and workflow validation **fails closed** — a
+steps document naming an unpriced (provider, model) is a 400 at
+create/add-version, same style as permit validation. The price table becomes
+governance data, not best-effort metadata (its maintenance story is an open
+question below).
+
+**Per-run enforcement honesty.** Runs are single-model-call today, so
+`Hook.Before` sees zero accumulated spend for the current run — the per-run
+cap cannot block its own run's only request. In v1 it is detected at
+finalization, **transactionally**: the internal API's finalize handler
+resolves the run's permit cap and passes it to `FinalizeRun`, which inserts
+the `spend.exceeded` run event and the terminal status update in ONE
+transaction (the event insert happens while the run is still non-terminal, so
+the terminal-immutability guard is satisfied, and a reaper race cannot
+produce a false event — whichever finalization wins the status transition
+writes the event). This event is precisely the input Plan 4's alerting
+consumes. Pre-request per-run enforcement becomes real when multi-turn runs
+arrive — through this same hook, with no proxy changes.
+
+**Run visibility correction**: `fire_reason` exists in the schema but is not
+currently scanned or exposed — `store.Run`, `runCols`, and the public run
+JSON gain `fire_reason` and `fire_time` as part of this work, so scheduled
+runs are distinguishable through the API (the claim below depends on it).
 
 ### Tenant cap — monthly, UTC
 
 - `tenant.monthly_cap_cents int` (nullable). NULL → platform default from
   `NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS`; `0` = unlimited (dev).
 - `meter.Hook` (new `server/internal/meter` package implementing
-  `proxy.Hook`) sums `cost_cents` of the tenant's **finalized** runs in the
-  current UTC calendar month; at/over cap →
-  `HookError{Status: 429, Msg: "monthly spend cap reached"}`. The proxy
-  already maps that to 429 + a `proxy.denied` (reason `"hook"`) audit event;
-  the harness surfaces it as `llm_error` and the run finalizes failed.
+  `proxy.Hook`) computes the tenant's month-to-date spend as: `SUM(cost_cents)
+OVER runs WHERE tenant_id = $1 AND finished_at >= <UTC month start> AND
+cost_cents IS NOT NULL` — month membership by **`finished_at`** (cost exists
+  only at finalization), and **all** finalized runs with a recorded cost count,
+  failed ones included (they spent real money). Backed by a new partial index
+  `ON run (tenant_id, finished_at) WHERE cost_cents IS NOT NULL` so the
+  per-request check is an index range scan, never a tenant-wide table scan.
+  At/over cap → `HookError{Status: 429, Msg: "monthly spend cap reached"}`.
+  The proxy already maps that to 429 + a `proxy.denied` (reason `"hook"`)
+  audit event; the harness surfaces it as `llm_error` and the run finalizes
+  failed.
 - **Stated overshoot bound**: in-flight runs are not counted, so a tenant can
   exceed the cap by (concurrent runs × per-run cost). At current scale that
   bound is small; making it exact requires reservation accounting, deferred
@@ -140,11 +206,15 @@ This covers all three orphaning modes from the Plan 2 branch review: server
 restart killing in-flight Local goroutines, a failed context fetch that never
 finalizes, and queue waits outliving the token.
 
-**TTL vs queueing, resolved:** both configurable —
-`NIGHTSHIFT_RUN_TOKEN_TTL` (default 1h) and `NIGHTSHIFT_RUN_DEADLINE`
-(default 2h) — with a startup invariant `deadline > TTL`: a run whose token
-has expired can never finalize itself, so reaping after expiry is
-guaranteed-safe and reaping before it would be premature.
+**TTL vs queueing, resolved structurally:** the single-active-run admission
+index means a run can no longer queue behind another run at all — the
+expiring-while-queued scenario from roadmap decision 10 is dissolved, not
+mitigated. What remains is a run's own lifetime: both knobs are configurable —
+`NIGHTSHIFT_RUN_TOKEN_TTL` (default 1h, replacing the hard-coded
+`runTokenTTL` const) and `NIGHTSHIFT_RUN_DEADLINE` (default 2h) — with a
+startup invariant `deadline > TTL`: a run whose token has expired can never
+finalize itself, so reaping after expiry is guaranteed-safe and reaping
+before it would be premature.
 
 ## Failure handling and observability
 
@@ -163,14 +233,22 @@ endpoints already expose every column involved (the version endpoints gain the
 - **Schedule validation**: accept/reject matrix (bad cron, `@daily`
   descriptors, seconds field, non-IANA tz, one-of-two fields, unknown keys).
 - **Engine**: fire-parity (manual vs scheduled runs identical modulo
-  reason/fire_time); idempotency (concurrent same-`fire_time` fires → one
-  run); catch-up skip (stale last-check fires exactly once); overlap skip;
-  a DST-boundary test pinning `robfig/cron`'s behavior across a
-  spring-forward in `America/New_York` so a dependency upgrade cannot
-  silently change semantics.
+  reason/fire_time/dispatched_at); idempotency (concurrent same-`fire_time`
+  fires → one run); **dispatch recovery** (a pending scheduled row with
+  `dispatched_at IS NULL` — simulating a crash between create and invoke —
+  is redispatched by the next tick, exactly once); **admission** (a second
+  fire — manual or scheduled — while a run is active loses on the index:
+  manual → 409, scheduled → skip; concurrent attempts race the index, not a
+  check); staleness-window skip (an occurrence older than W never fires,
+  after any restart); a DST-boundary test pinning `robfig/cron`'s behavior
+  across a spring-forward in `America/New_York` so a dependency upgrade
+  cannot silently change semantics.
 - **Meter**: under/at/over cap against real Postgres with runs straddling a
-  UTC month boundary; `spend.exceeded` event on finalize; meter-DB-failure
-  fails closed; scheduler skip-when-capped.
+  UTC month boundary **by `finished_at`**, failed-but-costed runs counted;
+  transactional `spend.exceeded` (event and terminal status land atomically;
+  a lost finalize race writes no false event); **unpriced model rejected
+  with 400 at the workflow API**; meter-DB-failure fails closed; scheduler
+  skip-when-capped.
 - **Reaper**: stuck run past deadline → `failed/orphaned` with hash cleared
   (proxy rejects the token afterward); younger runs untouched; the
   `deadline > TTL` startup invariant.
@@ -197,3 +275,12 @@ per-run cap enforcement (arrives with multi-turn runs).
   the event shape here is designed to make that possible.
 - **Billing linkage** — monthly caps are guardrails, not invoices; real
   billing will want its own ledger table rather than `SUM(cost_cents)`.
+- **Price-table governance** — requiring priced models makes the table
+  load-bearing: who updates it, and what happens to approved workflows when a
+  model is delisted (existing approved versions keep running priced-as-was,
+  or fail closed?). Needs an answer before the table drifts.
+- **BYOK cap semantics** — when a tenant's own key pays the provider bill,
+  the platform monthly cap protects the platform's margin, not the tenant's
+  wallet; whether BYOK spend should count against the same cap (and whether
+  BYOK-only models can bypass the priced-model rule, since openrouter's
+  catalog is unbounded) is deferred to the billing/connector work.
