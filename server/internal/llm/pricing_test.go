@@ -30,3 +30,15 @@ func TestCostCentsFloorsCombinedNotSeparately(t *testing.T) {
 		t.Fatalf("want 1 cent, got %d", got)
 	}
 }
+
+func TestPriced(t *testing.T) {
+	if !Priced("anthropic", "claude-sonnet-5") {
+		t.Fatal("claude-sonnet-5 must be priced — every fixture uses it")
+	}
+	if Priced("anthropic", "no-such-model") {
+		t.Fatal("unknown model must not be priced")
+	}
+	if Priced("nope", "gpt-4o-mini") {
+		t.Fatal("unknown provider must not be priced")
+	}
+}

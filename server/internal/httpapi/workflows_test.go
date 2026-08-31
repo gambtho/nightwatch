@@ -149,3 +149,12 @@ func TestCreateWorkflowRejectsInvalidPermit(t *testing.T) {
 	resp, _ := e.do(t, "POST", "/v1/workflows", body)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+func TestCreateWorkflowRejectsUnpricedModel(t *testing.T) {
+	e := newEnv(t)
+	body := workflowBody()
+	body["steps"].(map[string]any)["model"] = "claude-imaginary-9"
+	resp, out := e.do(t, "POST", "/v1/workflows", body)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Contains(t, out["error"], "pricing")
+}
