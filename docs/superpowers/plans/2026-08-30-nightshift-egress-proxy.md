@@ -339,7 +339,7 @@ func (m *Master) EncryptSecret(wrappedKEK []byte, value string) (dekWrapped, cip
 func (m *Master) DecryptSecret(wrappedKEK, dekWrapped, ciphertext, nonce []byte) (string, error)
 ```
 
-and store: `CreateTenant(ctx, name string, wrappedKEK []byte) (Tenant, error)` (transactional: tenant + tenant_kek rows), `TenantKEK(ctx, tenantID uuid.UUID) (wrapped []byte, version int, err error)`.
+and store: `CreateTenant(ctx, name string, wrappedKEK []byte) (Tenant, error)` (transactional: tenant + tenant_kek rows), `TenantKEK(ctx, tenantID uuid.UUID) (wrapped []byte, version int, err error)` (the CURRENT — highest-version — KEK, used on the encrypt path), and `TenantKEKAt(ctx, tenantID uuid.UUID, version int) (wrapped []byte, err error)` (a specific historical version, used on the decrypt path via `connection.kek_version`).
 
 - [ ] **Step 1: Write the migration**
 
@@ -348,12 +348,14 @@ and store: `CreateTenant(ctx, name string, wrappedKEK []byte) (Tenant, error)` (
 ```sql
 -- +goose Up
 CREATE TABLE tenant_kek (
-    tenant_id uuid PRIMARY KEY REFERENCES tenant (id) ON DELETE CASCADE,
-    wrapped_kek bytea NOT NULL,
-    -- bumped on KEK rotation; connection.kek_version refers to this
+    tenant_id uuid NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
+    -- History table: rotation ADDS a row with version+1; old versions stay
+    -- decryptable while connections still name them via kek_version.
     version int NOT NULL DEFAULT 1,
+    wrapped_kek bytea NOT NULL,
     master_version int NOT NULL DEFAULT 1,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, version)
 );
 
 CREATE TABLE connection (
@@ -599,14 +601,27 @@ func (s *Store) CreateTenant(ctx context.Context, name string, wrappedKEK []byte
 	return t, tx.Commit(ctx)
 }
 
+// TenantKEK returns the current (highest-version) KEK — the encrypt path.
 func (s *Store) TenantKEK(ctx context.Context, tenantID uuid.UUID) ([]byte, int, error) {
 	var wrapped []byte
 	var version int
 	err := s.pool.QueryRow(ctx,
-		`SELECT wrapped_kek, version FROM tenant_kek WHERE tenant_id = $1`,
+		`SELECT wrapped_kek, version FROM tenant_kek
+		 WHERE tenant_id = $1 ORDER BY version DESC LIMIT 1`,
 		tenantID,
 	).Scan(&wrapped, &version)
 	return wrapped, version, notFound(err)
+}
+
+// TenantKEKAt returns a specific KEK version — the decrypt path, driven by
+// connection.kek_version, which keeps rotation resumable.
+func (s *Store) TenantKEKAt(ctx context.Context, tenantID uuid.UUID, version int) ([]byte, error) {
+	var wrapped []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT wrapped_kek FROM tenant_kek WHERE tenant_id = $1 AND version = $2`,
+		tenantID, version,
+	).Scan(&wrapped)
+	return wrapped, notFound(err)
 }
 ```
 
@@ -1128,11 +1143,26 @@ type Hook interface {
 	Before(ctx context.Context, req HookRequest) error
 }
 type NopHook struct{}
-type Config struct {
-	Upstreams    map[string]string // provider -> upstream base URL; DefaultConfig fills real hosts
-	InternalBase string            // base URL of the internal API for the pass-through route
+// HookError lets a Hook (Plan 3 metering) choose the response status.
+// Only 403 and 429 are honored; any other error maps to 403.
+type HookError struct {
+	Status int
+	Msg    string
 }
-func DefaultConfig() Config
+func (e HookError) Error() string
+// ProviderRoute is a provider's entire v1 blast radius: one upstream base
+// and exactly one allowed (method, path). Any other request to the origin
+// is denied before credential injection.
+type ProviderRoute struct {
+	Base   string // upstream base URL, including any prefix the SDK folds into its base
+	Method string
+	Path   string // the forwarded remainder the SDK emits, no leading slash
+}
+type Config struct {
+	Providers    map[string]ProviderRoute // DefaultConfig fills the three real providers
+	InternalBase string                   // base URL of the internal API for the pass-through route
+}
+func DefaultConfig() Config // returns a FRESH map each call
 type Deps struct {
 	Auth        AuthSource
 	Permits     PermitSource
@@ -1144,7 +1174,7 @@ type Deps struct {
 func RegisterRoutes(mux *http.ServeMux, d Deps)
 ```
 
-Routes: `/proxy/llm/{provider}/{path...}` (all methods) and `/proxy/internal/{path...}` (Task 7 implements forwarding; this task registers and stubs it 502). Auth-slot extraction: `anthropic` → `x-api-key` header; `openai`/`openrouter` → `Authorization: Bearer <token>`. Permit cached per RunID in-process (map + RWMutex), populated on first use; a cached entry is authorization data only — auth re-verifies every request.
+Routes: `/proxy/llm/{provider}/{path...}` and `/proxy/internal/{path...}` (Task 7 implements forwarding; this task registers and stubs it 502). Auth-slot extraction: `anthropic` → `x-api-key` header; `openai`/`openrouter` → `Authorization: Bearer <token>`. **No permit cache** — the permit is resolved per request (auth already reads the run row per request; the spec deliberately dropped caching). Authorization requires BOTH the permit's provider allowlist AND the provider's `ProviderRoute` (method, path) match — one operation per provider in v1.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1236,7 +1266,10 @@ func newEnv(t *testing.T, upstream string, p permit.Permit) *env {
 	}
 	cfg := proxy.DefaultConfig()
 	if upstream != "" {
-		cfg.Upstreams = map[string]string{"anthropic": upstream, "openai": upstream, "openrouter": upstream}
+		for name, route := range cfg.Providers {
+			route.Base = upstream
+			cfg.Providers[name] = route
+		}
 	}
 	mux := http.NewServeMux()
 	proxy.RegisterRoutes(mux, proxy.Deps{
@@ -1282,8 +1315,10 @@ func TestMissingOrBadTokenIs401(t *testing.T) {
 
 func TestOpenAITokenRidesAuthorizationHeader(t *testing.T) {
 	e := newEnv(t, "", mustPermit(t, `{"v":1,"llm":{"providers":[]}}`))
+	// SDK-faithful path: openai-go's base already contains /v1, so the SDK
+	// emits /chat/completions relative to it.
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
-		e.ts.URL+"/proxy/llm/openai/v1/chat/completions", nil)
+		e.ts.URL+"/proxy/llm/openai/chat/completions", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer run-token-xyz")
 	resp, err := http.DefaultClient.Do(req)
@@ -1305,11 +1340,30 @@ func TestUnknownProviderIs403(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
-func TestPermitIsCachedPerRun(t *testing.T) {
-	e := newEnv(t, "", mustPermit(t, `{"v":1,"llm":{"providers":[]}}`))
-	doAnthropic(t, e, "tok")
-	doAnthropic(t, e, "tok")
-	require.Equal(t, 1, e.permits.calls)
+func TestAllowedProviderDisallowedPathIs403(t *testing.T) {
+	// The provider is permitted, but v1 allows exactly one (method, path)
+	// per provider — anything else on the origin is outside the blast radius.
+	e := newEnv(t, "", mustPermit(t, `{"v":1,"llm":{"providers":["anthropic"]}}`))
+
+	req, err := http.NewRequestWithContext(context.Background(), "POST",
+		e.ts.URL+"/proxy/llm/anthropic/v1/files", nil)
+	require.NoError(t, err)
+	req.Header.Set("x-api-key", "tok")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// Wrong method on the allowed path is denied too.
+	req, err = http.NewRequestWithContext(context.Background(), "GET",
+		e.ts.URL+"/proxy/llm/anthropic/v1/messages", nil)
+	require.NoError(t, err)
+	req.Header.Set("x-api-key", "tok")
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Contains(t, e.events.events, "proxy.denied")
 }
 
 func TestPermitSourceFailureFailsClosed(t *testing.T) {
@@ -1333,13 +1387,14 @@ Expected: FAIL (package does not exist).
 
 ```go
 func DefaultConfig() Config {
-	return Config{Upstreams: map[string]string{
+	return Config{Providers: map[string]ProviderRoute{
 		// The SDKs fold a version prefix into their base URL, so the
-		// forwarded {path...} excludes it; each upstream base carries the
-		// prefix the real host expects.
-		"anthropic":  "https://api.anthropic.com",       // SDK requests <base>/v1/messages
-		"openai":     "https://api.openai.com/v1",       // SDK base is .../v1; requests <base>/chat/completions
-		"openrouter": "https://openrouter.ai/api/v1",
+		// forwarded {path...} excludes it; each Base carries the prefix the
+		// real host expects, and Path is exactly what the SDK emits. One
+		// (method, path) per provider IS the v1 blast radius.
+		"anthropic":  {Base: "https://api.anthropic.com", Method: "POST", Path: "v1/messages"},
+		"openai":     {Base: "https://api.openai.com/v1", Method: "POST", Path: "chat/completions"},
+		"openrouter": {Base: "https://openrouter.ai/api/v1", Method: "POST", Path: "chat/completions"},
 	}}
 }
 ```
@@ -1363,22 +1418,16 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
-
-	"github.com/google/uuid"
 
 	"github.com/gambtho/nightwatch/server/internal/permit"
 )
 
 type handler struct {
 	d Deps
-
-	mu      sync.RWMutex
-	permits map[uuid.UUID]permit.Permit
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
-	h := &handler{d: d, permits: make(map[uuid.UUID]permit.Permit)}
+	h := &handler{d: d}
 	mux.HandleFunc("/proxy/llm/{provider}/{path...}", h.llm)
 	mux.HandleFunc("/proxy/internal/{path...}", h.internal)
 }
@@ -1403,50 +1452,53 @@ func (h *handler) emit(r *http.Request, id RunIdentity, typ string, payload map[
 	}
 }
 
-// authorize runs the shared front half of every proxied request:
-// authenticate, resolve the permit, check the provider allowlist.
-func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider string) (RunIdentity, permit.Permit, bool) {
+// authorize runs the front half of every LLM request: authenticate,
+// resolve the permit (per request — no cache, by design), check the
+// provider allowlist, and check the provider's one allowed (method, path).
+func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider string) (RunIdentity, permit.Permit, ProviderRoute, bool) {
 	tok := extractRunToken(provider, r)
 	if tok == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return RunIdentity{}, permit.Permit{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
 	}
 	id, err := h.d.Auth.VerifyRunToken(r.Context(), tok)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return RunIdentity{}, permit.Permit{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
 	}
 
-	h.mu.RLock()
-	p, ok := h.permits[id.RunID]
-	h.mu.RUnlock()
-	if !ok {
-		p, err = h.d.Permits.PermitForRun(r.Context(), id.TenantID, id.RunID)
-		if err != nil {
-			// Fail closed: no permit, no egress.
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return RunIdentity{}, permit.Permit{}, false
-		}
-		h.mu.Lock()
-		h.permits[id.RunID] = p
-		h.mu.Unlock()
+	p, err := h.d.Permits.PermitForRun(r.Context(), id.TenantID, id.RunID)
+	if err != nil {
+		// Fail closed: no permit, no egress.
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
 	}
 
-	if _, known := h.d.Config.Upstreams[provider]; !known || !p.AllowsProvider(provider) {
+	route, known := h.d.Config.Providers[provider]
+	if !known || !p.AllowsProvider(provider) {
 		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider})
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return RunIdentity{}, permit.Permit{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
 	}
-	return id, p, true
+	// One operation per provider is the whole v1 blast radius: without
+	// this, a run token buys the entire provider origin.
+	if r.Method != route.Method || r.PathValue("path") != route.Path {
+		h.emit(r, id, "proxy.denied", map[string]any{
+			"provider": provider, "reason": "path", "method": r.Method, "path": r.PathValue("path"),
+		})
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+	}
+	return id, p, route, true
 }
 
 func (h *handler) llm(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
-	id, p, ok := h.authorize(w, r, provider)
+	id, p, route, ok := h.authorize(w, r, provider)
 	if !ok {
 		return
 	}
-	h.forward(w, r, provider, id, p) // Task 7
+	h.forward(w, r, provider, route, id, p) // Task 7
 }
 
 func (h *handler) internal(w http.ResponseWriter, r *http.Request) {
@@ -1457,7 +1509,7 @@ func (h *handler) internal(w http.ResponseWriter, r *http.Request) {
 Plus, in the same file for this task only, stubs that Task 7 replaces (they keep the package compiling and every deny-path test honest):
 
 ```go
-func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, id RunIdentity, p permit.Permit) {
+func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, route ProviderRoute, id RunIdentity, p permit.Permit) {
 	http.Error(w, "not implemented", http.StatusBadGateway)
 }
 
@@ -1525,8 +1577,10 @@ func TestForwardOpenAIUsesBearerSlot(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	e := newEnv(t, upstream.URL, mustPermit(t, `{"v":1,"llm":{"providers":["openai"]}}`))
+	// SDK-faithful path: openai-go emits /chat/completions relative to its
+	// /v1-suffixed base.
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
-		e.ts.URL+"/proxy/llm/openai/v1/chat/completions", strings.NewReader(`{}`))
+		e.ts.URL+"/proxy/llm/openai/chat/completions", strings.NewReader(`{}`))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer run-token")
 	resp, err := http.DefaultClient.Do(req)
@@ -1584,6 +1638,37 @@ func TestForwardStreamsIncrementally(t *testing.T) {
 		t.Fatal("first chunk not delivered before upstream finished — proxy is buffering")
 	}
 	close(release)
+}
+
+type fakeHook struct{ err error }
+
+func (f fakeHook) Before(ctx context.Context, req proxy.HookRequest) error { return f.err }
+
+func TestHookErrorChoosesStatus(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("hook rejection must not reach upstream")
+	}))
+	t.Cleanup(upstream.Close)
+
+	e := &env{
+		auth:    &fakeAuth{identity: proxy.RunIdentity{TenantID: uuid.New(), RunID: uuid.New()}},
+		permits: &fakePermits{permit: mustPermit(t, `{"v":1,"llm":{"providers":["anthropic"]}}`)},
+		creds:   &fakeCreds{secret: proxy.Secret{Value: "real-key"}},
+		events:  &fakeEvents{},
+	}
+	cfg := proxy.DefaultConfig()
+	route := cfg.Providers["anthropic"]
+	route.Base = upstream.URL
+	cfg.Providers["anthropic"] = route
+	mux := http.NewServeMux()
+	proxy.RegisterRoutes(mux, proxy.Deps{Auth: e.auth, Permits: e.permits, Credentials: e.creds,
+		Events: e.events, Hook: fakeHook{err: proxy.HookError{Status: http.StatusTooManyRequests, Msg: "budget"}},
+		Config: cfg})
+	e.ts = httptest.NewServer(mux)
+	t.Cleanup(e.ts.Close)
+
+	resp := doAnthropic(t, e, "tok")
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 }
 
 func TestCredentialFailureIs500WithEvent(t *testing.T) {
@@ -1647,9 +1732,16 @@ Expected: FAIL — the stubs return 502.
 Replace both stubs in `server/internal/proxy/handler.go`:
 
 ```go
-func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, id RunIdentity, p permit.Permit) {
+func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, route ProviderRoute, id RunIdentity, p permit.Permit) {
 	if err := h.d.Hook.Before(r.Context(), HookRequest{Identity: id, Provider: provider}); err != nil {
-		http.Error(w, "forbidden", http.StatusForbidden)
+		// The typed HookError picks 403 vs 429 (Plan 3 metering); anything
+		// else fails closed as 403.
+		status := http.StatusForbidden
+		var he HookError
+		if errors.As(err, &he) && (he.Status == http.StatusForbidden || he.Status == http.StatusTooManyRequests) {
+			status = he.Status
+		}
+		http.Error(w, http.StatusText(status), status)
 		return
 	}
 	secret, err := h.d.Credentials.Credential(r.Context(), id.TenantID, p.LLM.Connection, provider)
@@ -1658,7 +1750,7 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	upstream, err := url.Parse(h.d.Config.Upstreams[provider])
+	upstream, err := url.Parse(route.Base)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -1743,7 +1835,7 @@ func (s *statusWriter) Flush() {
 }
 ```
 
-(add imports `net/http/httputil`, `net/url`, `time` to handler.go; async `TouchConnection` is the adapter's concern, not the proxy's — the proxy never sees connection IDs.)
+(add imports `errors`, `net/http/httputil`, `net/url`, `time` to handler.go; async `TouchConnection` is the adapter's concern, not the proxy's — the proxy never sees connection IDs. `HookError.Error()` is simply `func (e HookError) Error() string { return e.Msg }` in proxy.go.)
 
 - [ ] **Step 4: Run tests and full verification**
 
@@ -1798,6 +1890,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
@@ -1808,6 +1901,7 @@ import (
 )
 
 type env struct {
+	pool   *pgxpool.Pool // raw pool: the status-guard test flips state store methods can't
 	store  *store.Store
 	signer *token.Signer
 	master *vault.Master
@@ -1818,7 +1912,8 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	s := store.New(testpg.New(t))
+	pool := testpg.New(t)
+	s := store.New(pool)
 	ctx := context.Background()
 
 	vkey := make([]byte, vault.KeyLen)
@@ -1844,7 +1939,7 @@ func newEnv(t *testing.T) *env {
 
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
 	set := proxyadapter.New(s, signer, master, map[string]string{"anthropic": "platform-key"})
-	return &env{store: s, signer: signer, master: master, set: set, tenant: tn, wf: wf}
+	return &env{pool: pool, store: s, signer: signer, master: master, set: set, tenant: tn, wf: wf}
 }
 
 func (e *env) mintRun(t *testing.T) (uuid.UUID, string) {
@@ -1877,6 +1972,22 @@ func TestVerifyRunTokenLifecycle(t *testing.T) {
 
 	_, err = e.set.Auth.VerifyRunToken(ctx, "garbage")
 	require.Error(t, err)
+}
+
+func TestVerifyRunTokenStatusGuardAlone(t *testing.T) {
+	// Finalize clears the hash AND flips status, so it cannot isolate the
+	// active-run guard. Flip status by direct SQL, hash intact: the guard
+	// must reject on status alone.
+	e := newEnv(t)
+	ctx := context.Background()
+	runID, bearer := e.mintRun(t)
+
+	_, err := e.pool.Exec(ctx, `UPDATE run SET status = 'failed' WHERE id = $1`, runID)
+	require.NoError(t, err)
+
+	_, err = e.set.Auth.VerifyRunToken(ctx, bearer)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed")
 }
 
 func TestPermitForRun(t *testing.T) {
@@ -2027,7 +2138,9 @@ func (c *credentials) Credential(ctx context.Context, tenantID uuid.UUID, name, 
 	conn, err := c.store.GetConnection(ctx, tenantID, provider, name)
 	switch {
 	case err == nil:
-		wrapped, _, kerr := c.store.TenantKEK(ctx, tenantID)
+		// Decrypt with the KEK version that wrapped this connection —
+		// rotation-safe even while a rewrap job is mid-flight.
+		wrapped, kerr := c.store.TenantKEKAt(ctx, tenantID, conn.KEKVersion)
 		if kerr != nil {
 			return proxy.Secret{}, kerr
 		}
@@ -2187,14 +2300,19 @@ In `server/cmd/nightshift/main.go` `serve()`, after `signer := ...`:
 	if err != nil {
 		return err
 	}
+	// Proxy-specific names, deliberately NOT the SDKs' well-known key
+	// variables: the pinned SDK constructors auto-load those from the
+	// environment into client options, which on Local compute (shared
+	// process) would put real keys back into harness memory. These names
+	// are invisible to the SDKs.
 	platform := map[string]string{
-		"anthropic":  os.Getenv("ANTHROPIC_API_KEY"),
-		"openai":     os.Getenv("OPENAI_API_KEY"),
-		"openrouter": os.Getenv("OPENROUTER_API_KEY"),
+		"anthropic":  os.Getenv("NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY"),
+		"openai":     os.Getenv("NIGHTSHIFT_PLATFORM_OPENAI_KEY"),
+		"openrouter": os.Getenv("NIGHTSHIFT_PLATFORM_OPENROUTER_KEY"),
 	}
 ```
 
-(the `platform` map replaces per-run `apiKeyFor` usage — delete the now-unused `apiKeyFor` function), then replace `factory := llm.NewFactory(llm.Config{})` with proxy-pointed base URLs, and mount the proxy after the other routes:
+(the `platform` map replaces per-run `apiKeyFor` usage — delete the now-unused `apiKeyFor` function; the old `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`OPENROUTER_API_KEY` names are retired everywhere, including the doc comment), then replace `factory := llm.NewFactory(llm.Config{})` with proxy-pointed base URLs, and mount the proxy after the other routes:
 
 ```go
 	baseURL := "http://" + addr
@@ -2218,7 +2336,22 @@ In `server/cmd/nightshift/main.go` `serve()`, after `signer := ...`:
 	})
 ```
 
-`httpapi.Deps` gains `Vault: master`. Add imports `proxy`, `proxyadapter`, `vault`. Update the doc comment at the top of main.go: add `NIGHTSHIFT_VAULT_KEY` (base64, 32 bytes, required for serve/dev-session) and note the `*_API_KEY` vars are now the proxy's platform-default credentials.
+`httpapi.Deps` gains `Vault: master`. Add imports `proxy`, `proxyadapter`, `vault`. Update the doc comment at the top of main.go: add `NIGHTSHIFT_VAULT_KEY` (base64, 32 bytes, required for serve/dev-session) and the three `NIGHTSHIFT_PLATFORM_*_KEY` variables (replacing the retired `*_API_KEY` lines).
+
+**Server timeouts**: replace `return http.ListenAndServe(addr, mux)` with
+
+```go
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		// WriteTimeout deliberately zero: streamed LLM responses run for
+		// minutes and a server-wide write deadline would sever them.
+	}
+	return srv.ListenAndServe()
+```
+
+(add the `time` import if absent).
 
 **Port `internal/redact` and wrap the logger** (the spec assigns the port here): copy `/home/tng/workspace/cronfoundry/internal/redact/redact.go` to `server/internal/redact/redact.go` unchanged except the package comment (do NOT copy `target.go` — it serves the publish package, which is Plan 4). Then create `server/internal/redact/slog.go`:
 
@@ -2338,9 +2471,10 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	// the run token did not), then streams one SSE chat chunk. Model the
 	// body on internal/llm's openai fixture format — adjust until the
 	// ported provider parses it; the provider's own tests show the shape.
-	var upstreamAuth string
+	var upstreamAuth, upstreamPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamAuth = r.Header.Get("Authorization")
+		upstreamPath = r.URL.Path
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(`data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"proxied digest"}}]}` + "\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
@@ -2369,7 +2503,9 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()
-	cfg.Upstreams["openai"] = upstream.URL
+	route := cfg.Providers["openai"]
+	route.Base = upstream.URL // bare base: the SDK's emitted path arrives verbatim
+	cfg.Providers["openai"] = route
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	baseURL = ts.URL
@@ -2412,6 +2548,9 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	require.Equal(t, "succeeded", run["status"])
 	require.Contains(t, run["output"], "proxied digest")
 	require.Equal(t, "Bearer platform-openai-key", upstreamAuth) // injected, not the run token
+	// The SDK emitted /chat/completions relative to its base; with a bare
+	// upstream base the exact path proves the /v1 rewrite logic is right.
+	require.Equal(t, "/chat/completions", upstreamPath)
 
 	out = do("GET", "/v1/runs/"+runID+"/events", nil)
 	var types []string
@@ -2464,7 +2603,8 @@ git commit -m "feat(server): wire the egress proxy — LLM traffic permit-checke
 
 1. `cd server && gofmt -l . && go vet ./... && go build ./... && go test ./...` — all green.
 2. Import-boundary check: `grep -rn "nightwatch/server/internal" server/internal/proxy/*.go` shows only `internal/permit`; `grep -rn "internal/httpapi\|internal/internalapi" server/internal/proxy server/internal/proxyadapter` shows nothing.
-3. Credential-leak check: `grep -rn "APIKey" server/internal/harness/` shows no field named APIKey; `grep -rn "os.Getenv(\"ANTHROPIC_API_KEY\"\|OPENAI_API_KEY\|OPENROUTER_API_KEY" server/` matches only `cmd/nightshift/main.go`'s platform map.
+3. Credential-leak check: `grep -rn "APIKey" server/internal/harness/` shows no field named APIKey; `grep -rn "ANTHROPIC_API_KEY\|OPENAI_API_KEY\|OPENROUTER_API_KEY" server/` matches NOTHING (the SDK-visible names are retired; only `NIGHTSHIFT_PLATFORM_*_KEY` may appear, and only in `cmd/nightshift/main.go`).
+   3b. Secret-logging check: `grep -rn "secret\|Secret" server/internal/proxy server/internal/proxyadapter | grep -i "slog\|log\."` shows no line that logs a secret value — BYOK values are protected by construction, per the spec's redaction policy.
 4. Spec boundary check: primitives delivered are 1 (permit enforcement, LLM scope) and 5 (vault, keys-first); grading/metering/scheduling untouched; `Hook` exists and is a no-op.
 5. `npm test` from the repo root — the prototype's 46 tests still pass.
 

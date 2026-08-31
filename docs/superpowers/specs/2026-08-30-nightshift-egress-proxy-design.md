@@ -54,7 +54,7 @@ harness (in actor)
 proxy (ours)  /proxy/llm/{provider}/{path...}   and   /proxy/internal/{path...}
    │  1 authenticate (run JWT from the auth-header slot:
    │       signature + stored-hash + active-run check)   ── AuthSource
-   │  2 resolve permit (per-run cache)      ── PermitSource
+   │  2 resolve permit (per request; no cache) ── PermitSource
    │  3 Hook.Before(...)                    ── no-op now; Plan 3 metering
    │  4 inject credential                   ── CredentialSource (vault)
    │  5 reverse-proxy, streaming            ── httputil.ReverseProxy, FlushInterval -1
@@ -134,12 +134,14 @@ enforces and reserves the connector shape:
   is a 400 on create/add-version. The v1 API is stamped unstable, so this
   tightening is permitted; test fixtures gain real permits.
 
-**Distribution: resolved per run, not per request.** On a run's first proxied
-request the proxy calls `PermitForRun` and caches the permit keyed by RunID
-until the run token expires or the run finalizes. Runs fire only from approved
-versions and versions are immutable, so the cache cannot go stale within a
-run. Re-approval mid-run deliberately does not alter a running run's permit —
-a run executes the version it was fired from.
+**Distribution: resolved per request — no cache.** Every proxied request
+calls `PermitForRun` (two indexed lookups: run → version). Authentication
+already reads the run row per request, LLM calls last seconds to minutes, and
+a cache would need exactly the expiry/eviction lifecycle that authentication
+makes redundant — so v1 deliberately has none; caching is a measured-later
+optimization. Runs fire only from approved versions and versions are
+immutable; re-approval mid-run deliberately does not alter a running run's
+permit — a run executes the version it was fired from.
 
 ## The credential vault
 
@@ -163,12 +165,15 @@ a schema migration. Building the rotation job now would be speculative.
 
 ```sql
 CREATE TABLE tenant_kek (
-    tenant_id uuid PRIMARY KEY REFERENCES tenant (id) ON DELETE CASCADE,
+    tenant_id uuid NOT NULL REFERENCES tenant (id) ON DELETE CASCADE,
+    -- History table: a rotation ADDS a row with version+1; old versions
+    -- survive so connections still wrapped under them stay decryptable
+    -- mid-rotation. connection.kek_version names the row that wrapped it.
+    version int NOT NULL DEFAULT 1,
     wrapped_kek bytea NOT NULL,
-    version int NOT NULL DEFAULT 1,   -- bumped on KEK rotation; what
-                                      -- connection.kek_version refers to
     master_version int NOT NULL DEFAULT 1,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, version)
 );
 
 CREATE TABLE connection (
@@ -193,8 +198,11 @@ is **per provider**: a permit may allow several providers while naming one
 connection, so `default` must be resolvable independently for each — the
 lookup key is `(tenant_id, provider, name)`, and a tenant can hold a BYO
 `default` for anthropic while openai falls through to the platform key.
-Rotation is resumable because each connection's `kek_version` names the
-`tenant_kek.version` that wrapped its DEK.
+Rotation is resumable because `tenant_kek` is a **history table**: each
+connection's `kek_version` names the KEK row that wrapped its DEK, encryption
+always uses the newest version, and decryption uses the version the
+connection names — so a rewrap job can stop and resume with both generations
+live.
 
 ### Contracts
 
@@ -226,18 +234,31 @@ Rotation is resumable because each connection's `kek_version` names the
    problem; the standalone split later chooses between shared-key config and
    an introspection endpoint, decided at split time and noted here so it
    isn't rediscovered.
-2. **Authorize** — `{provider}` must appear in the run's `llm.providers`;
-   otherwise **403, fail closed**, plus a `proxy.denied` run event. Denials
-   are audit-trail content: they are what lets a future alert name the
-   boundary that was hit.
-3. **Hook** — `Hook.Before`; a non-nil error maps to 429/403 per the hook's
-   typed error (Plan 3 defines the shapes; Plan 2's no-op never fires).
+2. **Authorize** — `{provider}` must appear in the run's `llm.providers`,
+   **and the request must match the provider's hard-coded (method, path)
+   allowlist** — v1 permits exactly one operation per provider (`POST
+/v1/messages` for anthropic; `POST /chat/completions` relative to the
+   `/v1` base for openai/openrouter). Anything else — another method,
+   another endpoint on the same origin — is **403, fail closed**, plus a
+   `proxy.denied` run event. Without the path allowlist, a run token would
+   buy credential-backed access to the entire provider origin (files,
+   fine-tuning, admin endpoints), far exceeding the workflow's stated blast
+   radius. Denials are audit-trail content: they are what lets a future
+   alert name the boundary that was hit.
+3. **Hook** — `Hook.Before`; the proxy defines the typed error now
+   (`HookError{Status int; Msg string}`, status limited to 403/429) so Plan
+   3's metering can express quota (429) versus policy (403) without
+   reopening the proxy; any untyped error maps to 403. Plan 2's no-op never
+   fires.
 4. **Inject** — strip all inbound auth headers; set the provider's real shape
    (`x-api-key` for anthropic; `Authorization: Bearer` for openai/openrouter)
    from the resolved connection; update `last_used_at` async.
 5. **Forward, streaming** — one `httputil.ReverseProxy` per provider,
    `FlushInterval: -1` so SSE streams immediately; upstream TLS verified
-   against system roots; write timeouts sized for multi-minute LLM calls.
+   against system roots. The server runs with `ReadHeaderTimeout` set and a
+   **deliberately unset write timeout** — streamed LLM responses run for
+   minutes and a server-wide `WriteTimeout` would sever them; per-upstream
+   deadlines are a later concern if abuse appears.
    Destination hosts are **fixed per provider route** (api.anthropic.com,
    api.openai.com, openrouter.ai) — the actor names a provider, never a URL,
    so there is no user-controlled destination to canonicalize.
@@ -264,8 +285,14 @@ Rotation is resumable because each connection's `kek_version` names the
   auth-header slot, and the proxy verifies, strips, and replaces it. No
   custom transport, no second header, and the SDKs' its-a-required-value
   constraint is satisfied by something the harness genuinely possesses.
-- The per-provider `*_API_KEY` env vars remain but are read **only by the
-  proxy**, as the platform-default connection.
+- Platform keys move to **proxy-specific env names**:
+  `NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY`, `NIGHTSHIFT_PLATFORM_OPENAI_KEY`,
+  `NIGHTSHIFT_PLATFORM_OPENROUTER_KEY`, read only by the proxy. The generic
+  `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` names are **retired**: the pinned SDKs
+  auto-load those variables into client options at construction time, so on
+  Local compute (shared process) keeping them would put real keys back into
+  harness memory and silently falsify the isolation claim. With the renamed
+  variables the SDKs find nothing to load.
 - The proxy accepts the same 1 h run token; the roadmap's Plan-3
   TTL-vs-queueing revisit now covers the proxy path too.
 
@@ -279,11 +306,10 @@ active-run check rejects terminal runs, so a finished run's token is dead on
 the next request — no cache eviction protocol needed). Upstream provider
 errors and timeouts pass through untouched — the harness's existing
 `llm_error` path and run finalization own them, so the proxy adds no new
-harness error handling. The permit cache is per-run and TTL-bounded by token
-expiry; it caches only the **permit** (authorization data), never the auth
-decision — `AuthSource.VerifyRunToken` re-checks the run row on every
-request, exactly as the internal API already does, so a stale cache entry
-can never outlive a revoked or finalized run.
+harness error handling. There is no permit cache (see The permit —
+Distribution): both the auth decision and the permit are resolved against
+the database on every request, so nothing can outlive a revoked or finalized
+run.
 
 ## Observability
 
@@ -294,8 +320,13 @@ failure logs an error and never blocks or fails the proxied request (a
 denial is still enforced even if recording it fails). The audit trail is
 therefore near-complete, not guaranteed-complete; making it durable
 (retry/outbox) is deliberately deferred until the alerting work (Plan 4)
-depends on it. Redacted `slog` throughout the proxy and vault.
-`connection.last_used_at` tells a tenant a key is in use.
+depends on it. Logging: the process logger is wrapped with the ported
+redactor, seeded with the platform keys known at startup. **BYOK values are
+protected by construction, not by the redactor** — proxy and adapter code
+never passes a decrypted secret to a log statement (enforced by a
+grep-verified rule at review time); a dynamic redactor that learns values at
+decrypt time is deferred. `connection.last_used_at` tells a tenant a key is
+in use.
 
 ## Testing
 
@@ -309,10 +340,17 @@ depends on it. Redacted `slog` throughout the proxy and vault.
   bodies flush incrementally; a BYOK connection beats the platform default.
 - **Permit validation**: malformed v1 permits rejected with 400 at the
   workflow API.
-- **Lifecycle**: a finalized run's token is rejected by the proxy (both via
-  the cleared hash and via the active-run check, tested separately); the
+- **Lifecycle**: a finalized run's token is rejected by the proxy; the
+  active-run status guard is tested **in isolation** (a run flipped to a
+  terminal status by direct SQL, hash left intact, must fail auth — finalize
+  alone can't isolate the guard because it clears both); the
   `/proxy/internal/...` pass-through delivers events/finalization
   end-to-end with the same token.
+- **Route allowlist**: an allowed provider with a non-allowlisted method or
+  path (e.g. `GET`, or `/files`) gets 403 + `proxy.denied`. Proxy tests use
+  the SDK-faithful request paths (what the ported providers actually emit
+  relative to their base URL), so a `/v1` base-prefix rewrite bug cannot
+  pass unnoticed; the e2e asserts the exact path received upstream.
 - **e2e**: the existing end-to-end test reroutes through the proxy with a fake
   upstream, proving a run completes with zero credentials in the harness.
 
