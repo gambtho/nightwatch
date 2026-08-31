@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gambtho/tomte/server/internal/endpoint"
 	"github.com/gambtho/tomte/server/internal/permit"
 )
 
@@ -56,16 +57,16 @@ func (h *handler) emit(r *http.Request, id RunIdentity, typ string, payload map[
 // authorize runs the front half of every LLM request: authenticate,
 // resolve the permit (per request — no cache, by design), check the
 // provider allowlist, and check the provider's one allowed (method, path).
-func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider string) (RunIdentity, permit.Permit, ProviderRoute, bool) {
+func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider string) (RunIdentity, permit.Permit, ProviderRoute, *endpoint.Endpoint, bool) {
 	tok := extractRunToken(provider, r)
 	if tok == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
 	id, err := h.d.Auth.VerifyRunToken(r.Context(), tok)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
 
 	p, err := h.d.Permits.PermitForRun(r.Context(), id.TenantID, id.RunID)
@@ -73,14 +74,32 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider str
 		// Fail closed: no permit, no egress.
 		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider, "reason": "permit"})
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
 
+	// The tenant's configured endpoint, when present and matching the
+	// requested provider name, IS the route — its base URL replaces the
+	// static table's. A lookup failure fails closed.
+	var ep *endpoint.Endpoint
+	if h.d.Endpoints != nil {
+		ep, err = h.d.Endpoints.EndpointFor(r.Context(), id.TenantID)
+		if err != nil {
+			h.emit(r, id, "proxy.error", map[string]any{"provider": provider, "stage": "endpoint"})
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
+		}
+	}
 	route, known := h.d.Config.Providers[provider]
+	if ep != nil && ep.Provider() == provider {
+		base, method, path := ep.Route()
+		route, known = ProviderRoute{Base: base, Method: method, Path: path}, true
+	} else {
+		ep = nil // an endpoint for a different provider plays no part in this request
+	}
 	if !known || !p.AllowsProvider(provider) {
 		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider})
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
 	// One operation per provider is the whole v1 blast radius: without
 	// this, a run token buys the entire provider origin.
@@ -89,25 +108,25 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider str
 			"provider": provider, "reason": "path", "method": r.Method, "path": r.PathValue("path"),
 		})
 		http.Error(w, "forbidden", http.StatusForbidden)
-		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
+		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, nil, false
 	}
-	return id, p, route, true
+	return id, p, route, ep, true
 }
 
 func (h *handler) llm(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
-	id, p, route, ok := h.authorize(w, r, provider)
+	id, p, route, ep, ok := h.authorize(w, r, provider)
 	if !ok {
 		return
 	}
-	h.forward(w, r, provider, route, id, p) // Task 7
+	h.forward(w, r, provider, route, id, p, ep)
 }
 
 func (h *handler) internal(w http.ResponseWriter, r *http.Request) {
 	h.passthrough(w, r) // Task 7
 }
 
-func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, route ProviderRoute, id RunIdentity, p permit.Permit) {
+func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, route ProviderRoute, id RunIdentity, p permit.Permit, ep *endpoint.Endpoint) {
 	if err := h.d.Hook.Before(r.Context(), HookRequest{Identity: id, Provider: provider}); err != nil {
 		// The typed HookError picks 403 vs 429 (Plan 3 metering); anything
 		// else fails closed as 403.
@@ -120,12 +139,26 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
-	secret, err := h.d.Credentials.Credential(r.Context(), id.TenantID, p.LLM.Connection, provider)
-	if err != nil {
-		slog.Error("proxy: credential resolution", "provider", provider, "err", err)
-		h.emit(r, id, "proxy.error", map[string]any{"provider": provider, "stage": "credential"})
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	// Credential resolution. On a local endpoint there is no credential
+	// at all — resolution and injection are skipped by contract, not by
+	// error ("Endpoint agnosticism"). On any other configured endpoint,
+	// the ENDPOINT's connection names the credential; the permit's
+	// llm.connection is legacy-env-mode-only.
+	var secret Secret
+	local := ep != nil && ep.Preset == endpoint.PresetLocal
+	if !local {
+		connName := p.LLM.Connection
+		if ep != nil && ep.Connection != "" {
+			connName = ep.Connection
+		}
+		var err error
+		secret, err = h.d.Credentials.Credential(r.Context(), id.TenantID, connName, provider)
+		if err != nil {
+			slog.Error("proxy: credential resolution", "provider", provider, "err", err)
+			h.emit(r, id, "proxy.error", map[string]any{"provider": provider, "stage": "credential"})
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 	upstream, err := url.Parse(route.Base)
 	if err != nil {
@@ -153,14 +186,25 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 			pr.Out.URL.RawPath = ""
 			pr.Out.Host = upstream.Host
 			// The run token must never reach the provider; the real
-			// credential goes in the provider's native slot only.
+			// credential goes in the endpoint's native slot only — and on
+			// a local endpoint, nowhere: the request is forwarded bare.
 			pr.Out.Header.Del("Authorization")
 			pr.Out.Header.Del("x-api-key")
-			switch provider {
-			case "anthropic":
-				pr.Out.Header.Set("x-api-key", secret.Value)
-			default:
+			pr.Out.Header.Del("api-key")
+			header := "authorization"
+			if provider == "anthropic" {
+				header = "x-api-key"
+			}
+			if ep != nil {
+				header = ep.CredentialHeader()
+			}
+			switch header {
+			case "":
+				// local: nothing injected
+			case "authorization":
 				pr.Out.Header.Set("Authorization", "Bearer "+secret.Value)
+			default:
+				pr.Out.Header.Set(header, secret.Value)
 			}
 		},
 		// Route transport errors through the redacting slog handler rather

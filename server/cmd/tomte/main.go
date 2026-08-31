@@ -198,11 +198,7 @@ func serve(ctx context.Context) error {
 	}
 
 	baseURL := "http://" + addr
-	factory := llm.NewFactory(llm.Config{
-		AnthropicBaseURL:  baseURL + "/proxy/llm/anthropic",
-		OpenAIBaseURL:     baseURL + "/proxy/llm/openai",
-		OpenRouterBaseURL: baseURL + "/proxy/llm/openrouter",
-	})
+	factory := llm.NewProxyFactory(baseURL)
 	local := compute.NewLocal(stateDir, func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
 		steps, tools, err := client.Context(ctx)
@@ -242,7 +238,8 @@ func serve(ctx context.Context) error {
 	proxy.RegisterRoutes(mux, proxy.Deps{
 		Auth: adapters.Auth, Permits: adapters.Permits,
 		Credentials: adapters.Credentials, Events: adapters.Events,
-		Hook: m, Config: cfg, Catalog: cat,
+		Endpoints: adapters.Endpoints,
+		Hook:      m, Config: cfg, Catalog: cat,
 	})
 
 	loopCtx, cancelLoops := context.WithCancel(context.Background())

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/tomte/server/internal/endpoint"
 	"github.com/gambtho/tomte/server/internal/permit"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/store"
@@ -25,6 +26,7 @@ type Set struct {
 	Permits     proxy.PermitSource
 	Credentials proxy.CredentialSource
 	Events      proxy.EventSink
+	Endpoints   proxy.EndpointSource
 }
 
 // New wires the adapter set.
@@ -34,6 +36,7 @@ func New(s *store.Store, signer *token.Signer, master *vault.Master, platform ma
 		Permits:     &permits{store: s},
 		Credentials: &credentials{store: s, master: master, platform: platform},
 		Events:      &events{store: s},
+		Endpoints:   &endpoints{store: s},
 	}
 }
 
@@ -138,6 +141,30 @@ func (c *credentials) decrypt(ctx context.Context, tenantID uuid.UUID, conn stor
 		return "", err
 	}
 	return c.master.DecryptSecret(wrapped, conn.DEKWrapped, conn.Ciphertext, conn.Nonce)
+}
+
+type endpoints struct {
+	store *store.Store
+}
+
+// EndpointFor maps the stored record to the proxy's endpoint type; no
+// configured endpoint (a dev deployment in legacy env mode) is (nil, nil).
+func (e *endpoints) EndpointFor(ctx context.Context, tenantID uuid.UUID) (*endpoint.Endpoint, error) {
+	le, err := e.store.GetLLMEndpoint(ctx, tenantID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	conn := ""
+	if le.ConnectionName != nil {
+		conn = *le.ConnectionName
+	}
+	return &endpoint.Endpoint{
+		Preset: le.Preset, Kind: le.Kind, BaseURL: le.BaseURL,
+		Connection: conn, RunModel: le.RunModel, ZeroCost: le.ZeroCost,
+	}, nil
 }
 
 type events struct {
