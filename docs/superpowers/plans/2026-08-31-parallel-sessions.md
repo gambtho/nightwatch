@@ -34,7 +34,7 @@ finishes, or a cross-cutting decision is taken.
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
 | P1 — Subtraction and floor       | **Next: owns `server/` at launch** — prompt below                                                          |
-| CI / catalog gate                | **Lane opened, pivot-critical** — prompt below                                                             |
+| CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
 | Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
 | Pivot demo (`demo/tomte-pivot`)  | **Lane opened** — prototype re-skin telling the click-install story; not for merge; prompt below           |
 
@@ -594,11 +594,24 @@ so that a non-technical person can describe a job instead of filling a form.
   edit visible in review — not tamper-proof. Only a PR-time CI diff against
   the merge base closes it.
 
-  **CI setup is now an opened lane with a ready prompt (below), escalated to
-  pivot-critical** by the merged pivot spec: auto-update ships catalog changes
-  to users' machines, so the narrow-only rule is what keeps a silent update
-  compatible with approve-once. It is a security follow-up, not tooling
-  hygiene, and its owner is not the connectors lane.
+  **Delivered: PR #41** (2026-08-31, CI lane) —
+  `.github/workflows/{server,web,catalog-gate}.yml`, all green on the PR
+  (coordinating session verified: gate/test/build all SUCCESS). The gate
+  runs the boot-level embedded defs-vs-baseline check on every run plus a
+  PR-only diff of `defs/` against the merge base via `cmd/catalog-gate`'s
+  existing two-dir mode — no server code changes were needed, so nothing
+  entered the `server/` queue. Proven, not asserted: a defs-only widening
+  failed the embedded check, and the load-bearing case (a two-file
+  defs+baseline widening the boot gate cannot stop) was caught by the
+  merge-base diff ("WIDENING: slack.list_channels: scope admin added");
+  both demo commits reverted, net diff is the 3 workflow files. Note:
+  `testpg` self-provisions Postgres via testcontainers — no service
+  container, no DSN override. Workflows run unfiltered on all PRs + push
+  to `main` so they stay simple if later made required. **This defect and
+  the "CI unowned" flag close when #41 merges.** Escalation history: made
+  pivot-critical by the merged pivot spec — auto-update ships catalog
+  changes to users' machines, so the narrow-only rule is what keeps a
+  silent update compatible with approve-once.
 
 ## Cross-cutting decisions
 
