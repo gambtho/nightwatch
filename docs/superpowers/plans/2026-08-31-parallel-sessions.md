@@ -33,9 +33,230 @@ finishes, or a cross-cutting decision is taken.
 | Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
-| P1 — Subtraction and floor       | **Next: owns `server/` at launch** — prompt below                                                          |
-| CI / catalog gate                | **Lane opened, pivot-critical** — prompt below                                                             |
-| Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
+| P1 — Subtraction and floor       | **Merged** (#48, plan #45) — the floor is on `main`; `server/` free until the hygiene pass takes it        |
+| CI / catalog gate                | **Merged** (#41) — no-CI defect closed; `tomtectl/` workflow still owed (routed to estate-cleanup prompt)  |
+| Packaging shell (`app/`)         | **Merged as record** (#42, Wails v3 spike) — lane PAUSED by direction change 2; `app/` gets a paused banner |
+| Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
+| Root README + MIT license        | **Merged** (#44)                                                                                           |
+| K8s agent track (THE FOCUS)      | **K1 delivered: PR #49** (`tomtectl/`, checks green) — decisions recorded below; K2 next after merge       |
+| Lean-in cleanup                  | **Three lanes opened** (estate removal, server hygiene, docs onboarding) — prompts below                   |
+| P2 — Connectors main road        | **Next `server/` occupant** — plans now in parallel, takes the lock when the hygiene PR merges; prompt below |
+| Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
+
+## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
+
+Leadership decision, relayed by the user. The verbatim ask: **"can we have a
+template for an agent that creates a hello world agent running on a k8s
+cluster, then expand to leverage llm to enhance the agent, allow connectors,
+etc -- use a simple cli to get the agent running on k8s"** — with the stated
+frame: focus specifically on an agent running on Kubernetes (simplest
+possible solution, no Substrate), CLI rather than UI, and from there
+**transition to the full Tomte experience** (governance, defined
+connectors, etc.).
+
+A second verbatim leadership quote (relayed 2026-08-31, same change):
+**"having an artifact that shows my agent topology -- almost agent as code
+(ideally yaml template or something like that)"** — the template is not an
+internal config detail; it is a first-class, human-readable **agent-as-code
+YAML artifact** that shows the agent topology. The YAML is the deliverable
+leadership wants to be able to look at.
+
+Three shaping answers from the user, deliberate — do not relitigate:
+
+- **Phase-1 shape: CLI-local, agents on K8s.** No hosted control plane at
+  first: a simple CLI (kubeconfig-driven) gets the agent running on a
+  cluster. The coordinator's recommendation (whole verified stack
+  in-cluster) was considered and not chosen.
+- **Bare agent first.** Phase 1 ships WITHOUT the governance spine — no
+  egress proxy, no permits, key via K8s Secret. Governance arrives in the
+  transition, not on day 1. (Recorded with the coordinator's named risk:
+  retrofitting enforcement is the expensive path; the transition phases
+  must treat the existing proxy/permit stack as the destination, not
+  reinvent it.)
+- **P1 continues as planned.** The server/ lane keeps building the Tomte
+  floor — the "full Tomte experience" the K8s track transitions into is
+  the P1+ stack. The pivot-spec estate is NOT re-triaged by this change.
+
+Lane dispositions: **K8s agent track is the focus** (new lane, prompt
+below). **Packaging (`app/`) is paused** — the desktop shell is not the
+near-term path; PR #42 stays as the record; the pending product calls
+(platform order, update feed) are moot while paused. **Frontend goes idle**
+after its three open PRs (#43/#46/#47) merge; login retirement still
+follows P1's local-session mint whenever the user wants it. CI, README,
+demo lanes are unaffected. Click-install's ultimate fate (shelved vs
+deferred) is deliberately NOT decided — the user answered the desktop
+question with the quote above; nothing forecloses either path.
+
+## K8s track K1 delivered (PR #49) — decisions of record
+
+From the K1 session (2026-08-31), coordinator-verified checks green:
+
+- **Naming/structure**: new top-level `tomtectl/`, own Go module
+  (`github.com/gambtho/tomte/tomtectl`), binary `tomtectl` (kubectl-echo;
+  cannot collide with a future server-extending `tomte` CLI). Commands:
+  `init` / `up` / `status` / `logs [--follow]` / `down`; agent resolved
+  from `-f` (default `./agent.yaml`).
+- **Schema**: `apiVersion: tomte.dev/v1alpha1, kind: Agent` per the board's
+  format decision; spec nouns are Tomte's own — `steps: [{id, text}]` +
+  `schedule.every` (restricted `<n><s|m|h>`), commented empty `llm: {}` /
+  `connectors: []` slots, **rejected if non-empty at K1** rather than
+  ignored. `llm` vocabulary aligned with `web/src/local/endpoints.ts`.
+- **Mechanism**: client-go (not kubectl shell-out) — self-contained binary,
+  real status/logs, K2/K3 need the typed API. Plain namespaced ConfigMap +
+  Deployment, label `tomte.dev/agent`; no CRD/operator/Helm. Runtime is an
+  explicitly-labeled placeholder (busybox + script re-reading the mounted
+  agent.yaml each wake — behavior never in the image); K2's real runtime
+  image replaces it on the same mount contract.
+- **Owed**: no CI workflow covers `tomtectl/` — routed to the
+  estate-cleanup prompt below (`tomtectl.yml` mirroring `server.yml`).
+
+## Lean-in cleanup (2026-08-31): onboarding-ready repo
+
+User decision: fully lean into direction change 2 and clean the repo for
+incoming team members — remove no-longer-relevant code, general hygiene.
+Settled calls: **the retired prototype is removed from `main`** (history
+and the two demo branches keep it); **web/ stays in-tree, idle** (its three
+PRs merged first); **hygiene and P2 parallelize** — hygiene takes the
+`server/` lock now, P2 writes its plan lock-free and takes the lock when
+the hygiene PR merges. All pre-cleanup PRs (#40–#48) are merged; cleanup
+runs on the post-P1 tree.
+
+Three cleanup lanes + P2, prompts below. Estate and docs lanes are
+lock-free; hygiene holds `server/`.
+
+### Prompt — Estate removal (repo-global, no `server/` lock)
+
+> You own the estate-removal lane: delete what the pivots left behind, so
+> a new team member never trips over dead code. Read the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` (direction
+> change 2, the P1 delta sheet, and the K1-delivered section) first. Work
+> in a linked worktree; PRs to `main`; you may split into independent PRs
+> (no stacking). Do not touch `server/` internals (the hygiene lane holds
+> that lock) — the only `server/`-adjacent thing you own is nothing; web,
+> root, and `.github` are yours.
+>
+> 1. **Remove the retired prototype from `main`** (user-approved): `src/`,
+>    root `index.html`, root `package.json` + `package-lock.json`, root
+>    `tsconfig*` files, `vite.config.ts`, `dist/`, and any root vitest
+>    config — the pre-pivot demo app, deliberately still
+>    nightshift-branded. Git history and the demo branches
+>    (`demo/dev-persona`, `demo/tomte-pivot`) keep their own copies —
+>    verify both branches exist on origin before deleting, and do not
+>    touch them. Check for anything that references the root app: the
+>    pre-commit hook's prettier step, `.gitignore` entries, README repo
+>    layout, CI path assumptions.
+> 2. **Retire the web login screen** (its endpoints died in P1 — see the
+>    P1 delta sheet): remove the magic-link login UI and its API calls;
+>    the session now arrives via the shell/dev mint and
+>    `GET /local/handoff?token=&next=`. Keep this PR minimal — dead-route
+>    removal plus whatever redirect keeps the dev flow working
+>    (`tomte dev-session` still mints). 161+ web tests green after.
+> 3. **Add `.github/workflows/tomtectl.yml`** mirroring `server.yml`'s
+>    gofmt/vet/test shape for the `tomtectl/` module — owed by K1 (PR
+>    #49). Verify it runs green on your own PR once #49 is merged (base
+>    it on post-#49 main).
+> 4. **Mark `app/` paused**: a short banner at the top of `app/README.md`
+>    — paused by direction change 2, board is the authority, code stays
+>    as the Wails v3 record.
+> 5. **Update the root README's repo-layout section** to match the
+>    post-removal tree (prototype gone, `tomtectl/` added and named as
+>    the current focus, `app/` marked paused, `web/` marked idle).
+>
+> Verification: server suite, web tests + build, tomtectl build/test all
+> green; CI green on each PR; grep for dangling references to the deleted
+> paths before calling it done.
+
+### Prompt — Server hygiene pass (takes the `server/` lock NOW)
+
+> You own the `server/` hygiene pass — you hold the `server/` lock from
+> launch until your PR merges; announce the merge to the coordinating
+> session so P2 can take the lock. Read the board (P1 delta sheet, frozen
+> labels) first. Linked worktree; one focused PR to `main` (two only if
+> mechanical-deletion vs comment-polish split genuinely helps review).
+>
+> Scope — **hygiene only, zero behavior change**:
+> - Dead code left at P1's subtraction edges: orphaned helpers, unused
+>   exports, unreferenced test fixtures, unused deps (`go mod tidy`).
+> - Stale comments and doc comments: references to magic links, Postmark,
+>   OAuth, monthly tenant billing, hosted/multi-tenant framing, "Plan N"
+>   numbering that no longer guides anyone — rewrite to present truth or
+>   delete; comments should state constraints, not history.
+> - TODO triage: fix the trivial ones, route the real ones to the board,
+>   delete the stale ones.
+> - `gofmt`, `go vet`, and staticcheck (if installable) clean.
+> - Use your polish/improve skills (e.g. `my:improve`, `my:polish-core
+>   --fix`) and apply only safe, high-confidence fixes.
+>
+> Hard constraints: no API or wire-format changes, no migrations, no
+> public-symbol renames beyond deleting dead ones, the frozen label
+> `tomte:run-jwt` untouched, full suite + connector e2e green, real
+> `tomte serve` boot before the PR. If you find a real bug, report it to
+> the coordinating session rather than widening this PR.
+
+### Prompt — Docs re-orientation for onboarding (lock-free, docs only)
+
+> You own the docs-onboarding lane: make the repo legible to new team
+> members joining after two same-day direction changes. Read the board
+> and the root README first. Linked worktree; one PR to `main`; you
+> rewrite no dated historical spec (project convention) — banners and
+> indexes only.
+>
+> 1. **`docs/README.md` index**: every doc under `docs/`, split into
+>    LIVING (the board, the pivot spec, the P1 plan, K1/tomtectl docs,
+>    api/v1.md) vs HISTORICAL (superseded specs and plans — one line each
+>    on what superseded it). Newcomers read top to bottom and know what
+>    is current in five minutes.
+> 2. **Banners on superseded docs**: a 2–3 line header note on each
+>    historical spec pointing to its successor (precedent: the two design
+>    anchors already carry banners). Content below the banner untouched.
+> 3. **Root README refresh**: lead with the current direction — the K8s
+>    agent track, the agent-as-code YAML, a `tomtectl` hello-world
+>    pointer — then the Tomte destination (governance/connectors) as the
+>    arc, then repo layout (coordinate with the estate lane: write the
+>    layout post-prototype-removal). Keep the no-trademark-claims and
+>    built-vs-designed constraints from the README prompt.
+> 4. **A short "working here" section** (root README or CONTRIBUTING.md):
+>    the lane model, the one-session-owns-`server/` rule, no pre-stacked
+>    PR bases, where the board lives, and the 15-minute path: clone →
+>    read → hello world on kind.
+>
+> Verify every command you document by running it. Accuracy over polish.
+
+### Prompt — P2: connectors main road (plan now; lock after hygiene)
+
+> You own P2 — the connectors main road, the next `server/` occupant.
+> Sequencing is explicit: **write and PR your implementation plan first
+> (docs-only, no lock needed); take the `server/` lock only when the
+> hygiene pass's PR has merged** (ask the coordinating session if
+> unclear). Read the board (P1 delta sheet, five-preset decision, direction
+> change 2), the pivot spec's "Credentials without OAuth" and capture-guide
+> sections, and the merged connectors spec. Plan against the merged
+> post-P1, post-hygiene tree.
+>
+> Scope, in order:
+> 1. **Slack token capture + verify**: the structured capture guide in the
+>    catalog `auth` block (`start_url`, steps, `secret_prefix: xoxb-`,
+>    `verify_op: auth_test`), control-plane verify at paste time via the
+>    session-authed path (never a run token), scope warning from Slack's
+>    `x-oauth-scopes` response header. The Slack `manifest_url` still has
+>    no hosted home (board open question) — ship the plain-create flow;
+>    do not claim pre-fill.
+> 2. **First-run LLM key verification** (assigned to P2 by the board after
+>    a Codex coverage-gap finding): the spec's disclosed, metered "one
+>    live, minimal call" through the proxy path at paste time, cost
+>    recorded so it counts against the budget once set.
+> 3. **Old connector phases 5 → 6** (remote MCP registration/discovery
+>    with the full SSRF defense set, then MCP proxy enforcement — 5
+>    strictly before 6).
+> 4. **Phase 3 (options client)** only when the build conversation lane
+>    needs it — confirm with the coordinating session before starting it.
+>
+> The frontend's merged connections manager (#47) coded its expectations
+> into fake seams at `web/src/local/connections.ts`
+> (ok/needs_reauth/missing states, capture guides, verify-then-store, MCP
+> registry) — implement to those contracts or flag the divergence to the
+> board before diverging. Each phase PRs to `main`, waits for its
+> predecessor; no pre-stacked bases. Suite + e2e green per PR.
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
@@ -132,8 +353,12 @@ identity, and steps v1 are merged; connector phases 1, 2, 4 are merged.
    rename; `serve()` as a library entry point. Mostly deletion; every later
    item builds on this floor. →
 2. **P2 — Connectors main road**: Slack token capture + verify (capture guide
-   in catalog, control-plane verify), then old phases 5 → 6 (remote MCP —
-   5 before 6, unchanged), phase 3 (options client) when the build needs it. →
+   in catalog, control-plane verify), **plus first-run LLM key verification**
+   — the spec's disclosed, metered "one live, minimal call" at paste time,
+   assigned here 2026-08-31 after a Codex review of the P1 plan flagged it
+   unowned (it wants the same session-authed verify path capture-verify
+   builds) — then old phases 5 → 6 (remote MCP — 5 before 6, unchanged),
+   phase 3 (options client) when the build needs it. →
 3. **P3 — Build conversation**: the build resource, agent loop, and its
    checklist — unchanged as the highest product value, now against the P1
    endpoint model. →
@@ -170,8 +395,8 @@ stays merged as a record.
 
 ## Ready-to-paste prompts (2026-08-31, post-pivot-merge)
 
-Four sessions can launch in parallel. P1 holds the `server/` lock; the other
-three never take it. Each prompt is self-contained.
+Six sessions can launch in parallel. P1 holds the `server/` lock; the other
+five never take it. Each prompt is self-contained.
 
 ### Prompt — P1: subtraction and floor (owns `server/`)
 
@@ -213,6 +438,21 @@ three never take it. Each prompt is self-contained.
 >    test. Approval records the endpoint identity; switching endpoints is a
 >    recorded governance event that re-runs the pricing gate
 >    ("Endpoint agnosticism").
+>    **Preset amendment (user decision, 2026-08-31, supersedes the spec's
+>    three-preset list): GitHub Models and Azure AI Foundry are first-class
+>    presets**, five in all plus "another service" and "on this computer".
+>    Two wrinkles your plan must resolve against current vendor docs, not
+>    assumption: (a) GitHub Models is a fixed base URL
+>    (`https://models.github.ai/inference`, OpenAI-compatible, auth = GitHub
+>    PAT with `models:read`), but its quota is subscription-included rather
+>    than per-token — decide how it meets the pricing gate (user-entered
+>    price vs a stated-quota treatment) and record the decision; (b) Azure
+>    AI Foundry has no fixed base URL (per-resource endpoints) and its auth
+>    is nonstandard — `api-key` header and `api-version` query on the
+>    classic Azure OpenAI path vs Bearer on the newer Foundry Models API —
+>    so the preset contributes validation + capture guidance, and the
+>    proxy's header-injection and path-allowlist contracts need explicit
+>    Azure handling, verified against Azure's current docs.
 > 6. Pricing-gate rework: bundled table as today; user-entered prices stored
 >    per (endpoint canonical base URL, model); local-$0 by explicit preset
 >    classification, never loopback inference; `max_tokens` derivation falls
@@ -304,9 +544,13 @@ three never take it. Each prompt is self-contained.
 > Build, prototyping on fake data behind a thin interface wherever the API
 > lands later (P1: endpoint record, price form, budget; P2: capture guide,
 > connection states):
-> 1. First-run flow: the endpoint chooser (Anthropic / OpenAI / OpenRouter
->    presets, "another service", "on this computer"), the guided key-capture
->    card with the disclosed metered verify call, the budget screen.
+> 1. First-run flow: the endpoint chooser — five presets (Anthropic /
+>    OpenAI / OpenRouter / GitHub Models / Azure AI Foundry — the last two
+>    added by user decision 2026-08-31), plus "another service" and "on
+>    this computer" — the guided key-capture card with the disclosed
+>    metered verify call, the budget screen. GitHub Models' card guides a
+>    PAT with `models:read`; Azure AI Foundry's card also collects the
+>    per-resource endpoint URL.
 > 2. Settings: endpoint switch as an explicit confirmation naming affected
 >    workflows ("your 3 workflows will now run against …"), budget edit,
 >    autostart toggle.
@@ -322,6 +566,155 @@ three never take it. Each prompt is self-contained.
 > local session) merges with P1; sequence login retirement behind that merge
 > and coordinate through the board. PRs to `main` per surface; keep them
 > independent.
+
+### Prompt — Pivot demo (`demo/tomte-pivot`, parallel, not for merge)
+
+> You own the demo lane for Tomte: a runnable `npm run dev` demo that tells
+> the click-install pivot story end to end, on fake data, for leadership and
+> user testing. Read the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` (especially
+> "First run", "The sleeping machine", "Credentials without OAuth", and
+> "Enforcement posture") and the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` first.
+>
+> Follow the established demo pattern (`demo/dev-persona` is the precedent):
+> a branch off `main` named `demo/tomte-pivot`, re-skinning the root
+> prototype (`src/`, root `npm run dev`) — **a permanent demo variant, never
+> merged to `main`**. On this branch, rebrand the prototype to Tomte freely
+> (on `main` the prototype deliberately stays nightshift-branded). You touch
+> no `server/` code and take no lock; everything is faked in the frontend.
+>
+> The demo walks the pivot's happy path as one continuous story:
+> 1. First run: choose where your AI runs (Anthropic / OpenAI / OpenRouter /
+>    GitHub Models / Azure AI Foundry / "another service" / "on this
+>    computer"), paste a key via the guided
+>    capture card, see the disclosed test-call verify succeed, set the
+>    monthly budget ("how much Tomte may spend from your key per month").
+> 2. Build conversation: describe a job in plain words (reuse the
+>    existing demo scenario), connect Slack once through the connections
+>    manager (paste an xoxb- token, watch it verify), and get the verdict.
+> 3. Approve: the blast-radius picture with the softened enforcement copy
+>    ("it can only act through Tomte's checkpoint, and every request is
+>    checked against this picture") and the spend line.
+> 4. The quiet home: a run history where one row reads
+>    "scheduled 3:00 AM · ran 7:42 AM, when your computer woke", plus a
+>    budget meter and an alert example.
+>
+> Keep every claim on screen consistent with the spec — the demo is a
+> promise leadership will repeat. Where the spec softens or renames copy
+> (enforcement posture, budget wording), use the spec's words verbatim.
+> Verify `npm run dev` boots clean from a fresh checkout of the branch and
+> the walkthrough needs no narration to follow.
+
+### Prompt — README + MIT license (docs lane, parallel)
+
+> Add a root `README.md` and an MIT `LICENSE` to the Tomte repo
+> (`gambtho/tomte`). Neither exists today — verify (only `server/README.md`
+> and `web/README.md` exist). Read the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` and the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` first; the README
+> must describe the product as the pivot defines it. Work in a linked
+> worktree; one PR to `main`; no `server/` or `web/` code changes.
+>
+> LICENSE: the standard MIT text, `Copyright (c) 2026 Tom Gamble`. Also set
+> `"license": "MIT"` in the root and `web/` package.json and add the
+> license comment/field Go tooling expects if the repo convention has one
+> (check; if none, skip — do not invent one).
+>
+> README contents, in order: what Tomte is (one short paragraph — a
+> click-install desktop app that lets a non-technical person safely delegate
+> recurring work to an AI agent, on any LLM endpoint they bring); how the
+> enforcement works, using the spec's exact posture wording — every
+> credential and call passes through Tomte's checkpoint; a software
+> boundary, not a sandbox — never overclaim; project status (early
+> development, pre-release, direction set by the pivot spec — link it);
+> repo layout (`server/` the Go control plane + proxy + scheduler, `web/`
+> the SPA, `src/` + root vite files the retired early prototype kept for
+> reference, `docs/` specs and coordination); a minimal dev quickstart
+> (verify each command actually works before writing it: Go/Postgres
+> versions, `tomte serve`, `tomte dev-session`, `web/` npm run dev); and
+> the license line.
+>
+> Constraints: the name Tomte is final but trademark counsel is pending —
+> no ™ marks or trademark claims. Do not describe hosted/multi-tenant
+> behavior (that direction is reversed) or features that don't exist yet as
+> if they exist; write in terms of what is built vs designed. Keep it under
+> ~120 lines — a README, not a spec.
+
+### Prompt — K8s agent track, phase K1 (THE FOCUS, new lane, parallel)
+
+> You own the K8s agent track — the project's current focus (direction
+> change 2). Read the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` (the
+> "Direction change 2" section carries the verbatim leadership ask and the
+> three shaping decisions) before writing anything. Work in a linked
+> worktree; you take no `server/` lock and touch no existing top-level dir.
+>
+> The ask, in two verbatim leadership quotes: "a template for an agent
+> that creates a hello world agent running on a k8s cluster, then expand
+> to leverage llm to enhance the agent, allow connectors, etc — use a
+> simple cli to get the agent running on k8s" and "having an artifact that
+> shows my agent topology — almost agent as code (ideally yaml template or
+> something like that)". Simplest possible solution; no Substrate; CLI,
+> not UI.
+>
+> **Phase K1 (this session): hello world on a cluster via a simple CLI,
+> defined by an agent-as-code YAML.** Brainstorm briefly, write a short
+> plan (PR it to `main` or lead your implementation PR with it — your call
+> at this size), then build:
+>
+> 1. **The agent-as-code YAML — the centerpiece.** One human-readable,
+>    versioned YAML file (e.g. `agent.yaml`) IS the agent: its identity,
+>    what it does (for K1, print/serve hello world on a loop), and its
+>    topology — written so that reading the file shows the topology, and
+>    leadership can be handed the file itself as the artifact. Schema
+>    tiny but shaped for growth: a `version`, the agent's task/behavior,
+>    and empty-but-named slots where K2's `llm:` (endpoint kind/base_url +
+>    secret ref, vocabulary aligned with the board's five-preset enum) and
+>    K3's `connectors:` will land — so the file grows downward into
+>    Tomte's steps/permit shape without a rewrite. The running agent
+>    consumes this file mounted via ConfigMap — behavior comes from the
+>    YAML, never hardcoded in the image.
+>    **Format decision (coordinator-surveyed, 2026-08-31): net-new schema
+>    in the Kubernetes resource envelope** — `apiVersion: tomte.dev/v1alpha1`,
+>    `kind: Agent`, `metadata:`, `spec:` — NOT a CRD at K1 (the CLI reads
+>    it; nothing is registered with the API server), but envelope-shaped so
+>    CRD-hood later is a registration step, not a schema rewrite. Existing
+>    formats were surveyed and not adopted: kagent's CRDs are the closest
+>    prior art (borrow its noun-shape where natural) but bring a
+>    controller + their Python engine as the runtime, which would route
+>    the Tomte transition through someone else's loop; K8s SIG-apps
+>    agent-sandbox is a runtime-isolation CRD to watch, not a topology
+>    format; Docker Compose's `models:` vocabulary is worth echoing but
+>    targets the Docker runtime. Our `spec:` keeps our own nouns — the
+>    governance slots are the differentiator no existing format carries.
+> 2. **A simple CLI** (new top-level dir; propose the name — Go, matching
+>    the repo): `init` scaffolds an `agent.yaml` from the template;
+>    deploy/run applies it to the cluster the user's kubeconfig points at
+>    (YAML → ConfigMap + Deployment/Job); `status` and `logs` round it
+>    out. The YAML is the single source of truth — the CLI derives all
+>    K8s objects from it; nobody hand-edits manifests. No CRDs, no
+>    operator, no controller; plain namespaced objects via client-go or
+>    shelling out to kubectl — pick the simplest that is honest, and say
+>    why. Helm only if it genuinely earns it (at K1 it probably doesn't).
+> 3. **Verification is a real cluster**: stand up kind (or k3d), run your
+>    own CLI end to end, and show `logs` returning hello world. A README
+>    in the lane dir walks a newcomer through the same five minutes and
+>    shows the `agent.yaml` up front — it is the pitch.
+>
+> **Known destination, not K1 scope**: K2 adds an LLM call (OpenAI-
+> compatible base URL + key from a K8s Secret; align the endpoint config
+> vocabulary with the board's five-preset enum so convergence stays
+> cheap). K3 adds connectors and begins the transition to the full Tomte
+> experience — the EXISTING proxy/permit/scheduler stack is that
+> destination; do not design K1 in a way that forecloses mounting it
+> later (this is why the config-file seam matters). Phase 1 is
+> deliberately bare — no proxy, no permits (user decision, recorded on
+> the board); resist the urge to add governance early.
+>
+> PR to `main`; CI (PR #41's workflows) must pass once #41 is merged.
+> Report your naming and structure decisions to the coordinating session
+> for the board.
 
 ## Pivot spec MERGED (PR #37); name FINAL
 
@@ -380,6 +773,88 @@ From the user, routed to the pivot-spec session the same day:
   build-conversation spec's successor gains — not designed yet. The
   build-conversation frontend items 5–6 become entry points into the
   connections manager; item 5's OAuth framing is dead regardless.
+
+## Cross-cutting decision: five endpoint presets (2026-08-31)
+
+**GitHub Models and Azure AI Foundry join Anthropic, OpenAI, and OpenRouter
+as first-class endpoint presets** (user decision, 2026-08-31). This amends
+the pivot spec's "Endpoint agnosticism" preset list; the spec file is not
+rewritten — this board entry is the record. Verified basis: GitHub Models
+(`https://models.github.ai/inference`) is an official OpenAI-compatible
+chat/completions endpoint authed by a GitHub PAT (`models:read`), with
+entitlements tied to Copilot plans. Azure AI Foundry is per-resource
+endpoints with nonstandard auth (`api-key` header + `api-version` query on
+the classic path). The P1 prompt carries the two implementation wrinkles
+(pricing-gate fit for subscription quota; Azure auth/path handling in the
+proxy). Leadership copy names them "GitHub Models (included with GitHub
+Copilot plans)" — do not claim `api.githubcopilot.com` support; it is
+undocumented for third parties and needs token exchange.
+
+**P1's resolutions (plan PR #45, 2026-08-31), coordinator-reviewed:**
+
+- **Azure — accepted as planned.** P1 pins the **v1 GA API** (per-resource
+  base `https://<resource>.openai.azure.com/openai/v1` or
+  `<resource>.services.ai.azure.com/openai/v1`; plain OpenAI-compatible, no
+  `api-version` param). Keys inject as an `api-key` header (Entra/Bearer out
+  of scope v1). Validation: HTTPS + Azure host-suffix allowlist + exact
+  `/openai/v1` path. No bundled prices — Azure rides the user-entered
+  (base_url, model) price path, so the gate applies via the price form.
+- **GitHub Models — amended, blanket $0 rejected.** The plan proposed
+  classifying the preset zero-cost with the gate skipped. Verified against
+  GitHub's current docs: GitHub Models has **opt-in pay-as-you-go billing**
+  beyond the free quota (token units × per-model multipliers; default
+  GitHub-side spending limit $0 until raised), so a hard $0 would record a
+  paying user's real spend as zero — the silent unmetered spend the gate
+  exists to prevent. Direction to P1: explicit free-vs-paid choice on the
+  github preset (free → $0 classification with honest copy; paid → the
+  user-entered price path), switchable in settings since an org can enable
+  paid usage after first run.
+  **Resolved (plan PR #45, commit 0023855), coordinator-accepted:**
+  `zero_cost` is an explicit per-endpoint boolean on the `llm_endpoint`
+  record, never preset-inferred — `local` forces true, `github` takes the
+  user's free-vs-paid answer from the capture card, every other preset
+  forces false, all DB CHECK-enforced. The settings toggle exists by
+  construction: flipping it goes through `PUT /v1/settings/endpoint`, the
+  recorded governance switch that re-runs the pricing gate and recompiles
+  approved versions. Compiled docs always carry resolved prices, so no
+  preset special-casing survives at runtime.
+- Preset enum for the record:
+  `anthropic|openai|openrouter|github|azure|custom|local`. Next migration
+  confirmed 00012.
+
+## Delta sheet: what P1 changes (PR #48, delivered pending review)
+
+From the P1 session (2026-08-31); full detail in the PR body. Verify against
+the tree after merge. `server/` passes to **P2 (connectors main road)** when
+#48 merges.
+
+- **For packaging** (paused, but this is its contract when it resumes —
+  and for the K8s track's eventual convergence):
+  `server.Start(ctx, server.Options) (*server.Server, error)` at the module
+  root. `Options{DatabaseURL, ListenAddr (":0" ok), PublicBaseURL (optional
+  override), RunnerKey, VaultKey, StateDir, RunProvider/RunModel (legacy env
+  mode), RunTokenTTL, RunDeadline, DefaultMonthlyCapCents, PlatformKeys,
+  LogHandler}`; `Server.{Addr, BaseURL, MintLocalSession, HandoffURL,
+  Shutdown, Err}`. Host allowlist is automatic (whole mux, logged
+  rejections). **OWED to whoever ships a webview**: browser-level
+  verification that the http-loopback cookie (plain `tomte_session`, not
+  Secure — the Safari constraint) is accepted.
+- **For frontend** (idle; wire-up work when it resumes): settings API
+  documented in `docs/api/v1.md` — `GET/PUT /v1/settings/endpoint`
+  (presets `anthropic|openai|openrouter|github|azure|custom|local`; switch
+  409s: `connection_missing` / `unpriced_models` / `provider_not_permitted`
+  / `invalid_permit`), `GET/PUT /v1/settings/prices` (explicit base_url),
+  `GET/PUT /v1/settings/budget`. Approve 400
+  `{error:"unpriced_model", model, base_url}` is the inline price-form
+  trigger. Login/magic-link routes are gone;
+  `GET /local/handoff?token=&next=` sets the session cookie. Catalog lists
+  Slack only; connection JSON lost `metadata`, kept `status`.
+- **Post-plan deltas, coordinator-noted**: endpoint-provider mismatch at
+  the proxy fails CLOSED (no static-table fallback once an endpoint record
+  is configured); a `Caps.OverCap` infrastructure error keeps the scheduler
+  heartbeat, so wake catch-up survives transient DB errors.
+- Frozen labels honored: `tomte:run-jwt` untouched; `tomte-oauth-state`
+  deleted with its consumer, never renamed.
 
 ## Rule: no pre-stacked PR bases
 
@@ -484,11 +959,24 @@ so that a non-technical person can describe a job instead of filling a form.
   edit visible in review — not tamper-proof. Only a PR-time CI diff against
   the merge base closes it.
 
-  **CI setup is now an opened lane with a ready prompt (below), escalated to
-  pivot-critical** by the merged pivot spec: auto-update ships catalog changes
-  to users' machines, so the narrow-only rule is what keeps a silent update
-  compatible with approve-once. It is a security follow-up, not tooling
-  hygiene, and its owner is not the connectors lane.
+  **Delivered: PR #41** (2026-08-31, CI lane) —
+  `.github/workflows/{server,web,catalog-gate}.yml`, all green on the PR
+  (coordinating session verified: gate/test/build all SUCCESS). The gate
+  runs the boot-level embedded defs-vs-baseline check on every run plus a
+  PR-only diff of `defs/` against the merge base via `cmd/catalog-gate`'s
+  existing two-dir mode — no server code changes were needed, so nothing
+  entered the `server/` queue. Proven, not asserted: a defs-only widening
+  failed the embedded check, and the load-bearing case (a two-file
+  defs+baseline widening the boot gate cannot stop) was caught by the
+  merge-base diff ("WIDENING: slack.list_channels: scope admin added");
+  both demo commits reverted, net diff is the 3 workflow files. Note:
+  `testpg` self-provisions Postgres via testcontainers — no service
+  container, no DSN override. Workflows run unfiltered on all PRs + push
+  to `main` so they stay simple if later made required. **This defect and
+  the "CI unowned" flag close when #41 merges.** Escalation history: made
+  pivot-critical by the merged pivot spec — auto-update ships catalog
+  changes to users' machines, so the narrow-only rule is what keeps a
+  silent update compatible with approve-once.
 
 ## Cross-cutting decisions
 
