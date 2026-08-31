@@ -81,7 +81,7 @@ func workflowBody() map[string]any {
 			"model":         "claude-sonnet-5",
 			"max_tokens":    2048,
 		},
-		"permit": map[string]any{"read": []string{"zendesk"}},
+		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 		"rubric": map[string]any{"rules": []string{"under a page"}},
 	}
 }
@@ -127,5 +127,13 @@ func TestWorkflowAPINotFoundAndBadInput(t *testing.T) {
 	resp, _ := e.do(t, "GET", "/v1/workflows/"+uuid.NewString(), nil)
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp, _ = e.do(t, "GET", "/v1/workflows/not-a-uuid", nil)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestCreateWorkflowRejectsInvalidPermit(t *testing.T) {
+	e := newEnv(t)
+	body := workflowBody()
+	body["permit"] = map[string]any{"v": 2}
+	resp, _ := e.do(t, "POST", "/v1/workflows", body)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }

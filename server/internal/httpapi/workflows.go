@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/permit"
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
 
@@ -64,7 +65,11 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 		return body, false
 	}
 	if body.Permit == nil {
-		body.Permit = json.RawMessage(`{}`)
+		body.Permit = json.RawMessage(permit.Empty)
+	}
+	if _, err := permit.Parse(body.Permit); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
+		return body, false
 	}
 	if body.Rubric == nil {
 		body.Rubric = json.RawMessage(`{}`)
