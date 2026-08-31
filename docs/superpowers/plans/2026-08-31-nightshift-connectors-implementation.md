@@ -94,13 +94,21 @@ Deviations from the starting decomposition given to this lane:
    At no commit on main can an approved permit name reach the proxy cannot
    enforce. Same principle gates the API: `PUT /v1/connections` accepts
    `kind: api_key` only from phase 5, though the CHECK widens in 00011.
-3. **Catalog narrow-only gate ships as a Go tool, not a CI claim.**
-   `server/cmd/catalog-gate` diffs the embedded catalog between two git revs
-   and fails on reach-widening edits (host, method, path template, removed
-   constraint, loosened schema). Startup validation covers intra-catalog
-   invariants; the cross-commit gate is runnable locally and in whatever CI
-   this repo grows. The missing CI is a cross-cutting finding reported to
-   coordination, not silently absorbed into this lane.
+3. **Catalog narrow-only gate: Go tool + startup baseline check, honestly
+   framed.** `server/cmd/catalog-gate` diffs the embedded catalog between two
+   git revs and fails on reach-widening edits (host, method, path template,
+   removed constraint, loosened schema); it is runnable locally and in
+   whatever CI this repo grows. Additionally (raised by the escalation lane,
+   whose merged spec's first anti-injection control leans on the narrow-only
+   rule): the catalog embeds a **committed baseline snapshot** of itself, and
+   startup validation runs the narrow-only diff against it, refusing to boot
+   on a widening — converting "nobody ran the tool" into "the binary won't
+   start". Stated plainly: the baseline updates in the same PR that edits the
+   catalog, so this is **tamper-evident, not tamper-proof** — a widening
+   becomes a deliberate, reviewable two-file edit instead of a silent one.
+   Only a PR-time CI diff against the merge base closes it fully; until CI
+   exists, an unenforced narrow-only rule weakens a documented security
+   control in the escalation design, and the board entry says so.
 4. **Gmail scopes are late-binding data.** Catalog scope sets are JSON; the
    CASA decision (full read vs. `gmail.metadata`) changes catalog data and
    consent copy, not code. Hard deadline: **phase 2 merge** — the first time
@@ -142,11 +150,12 @@ implementation → `my:polish-core --fix` → full `server/` verification
 `my:change-explainer` → PR. Each PR message names its spec section and its
 slice of the spec's testing matrix.
 
-- **Phase 1** — `internal/catalog` types + embedded defs + validation;
-  permit changes; proxy `connector.go` (authorize/compile/inject/forward);
-  `httpapi` catalog handler; approval check; `cmd/catalog-gate`. Tests: the
-  enforcement matrix (curated rows), compilation hygiene rows, catalog
-  validation rows, approval-gap regression.
+- **Phase 1** — `internal/catalog` types + embedded defs + validation +
+  baseline snapshot with startup narrow-only check; permit changes; proxy
+  `connector.go` (authorize/compile/inject/forward); `httpapi` catalog
+  handler; approval check; `cmd/catalog-gate`. Tests: the enforcement matrix
+  (curated rows), compilation hygiene rows, catalog validation rows
+  (including boot refusal on a widened baseline), approval-gap regression.
 - **Phase 2** — migration 00011; `store` connection widening (metadata,
   status, epoch, advisory-lock helpers); `httpapi` oauth start/callback;
   refresh in the proxy credential path; revocation. Tests: the spec's OAuth
