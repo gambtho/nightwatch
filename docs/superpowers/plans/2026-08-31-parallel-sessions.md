@@ -8,23 +8,23 @@ finishes, or a cross-cutting decision is taken.
 
 ## State of the world
 
-| Thread                           | State                                                                 |
-| -------------------------------- | --------------------------------------------------------------------- |
-| Plan 1 — Foundation              | **Merged** (PR #1)                                                    |
-| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                    |
-| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                   |
-| Identity spec                    | **Merged** (PR #6)                                                    |
-| Identity implementation          | **In flight** (branch `feat/identity`) — **owns `server/`**           |
-| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                        |
-| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed      |
-| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane               |
-| Plan 4 spec — grading + alerting | **PR #13 open** (branch `spec/grading-alerting`)                      |
-| Plan 5 spec — Compute            | **PR #12 open** (branch `spec/plan5-compute`)                         |
-| Build-conversation spec          | In flight (branch `spec/build-conversation`)                          |
-| Docs corrections + roadmap       | In flight — owns the platform spec and the roadmap                    |
-| Upstream Substrate egress PR     | In flight — external repo, nothing posted, awaiting user go-ahead     |
-| Frontend (`web/`) + CLI          | **Not started** — opens when identity merges and the build spec lands |
-| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge   |
+| Thread                           | State                                                               |
+| -------------------------------- | ------------------------------------------------------------------- |
+| Plan 1 — Foundation              | **Merged** (PR #1)                                                  |
+| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                  |
+| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                 |
+| Identity spec                    | **Merged** (PR #6)                                                  |
+| Identity implementation          | **Merged** (PR #17) — **`server/` is FREE and unassigned**          |
+| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                      |
+| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed    |
+| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane             |
+| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                           |
+| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                           |
+| Build-conversation spec          | **Merged** (PR #14) — implementation owed                           |
+| Docs corrections + roadmap       | **Merged** (PR #15)                                                 |
+| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below           |
+| Frontend (`web/`) + CLI          | **Lane OPEN, nothing started** — no `web/` directory exists         |
+| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge |
 
 ## The rule
 
@@ -40,13 +40,19 @@ it extends the existing `server/cmd/nightshift` binary
 ### Serialized `server/` queue
 
 1. ~~**Plan 3**~~ (merged, PR #10) →
-2. ~~**Identity implementation**~~ — complete, PR #17 open. Replaced the
-   session mechanism across httpapi and every test helper; retired
-   `NIGHTSHIFT_SESSION_KEY`. **`server/` frees on merge; the next owner is
-   unassigned.** →
+2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
+   mechanism across httpapi and every test helper; retired
+   `NIGHTSHIFT_SESSION_KEY`. **`server/` is now free and unassigned. The next
+   owner is a decision, not a default** — see the note under item 3. →
 3. **Connectors** (plan + implementation — collides with `permit.Parse`, the
    proxy, and the harness, and wants identity's session changes settled; four
-   downstream specs depend on its operation vocabulary) →
+   downstream specs depend on its operation vocabulary). **Contested:** the
+   build-conversation spec's first server item — user-facing steps v1 plus the
+   approval-time compile, resolving scoping decision 9 — is deliberately
+   independent of connectors and is a much smaller slot. Taking it first
+   unblocks the frontend sooner, because the frontend cannot consume a `steps`
+   contract that is still the compiled execution form. Connectors is the bigger
+   unlock but the longer occupancy. →
 4. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
@@ -67,7 +73,9 @@ change with no queue position yet. It most likely rides with connectors.
 ### Parallel-safe lanes, open now
 
 - **Frontend at `web/`** — the product's entry point, not a later phase.
-  Blocked only on identity merging and the build-conversation spec landing.
+  **Both blockers are cleared** (identity, PR #17; build-conversation spec,
+  PR #14). Nothing stands in front of it, no `web/` directory exists yet, and
+  no session is scoped for it.
 - **Docs, specs, research** — always open.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
