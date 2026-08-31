@@ -39,8 +39,8 @@ finishes, or a cross-cutting decision is taken.
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
 | K8s agent track (THE FOCUS)      | **K1 MERGED** (#49 @ 9c9d970; 6 review findings fixed, re-verified on kind) — lane holds for K2 launch      |
-| Lean-in cleanup                  | **Delivered: #51 (estate), #52 (login retirement), #54 (server hygiene)** — all awaiting merge             |
-| P2 — Connectors main road        | **Plan delivered: PR #53** (4 PRs: A Slack, B key-verify+ledger, C MCP+SSRF, D MCP enforce); decisions ruled below. Takes `server/` when #54 merges |
+| Lean-in cleanup                  | **Hygiene #54 + login #52 MERGED**; estate #51 open (incl. root .prettierrc removal — accepted); tomtectl CI workflow up as #56 |
+| P2 — Connectors main road        | **OWNS `server/`** (handed off on #54's merge). Plan PR #53 (4 PRs: A Slack, B key-verify+ledger 00013, C MCP+SSRF 00014, D MCP enforce); rulings below |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
 ## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
