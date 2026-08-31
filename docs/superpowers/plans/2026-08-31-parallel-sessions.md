@@ -59,13 +59,9 @@ frontend's remaining ten checklist items all wait on the build resource.
    it was small, independent of everything else, and the frontend cannot
    consume a `steps` contract that is still the compiled execution form.
    **`server/` has been free and unassigned since it merged.** →
-4. **Connectors** — IN FLIGHT (plan PR #25: seven phases). The critical path
-   for two lanes:
-   the frontend cannot progress past its first slice without the build
-   resource, which depends on this. Plan and implementation; collides with
-   `permit.Parse`, the proxy, and the harness; four downstream specs depend on
-   its operation vocabulary. **Whoever takes it should fix the `serve`
-   deadlock first** (see Blocking defects). →
+4. **Connectors** — paused by design: phases 1, 2, and 4 are merged; phase 3
+   remains on call after the build-conversation lane. Phases 5 then 6 remain
+   deferred. →
 5. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
@@ -80,18 +76,14 @@ right rather than merely asserted.
 
 ### Parallel-safe lanes, open now
 
-- **Frontend at `web/`** — first slice merged (PR #21): login over magic-link,
-  the approve blast-radius diagram driven only by the permit document, the
-  quiet home with run history, and `/build` claimed as an honest placeholder
-  rather than a faked build conversation. **The lane is now largely blocked**:
-  10 of the 11 items on the build-conversation spec's frontend checklist need
-  the build resource, which needs connectors. What it built — the permit
-  diagram, steps rendering, schedule wording — are the components those
-  surfaces will drive live.
-- ~~**Frontend, original entry**~~ — the product's entry point, not a later phase.
-  **Both blockers are cleared** (identity, PR #17; build-conversation spec,
-  PR #14). Nothing stands in front of it, no `web/` directory exists yet, and
-  no session is scoped for it.
+- **Frontend at `web/`** — `/setup` shipped (PR #32), alongside login over
+  magic-link, the approve blast-radius diagram driven only by the permit
+  document, the quiet home with run history, and `/build` as an honest
+  placeholder rather than a faked build conversation. **The lane is now
+  largely blocked**: 10 of the 11 items on the build-conversation spec's
+  frontend checklist need the build resource, which needs connectors. What it
+  built — the permit diagram, steps rendering, schedule wording — are the
+  components those surfaces will drive live.
 - **Docs, specs, research** — always open.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
@@ -144,31 +136,18 @@ This project tracks its own work in docs, not issues. An external issue
 tracker is only ever the required entry protocol for contributing upstream —
 never our own bookkeeping.
 
-## The loop is closed (2026-08-31)
+## The harness path is verified (2026-08-31)
 
-Recorded because it was the project's open question for most of the day: can a
-person use this, rather than can its parts pass tests.
+`TestEndToEndConnectorToolRun` verifies the harness/test path: a constrained
+write succeeds on an approved channel, an unlisted channel is denied and
+audited, and no credential ever reaches the harness. The harness projects
+permit-granted operations as tools, calls them through the enforcing proxy with
+credentials injected at the boundary, and returns tool-level failures as
+`IsError`.
 
-**They can, end to end, on `main` today** — verified against the tree, not
-against merge statuses:
-
-- **Sign in** — magic link, `__Host-` session cookie, `/v1/me` bootstrap.
-- **Create** — `web/src/screens/Setup.tsx` at `/setup`, posting real steps v1,
-  schedule, and permit to `POST /v1/workflows`, wired to `GET /v1/catalog`.
-  Deliberately a **developer setup path, not the product's front door** — the
-  build conversation replaces it.
-- **Approve** — the blast-radius diagram, driven only by the permit document.
-- **Run** — `POST /v1/workflows/{id}/runs` or the scheduler.
-- **Do something real** — the harness tool loop projects permit-granted ops as
-  tools (`internalapi` joins the approved permit with the catalog; the harness
-  never sees the permit or a credential), calls them through the enforcing
-  proxy with credentials injected at the boundary, and returns tool-level
-  failures to the model as `IsError`.
-- **See it** — the quiet home, run history, events.
-
-`TestEndToEndConnectorToolRun` proves the thesis rather than asserting it: a
-constrained write succeeds on an approved channel, an unlisted channel is
-denied and audited, and no credential ever reaches the harness.
+This does not establish an available end-to-end workflow on `main`: the
+`nightshift serve` startup deadlock remains blocked there until PR #24 merges
+and `main` is reverified.
 
 What is still missing is the _product_, not the loop: the build conversation,
 so that a non-technical person can describe a job instead of filling a form.
