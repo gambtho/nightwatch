@@ -70,6 +70,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 		return RequireSession(d.Store, h)
 	}
 	a := &authHandlers{d: d}
+	mux.Handle("GET /local/handoff", http.HandlerFunc(d.localHandoff))
 	mux.Handle("POST /v1/auth/logout", mut(http.HandlerFunc(a.logout)))
 	mux.Handle("GET /v1/me", auth(a.me))
 	mux.Handle("POST /v1/workflows", mut(auth(d.createWorkflow)))

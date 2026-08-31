@@ -331,14 +331,10 @@ func devSession(ctx context.Context, args []string) error {
 		return err
 	}
 
-	value, tokenHash, err := httpapi.NewOpaqueToken()
+	cookie, err := httpapi.MintLocalSession(ctx, s, tn.ID, user.ID)
 	if err != nil {
 		return err
 	}
-	if err := s.CreateSession(ctx, tokenHash, tn.ID, user.ID); err != nil {
-		return err
-	}
-	cookie := httpapi.SessionCookie(value)
 	fmt.Printf("tenant: %s\nuser:   %s\ncookie: %s=%s\n", tn.ID, user.ID, cookie.Name, cookie.Value)
 	return nil
 }
