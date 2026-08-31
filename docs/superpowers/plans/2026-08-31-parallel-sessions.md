@@ -11,25 +11,25 @@ finishes, or a cross-cutting decision is taken.
 
 ## State of the world
 
-| Thread                           | State                                                                                                                    |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Plan 1 — Foundation              | **Merged** (PR #1)                                                                                                       |
-| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                                                                       |
-| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                                                                      |
-| Identity spec                    | **Merged** (PR #6)                                                                                                       |
-| Identity implementation          | **Merged** (PR #17)                                                                                                      |
-| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
-| Connectors                       | **In flight** — phase 1 merged; phase 2 re-landing as PR #31; phase 4 as PR #30; **owns `server/`**                      |
-| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
-| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
-| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
-| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                                |
-| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                                |
-| Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                                |
-| Docs corrections + roadmap       | **Merged** (PR #15)                                                                                                      |
-| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                                |
-| Frontend (`web/`) + CLI          | **First slice merged** (PR #21) — `web/` exists; login, approve, quiet home. Rest blocked on connectors. CLI not started |
-| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                                      |
+| Thread                           | State                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Plan 1 — Foundation              | **Merged** (PR #1)                                                                                         |
+| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                                                         |
+| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                                                        |
+| Identity spec                    | **Merged** (PR #6)                                                                                         |
+| Identity implementation          | **Merged** (PR #17)                                                                                        |
+| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                 |
+| Connectors                       | **Phases 1, 2, 4 merged.** Paused by design — phase 3 on call for the build lane; 5→6 deferred, 5 before 6 |
+| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                             |
+| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                           |
+| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                    |
+| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                  |
+| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                  |
+| Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                  |
+| Docs corrections + roadmap       | **Merged** (PR #15)                                                                                        |
+| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                  |
+| Frontend (`web/`) + CLI          | **`/setup` shipped** (PR #32) — the loop closes. CLI still not started                                     |
+| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                        |
 
 ## The rule
 
@@ -44,6 +44,12 @@ it extends the existing `server/cmd/nightshift` binary
 
 ### Serialized `server/` queue
 
+**`server/` is FREE and unassigned.** The connectors lane has paused by design,
+not stalled. Highest-value next occupant per the dependency map below: the
+**build-conversation lane** (its `server/` checklist items 2, 3, 6 — the build
+resource, the build agent loop, and the verdict demand signal), because the
+frontend's remaining ten checklist items all wait on the build resource.
+
 1. ~~**Plan 3**~~ (merged, PR #10) →
 2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
    mechanism across httpapi and every test helper; retired
@@ -53,13 +59,9 @@ it extends the existing `server/cmd/nightshift` binary
    it was small, independent of everything else, and the frontend cannot
    consume a `steps` contract that is still the compiled execution form.
    **`server/` has been free and unassigned since it merged.** →
-4. **Connectors** — IN FLIGHT (plan PR #25: seven phases). The critical path
-   for two lanes:
-   the frontend cannot progress past its first slice without the build
-   resource, which depends on this. Plan and implementation; collides with
-   `permit.Parse`, the proxy, and the harness; four downstream specs depend on
-   its operation vocabulary. **Whoever takes it should fix the `serve`
-   deadlock first** (see Blocking defects). →
+4. **Connectors** — paused by design: phases 1, 2, and 4 are merged; phase 3
+   remains on call after the build-conversation lane. Phases 5 then 6 remain
+   deferred. →
 5. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
@@ -74,18 +76,14 @@ right rather than merely asserted.
 
 ### Parallel-safe lanes, open now
 
-- **Frontend at `web/`** — first slice merged (PR #21): login over magic-link,
-  the approve blast-radius diagram driven only by the permit document, the
-  quiet home with run history, and `/build` claimed as an honest placeholder
-  rather than a faked build conversation. **The lane is now largely blocked**:
-  10 of the 11 items on the build-conversation spec's frontend checklist need
-  the build resource, which needs connectors. What it built — the permit
-  diagram, steps rendering, schedule wording — are the components those
-  surfaces will drive live.
-- ~~**Frontend, original entry**~~ — the product's entry point, not a later phase.
-  **Both blockers are cleared** (identity, PR #17; build-conversation spec,
-  PR #14). Nothing stands in front of it, no `web/` directory exists yet, and
-  no session is scoped for it.
+- **Frontend at `web/`** — `/setup` shipped (PR #32), alongside login over
+  magic-link, the approve blast-radius diagram driven only by the permit
+  document, the quiet home with run history, and `/build` as an honest
+  placeholder rather than a faked build conversation. **The lane is now
+  largely blocked**: 10 of the 11 items on the build-conversation spec's
+  frontend checklist need the build resource, which needs connectors. What it
+  built — the permit diagram, steps rendering, schedule wording — are the
+  components those surfaces will drive live.
 - **Docs, specs, research** — always open.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
@@ -137,6 +135,22 @@ costs one message.
 This project tracks its own work in docs, not issues. An external issue
 tracker is only ever the required entry protocol for contributing upstream —
 never our own bookkeeping.
+
+## The harness path is verified (2026-08-31)
+
+`TestEndToEndConnectorToolRun` verifies the harness/test path: a constrained
+write succeeds on an approved channel, an unlisted channel is denied and
+audited, and no credential ever reaches the harness. The harness projects
+permit-granted operations as tools, calls them through the enforcing proxy with
+credentials injected at the boundary, and returns tool-level failures as
+`IsError`.
+
+This does not establish an available end-to-end workflow on `main`: the
+`nightshift serve` startup deadlock remains blocked there until PR #24 merges
+and `main` is reverified.
+
+What is still missing is the _product_, not the loop: the build conversation,
+so that a non-technical person can describe a job instead of filling a form.
 
 ## Blocking defects
 
