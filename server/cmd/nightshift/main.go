@@ -16,6 +16,15 @@
 //	NIGHTSHIFT_PLATFORM_OPENROUTER_KEY
 //	                        platform model credentials, per provider — injected
 //	                        by the egress proxy, never visible to the harness
+//	NIGHTSHIFT_RUN_TOKEN_TTL  Go duration, default 1h
+//	NIGHTSHIFT_RUN_DEADLINE   Go duration, default 2h; must exceed
+//	                          NIGHTSHIFT_RUN_TOKEN_TTL — a run whose token
+//	                          expired can never finalize itself, so the
+//	                          reaper only sweeps runs past a strictly longer
+//	                          deadline
+//	NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS
+//	                          tenant monthly spend cap in cents, default 0
+//	                          (unlimited)
 package main
 
 import (
@@ -27,6 +36,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/gambtho/nightwatch/server/internal/compute"
@@ -36,6 +46,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
 	"github.com/gambtho/nightwatch/server/internal/llm"
+	"github.com/gambtho/nightwatch/server/internal/meter"
 	"github.com/gambtho/nightwatch/server/internal/proxy"
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
 	"github.com/gambtho/nightwatch/server/internal/redact"
@@ -84,6 +95,32 @@ func keyFromEnv(name string) []byte {
 		os.Exit(2)
 	}
 	return key
+}
+
+func durationFromEnv(name string, fallback time.Duration) time.Duration {
+	v := os.Getenv(name)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Error("env var must be a positive Go duration", "name", name, "value", v)
+		os.Exit(2)
+	}
+	return d
+}
+
+func intFromEnv(name string, fallback int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		slog.Error("env var must be a non-negative integer", "name", name, "value", v)
+		os.Exit(2)
+	}
+	return n
 }
 
 func serve(ctx context.Context) error {
@@ -152,7 +189,15 @@ func serve(ctx context.Context) error {
 		}
 	})
 
-	eng := &engine.Engine{Store: s, Signer: signer, Compute: local}
+	tokenTTL := durationFromEnv("NIGHTSHIFT_RUN_TOKEN_TTL", time.Hour)
+	runDeadline := durationFromEnv("NIGHTSHIFT_RUN_DEADLINE", 2*time.Hour)
+	if err := engine.ValidateRunLifetimes(tokenTTL, runDeadline); err != nil {
+		return err
+	}
+	defaultCap := intFromEnv("NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS", 0)
+
+	eng := &engine.Engine{Store: s, Signer: signer, Compute: local, TokenTTL: tokenTTL}
+	m := &meter.Meter{Store: s, DefaultCap: defaultCap}
 
 	mux := http.NewServeMux()
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: eng, Vault: master})
@@ -164,8 +209,15 @@ func serve(ctx context.Context) error {
 	proxy.RegisterRoutes(mux, proxy.Deps{
 		Auth: adapters.Auth, Permits: adapters.Permits,
 		Credentials: adapters.Credentials, Events: adapters.Events,
-		Hook: proxy.NopHook{}, Config: cfg,
+		Hook: m, Config: cfg,
 	})
+
+	loopCtx, cancelLoops := context.WithCancel(context.Background())
+	defer cancelLoops()
+	sched := &engine.Scheduler{Engine: eng, Store: s, Caps: m}
+	reaper := &engine.Reaper{Store: s, Deadline: runDeadline}
+	go sched.Run(loopCtx)
+	go reaper.Run(loopCtx)
 
 	slog.Info("nightshift: serving", "addr", addr)
 	srv := &http.Server{

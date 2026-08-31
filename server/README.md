@@ -33,6 +33,37 @@ are gone: `NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY`,
 are the operator's platform-default keys, read only by the egress proxy and
 injected at the boundary — no credential reaches the harness.
 
+Three more govern scheduling and metering: `NIGHTSHIFT_RUN_TOKEN_TTL`
+(default `1h`) and `NIGHTSHIFT_RUN_DEADLINE` (default `2h`) are Go
+durations; `serve` refuses to start unless the deadline strictly exceeds
+the token TTL, since a run whose token has already expired can never
+finalize itself before the reaper would be allowed to sweep it.
+`NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS` (default `0`, meaning unlimited)
+sets the tenant monthly spend cap in cents.
+
+### Scheduler and reaper
+
+`internal/engine.Scheduler` ticks on an interval, looking for workflows
+whose versioned `schedule` artifact (see [`docs/api/v1.md`](../docs/api/v1.md))
+is due. It creates and dispatches a run for the current occurrence only —
+a schedule that was down for a while does not catch up on missed
+occurrences — and admits at most one active run per workflow at a time,
+via a store-level admission index rather than an in-process queue. A tick
+that finds cap-exceeded or already-active workflows simply skips them.
+
+`internal/engine.Reaper` sweeps runs stuck past `NIGHTSHIFT_RUN_DEADLINE`
+and finalizes them as failed, recovering from harness crashes and lost
+dispatches. It only ever reaps a run whose token has already expired,
+which the deadline>TTL invariant above guarantees.
+
+### Metering
+
+`internal/meter.Meter` is wired as the egress proxy's `Hook`: every
+provider call is checked against the tenant's monthly spend cap
+(`NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS`, UTC calendar month) before it is
+allowed to reach the upstream — the cap is enforced at the proxy hook,
+not before a run is admitted.
+
 ### The egress proxy
 
 All LLM traffic from the harness is routed through `internal/proxy`, the

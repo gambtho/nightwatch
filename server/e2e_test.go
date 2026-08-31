@@ -253,3 +253,87 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	}
 	require.Contains(t, types, "proxy.request")
 }
+
+// TestEndToEndScheduledRun proves a schedule fires a run with no HTTP fire
+// call: workflow with a cron schedule -> Scheduler.Tick (injected clock) ->
+// engine -> harness -> run record, visible via the public API with
+// fire_reason "schedule". A second tick in the same window fires nothing.
+func TestEndToEndScheduledRun(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+
+	sessionKey := bytes.Repeat([]byte{1}, 32)
+	signer := token.New(bytes.Repeat([]byte{2}, 32))
+	provider := &llmtest.Scripted{
+		Response: "scheduled digest",
+		Usage:    llm.Usage{InputTokens: 10, OutputTokens: 5},
+	}
+	factory := func(string) (llm.Provider, error) { return provider, nil }
+
+	var baseURL string
+	local := compute.NewLocal(t.TempDir(), func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
+		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
+		steps, err := client.Context(ctx)
+		if err != nil {
+			t.Errorf("harness context: %v", err)
+			return
+		}
+		_, _ = harness.Run(ctx, harness.Input{Steps: steps, RunToken: req.RunToken}, harness.Deps{
+			ProviderFactory: factory,
+			Sink:            client,
+		})
+	})
+	eng := &engine.Engine{Store: s, Signer: signer, Compute: local}
+
+	mux := http.NewServeMux()
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: eng})
+	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	baseURL = ts.URL
+
+	master, err := vault.NewMaster(bytes.Repeat([]byte{3}, 32))
+	require.NoError(t, err)
+	wrapped, err := master.NewTenantKEK()
+	require.NoError(t, err)
+	tn, err := s.CreateTenant(ctx, "acme", wrapped)
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
+	require.NoError(t, err)
+	cookie, err := httpapi.SessionCookie(sessionKey,
+		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: "owner"}, time.Hour)
+	require.NoError(t, err)
+	do := newDoHelper(t, ts.URL, cookie)
+
+	out := do("POST", "/v1/workflows", map[string]any{
+		"name": "daily digest",
+		"steps": map[string]any{
+			"system_prompt": "You prepare the daily digest.",
+			"kickoff":       "Summarize.",
+			"provider":      "anthropic",
+			"model":         "claude-sonnet-5",
+			"max_tokens":    64,
+		},
+		"permit":   map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
+		"schedule": map[string]any{"cron": "0 9 * * *", "tz": "UTC"},
+	})
+	wfID := out["workflow"].(map[string]any)["id"].(string)
+	do("POST", "/v1/workflows/"+wfID+"/versions/1/approve", nil)
+
+	now := time.Date(2026, 9, 7, 9, 0, 30, 0, time.UTC)
+	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
+	sched.Tick(ctx)
+	local.Wait()
+
+	out = do("GET", "/v1/workflows/"+wfID+"/runs", nil)
+	runs := out["runs"].([]any)
+	require.Len(t, runs, 1)
+	run := runs[0].(map[string]any)
+	require.Equal(t, "schedule", run["fire_reason"])
+	require.Equal(t, "succeeded", run["status"])
+	require.Contains(t, run["output"], "scheduled digest")
+
+	sched.Tick(ctx) // same window: nothing new
+	out = do("GET", "/v1/workflows/"+wfID+"/runs", nil)
+	require.Len(t, out["runs"].([]any), 1)
+}
