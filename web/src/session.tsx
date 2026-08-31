@@ -61,10 +61,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       await apiLogout();
-    } finally {
-      // Even if the request failed, locally treating the user as signed
-      // out is the safe direction — the next bootstrap re-checks reality.
       setSession({ status: "anonymous" });
+    } catch {
+      // The logout may not have reached the server, so the cookie could
+      // still be live — never show "signed out" over a valid session.
+      // Re-bootstrap and let /v1/me report the truth.
+      setAttempt((n) => n + 1);
     }
   }, []);
 

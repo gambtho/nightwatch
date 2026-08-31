@@ -142,3 +142,48 @@ describe("Home", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("Home — draft alongside approved", () => {
+  it("surfaces the pending draft over the approved state", async () => {
+    mockApi({
+      "GET /v1/me": {
+        body: {
+          user: { id: "u", email: "e", role: "owner" },
+          tenant: { id: "t", name: "dev" },
+        },
+      },
+      "GET /v1/workflows": {
+        body: {
+          workflows: [
+            { id: "wf3", name: "digest v2", created_at: "2026-08-30T00:00:00Z" },
+          ],
+        },
+      },
+      "GET /v1/workflows/wf3": {
+        body: {
+          workflow: { id: "wf3", name: "digest v2", created_at: "2026-08-30T00:00:00Z" },
+          versions: [
+            approvedVersion,
+            { ...approvedVersion, number: 2, status: "draft", approved_at: null },
+          ],
+        },
+      },
+      "GET /v1/workflows/wf3/runs": { body: { runs: [] } },
+    });
+
+    render(
+      <MemoryRouter>
+        <SessionProvider>
+          <Home />
+        </SessionProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/needs your approval/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /review what it's allowed to reach/i }),
+    ).toHaveAttribute("href", "/workflows/wf3/approve");
+    // The approved version's info stays visible underneath.
+    expect(screen.getByText(/Mondays at 9:00 AM/)).toBeInTheDocument();
+  });
+});

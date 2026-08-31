@@ -20,7 +20,9 @@ function lastRunLine(summary: WorkflowSummary): string {
 
 function statusBadge(summary: WorkflowSummary) {
   const { last } = summary;
-  if (!summary.versions.approved) {
+  // A pending draft outranks the approved state — it's the one thing on
+  // this page that actually needs the user.
+  if (summary.versions.latestDraft) {
     return <span className="wf-badge wf-badge-draft">needs your approval</span>;
   }
   if (last?.status === "failed") {
@@ -62,6 +64,13 @@ export default function WorkflowCard({ summary }: { summary: WorkflowSummary }) 
           <div className="dim wf-card-line wf-card-rules">
             Rule checks arrive with grading — not yet scored
           </div>
+          {versions.latestDraft && (
+            <div className="wf-card-line">
+              <Link to={`/workflows/${workflow.id}/approve`}>
+                Review what it's allowed to reach →
+              </Link>
+            </div>
+          )}
         </>
       ) : versions.latestDraft ? (
         <div className="wf-card-line">

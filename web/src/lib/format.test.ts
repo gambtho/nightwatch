@@ -21,7 +21,7 @@ describe("timeAgo", () => {
 
   it("falls back to a date for old timestamps", () => {
     // Rendered in the viewer's zone, so the exact day may shift by one.
-    expect(timeAgo("2026-06-01T12:00:00Z", now)).toMatch(/May 31|Jun 1/);
+    expect(timeAgo("2026-06-01T12:00:00Z", now)).toMatch(/May 31|Jun [12]/);
   });
 
   it("passes through unparseable input", () => {

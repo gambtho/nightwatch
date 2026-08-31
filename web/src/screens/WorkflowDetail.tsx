@@ -11,6 +11,7 @@ import { useSession } from "../session";
 import "./screens.css";
 
 function RunRow({ run }: { run: Run }) {
+  const { expire } = useSession();
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<RunEvent[] | null>(null);
   const [eventsError, setEventsError] = useState(false);
@@ -23,13 +24,18 @@ function RunRow({ run }: { run: Run }) {
       .then(({ events }) => {
         if (!cancelled) setEvents(events);
       })
-      .catch(() => {
-        if (!cancelled) setEventsError(true);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isAuthError(err)) {
+          expire();
+          return;
+        }
+        setEventsError(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, events, run.id]);
+  }, [open, events, run.id, expire]);
 
   const statusLabel: Record<Run["status"], string> = {
     pending: "waiting to start",

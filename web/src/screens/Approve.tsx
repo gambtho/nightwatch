@@ -14,8 +14,15 @@ import "./screens.css";
 // steps in their own words, the schedule in words, and the blast radius
 // drawn from the permit document itself.
 
+// Keyed by workflow id so navigating between approval gates remounts with
+// fresh state — a stale draft number can never be approved against a new id.
 export default function Approve() {
   const { id } = useParams<{ id: string }>();
+  if (!id) return null;
+  return <ApproveInner key={id} id={id} />;
+}
+
+function ApproveInner({ id }: { id: string }) {
   const navigate = useNavigate();
   const { expire } = useSession();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -25,7 +32,6 @@ export default function Approve() {
   const [approving, setApproving] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
     let cancelled = false;
     getWorkflow(id)
       .then(({ workflow, versions }) => {
@@ -48,7 +54,7 @@ export default function Approve() {
   }, [id, expire]);
 
   async function approve() {
-    if (!id || !draft) return;
+    if (!draft) return;
     setApproving(true);
     setError(null);
     try {
