@@ -28,21 +28,45 @@ type Deps struct {
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
+	// mut is the CSRF Origin policy, applied to every mutating /v1 route
+	// (defence in depth over SameSite=Lax): Origin absent → allowed (the
+	// session cookie is still required; non-browser clients and
+	// same-origin navigations), exactly the configured public origin →
+	// allowed, anything else → 403 before the handler runs.
+	mut := func(h http.Handler) http.Handler {
+		return checkOrigin(d.PublicBaseURL, h)
+	}
 	auth := func(h http.HandlerFunc) http.Handler {
 		return RequireSession(d.Store, h)
 	}
-	mux.Handle("POST /v1/workflows", auth(d.createWorkflow))
+	a := &authHandlers{d: d, ips: newIPLimiter(ipLimitMax, ipLimitWindow)}
+	mux.Handle("POST /v1/auth/magic-link", mut(http.HandlerFunc(a.magicLink)))
+	mux.Handle("GET /auth/verify", http.HandlerFunc(a.verifyPage))
+	mux.Handle("POST /v1/auth/verify", mut(http.HandlerFunc(a.verify)))
+	mux.Handle("POST /v1/auth/logout", mut(http.HandlerFunc(a.logout)))
+	mux.Handle("GET /v1/me", auth(a.me))
+	mux.Handle("POST /v1/workflows", mut(auth(d.createWorkflow)))
 	mux.Handle("GET /v1/workflows", auth(d.listWorkflows))
 	mux.Handle("GET /v1/workflows/{id}", auth(d.getWorkflow))
-	mux.Handle("POST /v1/workflows/{id}/versions", auth(d.addVersion))
-	mux.Handle("POST /v1/workflows/{id}/versions/{version}/approve", auth(d.approveVersion))
-	mux.Handle("POST /v1/workflows/{id}/runs", auth(d.fireRun))
+	mux.Handle("POST /v1/workflows/{id}/versions", mut(auth(d.addVersion)))
+	mux.Handle("POST /v1/workflows/{id}/versions/{version}/approve", mut(auth(d.approveVersion)))
+	mux.Handle("POST /v1/workflows/{id}/runs", mut(auth(d.fireRun)))
 	mux.Handle("GET /v1/workflows/{id}/runs", auth(d.listRuns))
 	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
 	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
-	mux.Handle("PUT /v1/connections/{name}", auth(d.putConnection))
+	mux.Handle("PUT /v1/connections/{name}", mut(auth(d.putConnection)))
 	mux.Handle("GET /v1/connections", auth(d.listConnections))
-	mux.Handle("DELETE /v1/connections/{name}", auth(d.deleteConnection))
+	mux.Handle("DELETE /v1/connections/{name}", mut(auth(d.deleteConnection)))
+}
+
+func checkOrigin(public *url.URL, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && origin != public.String() {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
