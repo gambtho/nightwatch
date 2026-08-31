@@ -162,3 +162,43 @@ func TestDispatchAndTokenReset(t *testing.T) {
 	// Dispatched runs are no longer token-resettable.
 	require.ErrorIs(t, s.ResetRunToken(ctx, tn.ID, run.ID, "h1-again"), store.ErrNotFound)
 }
+
+func TestFinalizeRunSpendExceededEvent(t *testing.T) {
+	s := store.New(testpg.New(t))
+	ctx := context.Background()
+	tn, wf := setupApproved(t, s)
+
+	runID := uuid.New()
+	_, err := s.CreateRun(ctx, tn.ID, wf.ID, runID, 1, "h", "manual", nil)
+	require.NoError(t, err)
+
+	// Over cap: event and terminal status land atomically.
+	_, err = s.FinalizeRun(ctx, tn.ID, runID, store.RunFinal{
+		Status: "succeeded", CostCents: 75,
+	}, 50)
+	require.NoError(t, err)
+	events, err := s.ListRunEvents(ctx, tn.ID, runID)
+	require.NoError(t, err)
+	var types []string
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	require.Contains(t, types, "spend.exceeded")
+
+	// A losing second finalize writes nothing — no duplicate event.
+	_, err = s.FinalizeRun(ctx, tn.ID, runID, store.RunFinal{Status: "failed", CostCents: 75}, 50)
+	require.ErrorIs(t, err, store.ErrNotFound)
+	events, err = s.ListRunEvents(ctx, tn.ID, runID)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+
+	// Under cap: no event.
+	run2 := uuid.New()
+	_, err = s.CreateRun(ctx, tn.ID, wf.ID, run2, 1, "h2", "manual", nil)
+	require.NoError(t, err)
+	_, err = s.FinalizeRun(ctx, tn.ID, run2, store.RunFinal{Status: "succeeded", CostCents: 10}, 50)
+	require.NoError(t, err)
+	events, err = s.ListRunEvents(ctx, tn.ID, run2)
+	require.NoError(t, err)
+	require.Empty(t, events)
+}

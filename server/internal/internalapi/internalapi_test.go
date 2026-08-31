@@ -159,3 +159,36 @@ func TestInternalAPIRejectsMismatchedTokenHash(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
+
+func TestFinalizeResolvesPerRunCap(t *testing.T) {
+	s, signer, ts, tn, wf := setup(t)
+	_ = wf
+	ctx := context.Background()
+	user, err := s.UpsertUser(ctx, tn.ID, "cap@acme.test")
+	require.NoError(t, err)
+	capped, _, err := s.CreateWorkflow(ctx, tn.ID, "capped", store.VersionDoc{
+		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 100},
+		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"spend":{"per_run_cents":5},"connections":{}}`),
+		Rubric: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	_, err = s.ApproveVersion(ctx, tn.ID, capped.ID, 1, user.ID)
+	require.NoError(t, err)
+	runID, bearer := mintRun(t, s, signer, tn, capped)
+
+	client := harness.NewClient(ts.URL, runID, bearer)
+	_, err = client.Context(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.Finalize(ctx, harness.Result{
+		Status: harness.StatusSucceeded, Output: "big",
+		Usage: llm.Usage{InputTokens: 100000, OutputTokens: 50000}, CostCents: 105,
+	}))
+
+	events, err := s.ListRunEvents(ctx, tn.ID, runID)
+	require.NoError(t, err)
+	var types []string
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	require.Contains(t, types, "spend.exceeded")
+}
