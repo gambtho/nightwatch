@@ -58,10 +58,16 @@ func (e *Engine) Fire(ctx context.Context, tenantID, workflowID uuid.UUID, versi
 }
 
 // Redispatch recovers a run that was created but never dispatched (a crash
-// between CreateRun and Invoke). The original bearer is gone — only its
-// hash was stored — so a fresh token is signed and the stored hash swapped
-// first; an undispatched pending run has no token holder, so the swap is
-// safe by construction.
+// between CreateRun and Invoke, or a run whose post-Invoke
+// MarkRunDispatched failed and both attempts in dispatch were exhausted).
+// The original bearer is gone — only its hash was stored — so a fresh
+// token is signed and the stored hash swapped first. For the
+// crash-before-Invoke case, an undispatched pending run has no token
+// holder, so the swap is safe by construction; for the
+// MarkRunDispatched-failure case the run is already live under the first
+// bearer, so this swap races the harness — dispatch's retry (on a
+// cancel-free context) is what keeps that path rare, and the residual
+// risk is documented in server/README.md.
 func (e *Engine) Redispatch(ctx context.Context, run store.Run) error {
 	bearer, hash, err := e.Signer.Sign(token.RunClaims{
 		RunID: run.ID, TenantID: run.TenantID, ExpiresAt: e.now().Add(e.ttl()),
@@ -89,7 +95,17 @@ func (e *Engine) dispatch(ctx context.Context, run store.Run, bearer string) err
 		return err
 	}
 	if err := e.Store.MarkRunDispatched(ctx, run.TenantID, run.ID); err != nil {
-		slog.Error("engine: mark dispatched", "run", run.ID, "err", err)
+		// The run is now live — the harness holds the bearer — but still
+		// looks undispatched to the next tick, which would Redispatch it:
+		// ResetRunToken invalidates the live token mid-run and a second
+		// Invoke duplicates spend. Retry once on a cancel-free context
+		// (the caller disconnecting shouldn't cost us the retry) before
+		// accepting that risk.
+		retryCtx := context.WithoutCancel(ctx)
+		if retryErr := e.Store.MarkRunDispatched(retryCtx, run.TenantID, run.ID); retryErr != nil {
+			slog.Error("engine: mark dispatched failed after retry; run may be double-dispatched next tick",
+				"run", run.ID, "tenant", run.TenantID, "err", err, "retry_err", retryErr)
+		}
 	}
 	return nil
 }
