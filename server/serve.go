@@ -25,6 +25,7 @@ import (
 	"github.com/gambtho/tomte/server/internal/httpapi"
 	"github.com/gambtho/tomte/server/internal/internalapi"
 	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/llmverify"
 	"github.com/gambtho/tomte/server/internal/meter"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/proxyadapter"
@@ -184,6 +185,8 @@ func Start(ctx context.Context, o Options) (*Server, error) {
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: public,
 		RunProvider: o.RunProvider, RunModel: o.RunModel, Catalog: cat,
 		CaptureVerify: &captureverify.Client{},
+		LLMVerify:     &llmverify.Client{},
+		Meter:         m,
 	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
 

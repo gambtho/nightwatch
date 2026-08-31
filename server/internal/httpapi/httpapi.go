@@ -12,6 +12,8 @@ import (
 	"github.com/gambtho/tomte/server/internal/captureverify"
 	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/llmverify"
+	"github.com/gambtho/tomte/server/internal/meter"
 	"github.com/gambtho/tomte/server/internal/store"
 	"github.com/gambtho/tomte/server/internal/vault"
 )
@@ -40,6 +42,12 @@ type Deps struct {
 	// is stored — the paste path is session-authed only, never the run
 	// path.
 	CaptureVerify *captureverify.Client
+	// LLMVerify makes the first-run disclosed, metered one-call check of
+	// a candidate LLM endpoint + key, before anything is saved.
+	LLMVerify *llmverify.Client
+	// Meter guards the verify call with the same monthly-budget check
+	// every other spend path gets (nil skips the check — tests only).
+	Meter *meter.Meter
 }
 
 // Platform run-model defaults: the cheapest priced Anthropic pair. Used
@@ -90,6 +98,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/catalog", auth(d.getCatalog))
 	mux.Handle("GET /v1/settings/endpoint", auth(d.getEndpoint))
 	mux.Handle("PUT /v1/settings/endpoint", mut(auth(d.putEndpoint)))
+	mux.Handle("POST /v1/settings/endpoint/verify", mut(auth(d.verifyEndpoint)))
 	mux.Handle("GET /v1/settings/prices", auth(d.listPrices))
 	mux.Handle("PUT /v1/settings/prices", mut(auth(d.putPrice)))
 	mux.Handle("GET /v1/settings/budget", auth(d.getBudget))
