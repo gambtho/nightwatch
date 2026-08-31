@@ -15,7 +15,7 @@ import (
 func setupApproved(t *testing.T, s *store.Store) (store.Tenant, store.Workflow) {
 	t.Helper()
 	ctx := context.Background()
-	tn, err := s.CreateTenant(ctx, "acme")
+	tn, err := s.CreateTenant(ctx, "acme", testKEK)
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestRunCrossTenantIsolation(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
 	tn, wf := setupApproved(t, s)
-	other, err := s.CreateTenant(ctx, "other")
+	other, err := s.CreateTenant(ctx, "other", testKEK)
 	require.NoError(t, err)
 
 	runID := uuid.New()

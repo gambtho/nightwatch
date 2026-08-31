@@ -13,7 +13,7 @@ import (
 func TestUpsertUserIdempotent(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
-	tn, err := s.CreateTenant(ctx, "acme")
+	tn, err := s.CreateTenant(ctx, "acme", testKEK)
 	require.NoError(t, err)
 
 	u1, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")

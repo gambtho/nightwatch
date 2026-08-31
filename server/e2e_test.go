@@ -62,7 +62,7 @@ func TestEndToEndRun(t *testing.T) {
 	t.Cleanup(ts.Close)
 	baseURL = ts.URL
 
-	tn, err := s.CreateTenant(ctx, "acme")
+	tn, err := s.CreateTenant(ctx, "acme", []byte("test-wrapped-kek")) // opaque to the store; real KEKs arrive with vault tests
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
