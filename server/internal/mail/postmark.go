@@ -59,5 +59,17 @@ func (p *Postmark) Send(ctx context.Context, to, subject, body string) error {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("postmark: status %d: %s", resp.StatusCode, msg)
 	}
+	// Postmark can answer 200 with a nonzero ErrorCode (its batch
+	// endpoint always does); treat that as a failed delivery too.
+	var out struct {
+		ErrorCode int
+		Message   string
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&out); err != nil {
+		return fmt.Errorf("postmark: decode response: %w", err)
+	}
+	if out.ErrorCode != 0 {
+		return fmt.Errorf("postmark: error %d: %s", out.ErrorCode, out.Message)
+	}
 	return nil
 }

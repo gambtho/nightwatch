@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,7 +18,9 @@ import (
 
 // SessionCookieName carries the __Host- prefix: browsers accept it only
 // with Secure, Path=/, and no Domain attribute, which pins the cookie to
-// exactly our origin. Localhost rides the secure-context carve-out.
+// exactly our origin. Local dev over plain-HTTP localhost works in
+// browsers that extend Secure-cookie lenience to localhost (Chromium,
+// Firefox); Safari does not.
 const SessionCookieName = "__Host-ns_session"
 
 // sessionCookieMaxAge mirrors the session row's 30-day absolute cap; the
@@ -31,9 +35,10 @@ type SessionClaims struct {
 
 type claimsKey struct{}
 
-// NewSessionToken mints an opaque session token: the cookie value is
-// base64url of 256 random bits, and only its SHA-256 reaches the database.
-func NewSessionToken() (value string, tokenHash []byte, err error) {
+// NewOpaqueToken mints an opaque credential (used for both sessions and
+// magic-link tokens): the presented value is base64url of 256 random
+// bits, and only its SHA-256 reaches the database.
+func NewOpaqueToken() (value string, tokenHash []byte, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", nil, err
@@ -69,7 +74,8 @@ func ClearSessionCookie() *http.Cookie {
 // RequireSession authenticates the opaque cookie against the session
 // table. One indexed query joins session to app_user and returns the
 // user's CURRENT role — a revoked session, an expired window, or a
-// vanished user row are all the same plain 401.
+// vanished user row are all the same plain 401. An infrastructure error
+// is NOT a 401: a database outage must not read as "session revoked".
 func RequireSession(s *store.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(SessionCookieName)
@@ -78,8 +84,13 @@ func RequireSession(s *store.Store, next http.Handler) http.Handler {
 			return
 		}
 		userID, tenantID, role, err := s.SessionUser(r.Context(), HashToken(cookie.Value))
-		if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			slog.Error("session: lookup", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		claims := SessionClaims{UserID: userID, TenantID: tenantID, Role: role}

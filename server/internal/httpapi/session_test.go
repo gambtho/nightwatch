@@ -13,6 +13,28 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/testpg"
 )
 
+func TestRequireSessionInfraErrorIsNot401(t *testing.T) {
+	pool := testpg.New(t)
+	s := store.New(pool)
+	value, tokenHash, err := httpapi.NewOpaqueToken()
+	require.NoError(t, err)
+	ctx := context.Background()
+	tn, err := s.CreateTenant(ctx, "acme", []byte("kek"))
+	require.NoError(t, err)
+	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
+	require.NoError(t, err)
+	require.NoError(t, s.CreateSession(ctx, tokenHash, tn.ID, user.ID))
+
+	h := httpapi.RequireSession(s, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	pool.Close() // a database outage must not read as "session revoked"
+
+	req := httptest.NewRequest("GET", "/v1/workflows", nil)
+	req.AddCookie(&http.Cookie{Name: httpapi.SessionCookieName, Value: value})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestSessionCookieContract(t *testing.T) {
 	c := httpapi.SessionCookie("tok")
 	require.Equal(t, "__Host-ns_session", c.Name)
@@ -39,9 +61,9 @@ func TestRequireSessionAgainstStore(t *testing.T) {
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 
-	value, tokenHash, err := httpapi.NewSessionToken()
+	value, tokenHash, err := httpapi.NewOpaqueToken()
 	require.NoError(t, err)
-	_, err = s.CreateSession(ctx, tokenHash, tn.ID, user.ID)
+	err = s.CreateSession(ctx, tokenHash, tn.ID, user.ID)
 	require.NoError(t, err)
 
 	var seen httpapi.SessionClaims

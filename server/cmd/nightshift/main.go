@@ -14,11 +14,14 @@
 //	                        magic-link URLs, the Origin check, and redirect
 //	                        joining — Host/proxy headers are never used.
 //	NIGHTSHIFT_POSTMARK_TOKEN, NIGHTSHIFT_MAIL_FROM
-//	                        Postmark server token and From address; when
-//	                        either is unset, magic-link email is written to
-//	                        the log instead (dev)
+//	                        Postmark server token and From address, set
+//	                        together. Unset is allowed only for a localhost
+//	                        base URL (magic links then go to the log);
+//	                        setting exactly one refuses startup.
 //	NIGHTSHIFT_RUNNER_KEY   base64, 32 bytes (required for serve)
-//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for serve/dev-session)
+//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for serve;
+//	                        dev-session needs it only when minting a new
+//	                        tenant)
 //	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
 //	NIGHTSHIFT_STATE_DIR    actor state root, default $TMPDIR/nightshift-actors
 //	NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY, NIGHTSHIFT_PLATFORM_OPENAI_KEY,
@@ -149,11 +152,13 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var mailer mail.Sender = mail.LogSender{}
-	if tok, from := os.Getenv("NIGHTSHIFT_POSTMARK_TOKEN"), os.Getenv("NIGHTSHIFT_MAIL_FROM"); tok != "" && from != "" {
-		mailer = mail.NewPostmark(tok, from)
-	} else {
-		slog.Warn("mail: NIGHTSHIFT_POSTMARK_TOKEN/NIGHTSHIFT_MAIL_FROM unset; magic links go to the log")
+	mailer, err := mail.Select(os.Getenv("NIGHTSHIFT_POSTMARK_TOKEN"), os.Getenv("NIGHTSHIFT_MAIL_FROM"),
+		httpapi.IsLocalhost(publicBase))
+	if err != nil {
+		return err
+	}
+	if _, isLog := mailer.(mail.LogSender); isLog {
+		slog.Warn("mail: no Postmark config; magic links go to the log (localhost dev mode)")
 	}
 	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
 	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
@@ -318,11 +323,11 @@ func devSession(ctx context.Context, args []string) error {
 		return err
 	}
 
-	value, tokenHash, err := httpapi.NewSessionToken()
+	value, tokenHash, err := httpapi.NewOpaqueToken()
 	if err != nil {
 		return err
 	}
-	if _, err := s.CreateSession(ctx, tokenHash, tn.ID, user.ID); err != nil {
+	if err := s.CreateSession(ctx, tokenHash, tn.ID, user.ID); err != nil {
 		return err
 	}
 	cookie := httpapi.SessionCookie(value)

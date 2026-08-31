@@ -1,18 +1,37 @@
-// Package mail is the transactional-email seam. The provider choice
-// (Postmark/SES/Resend-class, shared with Plan 4 alerting) is an open
-// question in the identity spec; until it is answered, LogSender is the
-// development delivery path and Sender is the only thing the rest of the
-// server knows about.
+// Package mail is the transactional-email seam. The identity spec left
+// the provider open; the grading + alerting spec (PR #13) settled it on
+// Postmark for the whole platform. LogSender remains the development
+// delivery path, and Sender is the only thing the rest of the server
+// knows about.
 package mail
 
 import (
 	"context"
+	"errors"
 	"log/slog"
-	"sync"
 )
 
 type Sender interface {
 	Send(ctx context.Context, to, subject, body string) error
+}
+
+// Select picks the delivery path from configuration. Both Postmark values
+// set → Postmark; exactly one set → an error (a deployment mistake, not a
+// dev setup); neither set → LogSender, but only when the caller says a
+// dev fallback is acceptable (a localhost deployment) — a production
+// server with no mail configured must fail at startup, not silently log
+// every login link.
+func Select(postmarkToken, from string, devFallbackOK bool) (Sender, error) {
+	switch {
+	case postmarkToken != "" && from != "":
+		return NewPostmark(postmarkToken, from), nil
+	case postmarkToken != "" || from != "":
+		return nil, errors.New("mail: NIGHTSHIFT_POSTMARK_TOKEN and NIGHTSHIFT_MAIL_FROM must be set together")
+	case devFallbackOK:
+		return LogSender{}, nil
+	default:
+		return nil, errors.New("mail: no provider configured; set NIGHTSHIFT_POSTMARK_TOKEN and NIGHTSHIFT_MAIL_FROM (log delivery is only allowed for a localhost base URL)")
+	}
 }
 
 // LogSender writes the message to the log. In development the logged
@@ -22,29 +41,4 @@ type LogSender struct{}
 func (LogSender) Send(_ context.Context, to, subject, body string) error {
 	slog.Info("mail: send", "to", to, "subject", subject, "body", body)
 	return nil
-}
-
-// Recorder is a test Sender that captures messages.
-type Recorder struct {
-	mu   sync.Mutex
-	msgs []Message
-}
-
-type Message struct {
-	To      string
-	Subject string
-	Body    string
-}
-
-func (r *Recorder) Send(_ context.Context, to, subject, body string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.msgs = append(r.msgs, Message{To: to, Subject: subject, Body: body})
-	return nil
-}
-
-func (r *Recorder) Messages() []Message {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]Message(nil), r.msgs...)
 }

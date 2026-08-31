@@ -33,7 +33,6 @@ func tenantNameFromEmail(email string) string {
 type ConsumeResult struct {
 	User       User
 	Tenant     Tenant
-	Session    Session
 	NextPath   *string
 	FirstLogin bool
 }
@@ -91,7 +90,7 @@ func (s *Store) ConsumeLoginToken(ctx context.Context, tokenHash, sessionTokenHa
 		}
 	}
 
-	if res.Session, err = createSession(ctx, tx, sessionTokenHash, res.Tenant.ID, res.User.ID); err != nil {
+	if err = createSession(ctx, tx, sessionTokenHash, res.Tenant.ID, res.User.ID); err != nil {
 		return res, err
 	}
 	return res, tx.Commit(ctx)

@@ -29,10 +29,11 @@ type Deps struct {
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	// mut is the CSRF Origin policy, applied to every mutating /v1 route
-	// (defence in depth over SameSite=Lax): Origin absent → allowed (the
-	// session cookie is still required; non-browser clients and
-	// same-origin navigations), exactly the configured public origin →
-	// allowed, anything else → 403 before the handler runs.
+	// (defence in depth over SameSite=Lax): Origin absent → allowed
+	// (non-browser clients and same-origin navigations; routes that also
+	// require a session still get RequireSession), exactly the configured
+	// public origin → allowed, anything else → 403 before the handler
+	// runs.
 	mut := func(h http.Handler) http.Handler {
 		return checkOrigin(d.PublicBaseURL, h)
 	}

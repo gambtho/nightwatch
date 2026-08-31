@@ -29,3 +29,8 @@ func ParsePublicBaseURL(raw string) (*url.URL, error) {
 func isLocalhost(hostname string) bool {
 	return hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1"
 }
+
+// IsLocalhost reports whether the public base URL points at local
+// development — the condition under which log-based mail delivery and
+// plain HTTP are acceptable.
+func IsLocalhost(u *url.URL) bool { return isLocalhost(u.Hostname()) }

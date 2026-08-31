@@ -61,7 +61,12 @@ func (a *authHandlers) magicLink(w http.ResponseWriter, r *http.Request) {
 		Email string `json:"email"`
 		Next  string `json:"next"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&in)
+	// Anti-enumeration covers account existence, not syntax: a malformed
+	// request gets a diagnosable 400, which leaks nothing about accounts.
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request body"})
+		return
+	}
 
 	a.tryToSendLink(r, store.NormalizeEmail(in.Email), in.Next)
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
@@ -88,7 +93,7 @@ func (a *authHandlers) tryToSendLink(r *http.Request, email, next string) {
 		return
 	}
 
-	value, tokenHash, err := NewSessionToken()
+	value, tokenHash, err := NewOpaqueToken()
 	if err != nil {
 		slog.Error("auth: mint login token", "err", err)
 		return
@@ -110,9 +115,19 @@ func (a *authHandlers) tryToSendLink(r *http.Request, email, next string) {
 }
 
 // isSafeRelativePath admits only a same-origin absolute path: one leading
-// slash (not scheme-relative //), no backslashes.
+// slash (not scheme-relative //), no backslashes, no control characters —
+// the value is later written into a Location header, so CR/LF especially
+// must never be stored.
 func isSafeRelativePath(p string) bool {
-	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.Contains(p, "\\")
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.Contains(p, "\\") {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // verifyPage implements GET /auth/verify: the interstitial. Read-only.
@@ -148,7 +163,7 @@ func (a *authHandlers) verify(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	value, sessionHash, err := NewSessionToken()
+	value, sessionHash, err := NewOpaqueToken()
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -209,7 +224,9 @@ func (a *authHandlers) me(w http.ResponseWriter, r *http.Request) {
 }
 
 // ipLimiter is a fixed-window in-memory counter. Per-process and reset on
-// restart — acceptable for an anti-abuse budget at v1.
+// restart — acceptable for an anti-abuse budget at v1. Tracking is capped
+// at maxTrackedIPs live windows; beyond that, unknown IPs are refused
+// (fail closed: the flood that fills the map is the abuse being limited).
 type ipLimiter struct {
 	mu     sync.Mutex
 	max    int
@@ -226,22 +243,27 @@ func newIPLimiter(max int, window time.Duration) *ipLimiter {
 	return &ipLimiter{max: max, window: window, hits: make(map[string]*ipWindow)}
 }
 
+const maxTrackedIPs = 4096
+
 func (l *ipLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	if len(l.hits) > 4096 {
+	e := l.hits[ip]
+	if e != nil && now.Sub(e.start) <= l.window {
+		e.count++
+		return e.count <= l.max
+	}
+	if len(l.hits) >= maxTrackedIPs {
 		for k, v := range l.hits {
 			if now.Sub(v.start) > l.window {
 				delete(l.hits, k)
 			}
 		}
+		if len(l.hits) >= maxTrackedIPs {
+			return false
+		}
 	}
-	e := l.hits[ip]
-	if e == nil || now.Sub(e.start) > l.window {
-		l.hits[ip] = &ipWindow{count: 1, start: now}
-		return true
-	}
-	e.count++
-	return e.count <= l.max
+	l.hits[ip] = &ipWindow{count: 1, start: now}
+	return true
 }

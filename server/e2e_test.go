@@ -27,7 +27,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/llm/llmtest"
-	"github.com/gambtho/nightwatch/server/internal/mail"
+	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
 	"github.com/gambtho/nightwatch/server/internal/proxy"
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
 	"github.com/gambtho/nightwatch/server/internal/store"
@@ -121,7 +121,7 @@ func TestEndToEndMagicLinkLogin(t *testing.T) {
 
 	master, err := vault.NewMaster(bytes.Repeat([]byte{3}, 32))
 	require.NoError(t, err)
-	mailer := &mail.Recorder{}
+	mailer := &mailtest.Recorder{}
 
 	mux := http.NewServeMux()
 	ts := httptest.NewTLSServer(mux)
@@ -205,9 +205,9 @@ func TestEndToEndMagicLinkLogin(t *testing.T) {
 // authenticates as it.
 func mintSession(t *testing.T, s *store.Store, tenantID, userID uuid.UUID) *http.Cookie {
 	t.Helper()
-	value, tokenHash, err := httpapi.NewSessionToken()
+	value, tokenHash, err := httpapi.NewOpaqueToken()
 	require.NoError(t, err)
-	_, err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
+	err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
 	require.NoError(t, err)
 	return httpapi.SessionCookie(value)
 }

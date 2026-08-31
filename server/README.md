@@ -36,8 +36,10 @@ Login is an email magic link (`POST /v1/auth/magic-link` →
 first verified login mints the tenant. Sessions are opaque DB-backed
 cookies (`__Host-ns_session`) with a 7-day idle window inside a 30-day
 cap. Magic-link email goes through Postmark when
-`NIGHTSHIFT_POSTMARK_TOKEN` and `NIGHTSHIFT_MAIL_FROM` are set; otherwise
-the link is written to the server log (the dev flow).
+`NIGHTSHIFT_POSTMARK_TOKEN` and `NIGHTSHIFT_MAIL_FROM` are both set
+(setting exactly one refuses startup); with neither set, the link is
+written to the server log — allowed only for a localhost base URL, so a
+production deployment cannot silently run without mail.
 
 `nightshift dev-session` mints a tenant, owner user, and session row for
 local use, printing the cookie. It reuses the tenant an existing email
