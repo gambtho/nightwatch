@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -60,7 +61,7 @@ func EnsureLocalOwner(ctx context.Context, s *store.Store, v *vault.Master) (ten
 // MintLocalSession inserts a session row for the local owner and returns
 // the cookie carrying its opaque token — what the shell injects into the
 // webview at launch and on every window (re)open.
-func MintLocalSession(ctx context.Context, s *store.Store, tenantID, userID uuid.UUID) (*http.Cookie, error) {
+func MintLocalSession(ctx context.Context, s *store.Store, public *url.URL, tenantID, userID uuid.UUID) (*http.Cookie, error) {
 	value, tokenHash, err := NewOpaqueToken()
 	if err != nil {
 		return nil, err
@@ -68,7 +69,7 @@ func MintLocalSession(ctx context.Context, s *store.Store, tenantID, userID uuid
 	if err := s.CreateSession(ctx, tokenHash, tenantID, userID); err != nil {
 		return nil, err
 	}
-	return SessionCookie(value), nil
+	return SessionCookieFor(public, value), nil
 }
 
 // NewHandoffToken mints the single-use, short-TTL token behind "open in
@@ -112,7 +113,7 @@ func (d Deps) localHandoff(w http.ResponseWriter, r *http.Request) {
 	if next := r.URL.Query().Get("next"); isSafeRelativePath(next) {
 		target = next
 	}
-	http.SetCookie(w, SessionCookie(value))
+	http.SetCookie(w, SessionCookieFor(d.PublicBaseURL, value))
 	http.Redirect(w, r, d.PublicBaseURL.String()+target, http.StatusSeeOther)
 }
 

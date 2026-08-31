@@ -28,13 +28,13 @@ func isSafeRelativePath(p string) bool {
 // logout implements POST /v1/auth/logout: delete the row, clear the
 // cookie. Idempotent — logging out while logged out is still a 204.
 func (a *authHandlers) logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(SessionCookieName); err == nil {
-		if err := a.d.Store.DeleteSession(r.Context(), HashToken(cookie.Value)); err != nil {
+	if value, ok := sessionCookieValue(r); ok {
+		if err := a.d.Store.DeleteSession(r.Context(), HashToken(value)); err != nil {
 			writeErr(w, err)
 			return
 		}
 	}
-	http.SetCookie(w, ClearSessionCookie())
+	http.SetCookie(w, ClearSessionCookieFor(a.d.PublicBaseURL))
 	w.WriteHeader(http.StatusNoContent)
 }
 

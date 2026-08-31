@@ -8,11 +8,10 @@
 //
 //	DATABASE_URL            Postgres DSN (required)
 //	TOMTE_PUBLIC_BASE_URL
-//	                        canonical customer-facing origin, scheme + host
-//	                        (required for serve). HTTPS required; http is
-//	                        allowed for localhost only. Single source for
-//	                        the Origin check and redirect joining —
-//	                        Host/proxy headers are never used.
+//	                        optional origin override (dev topologies like
+//	                        Vite-as-origin); by default serve derives the
+//	                        loopback origin from the bound listener.
+//	                        HTTPS required; http for loopback hosts only.
 //	TOMTE_RUNNER_KEY   base64, 32 bytes (required for serve)
 //	TOMTE_VAULT_KEY    base64, 32 bytes (required for serve;
 //	                        dev-session needs it only when minting a new
@@ -47,28 +46,17 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
-	"github.com/gambtho/tomte/server/internal/catalog"
-	"github.com/gambtho/tomte/server/internal/compute"
-	"github.com/gambtho/tomte/server/internal/db"
-	"github.com/gambtho/tomte/server/internal/engine"
-	"github.com/gambtho/tomte/server/internal/harness"
-	"github.com/gambtho/tomte/server/internal/httpapi"
-	"github.com/gambtho/tomte/server/internal/internalapi"
-	"github.com/gambtho/tomte/server/internal/llm"
-	"github.com/gambtho/tomte/server/internal/meter"
-	"github.com/gambtho/tomte/server/internal/proxy"
-	"github.com/gambtho/tomte/server/internal/proxyadapter"
-	"github.com/gambtho/tomte/server/internal/redact"
-	"github.com/gambtho/tomte/server/internal/store"
-	"github.com/gambtho/tomte/server/internal/token"
-	"github.com/gambtho/tomte/server/internal/vault"
 	"github.com/google/uuid"
+
+	server "github.com/gambtho/tomte/server"
+	"github.com/gambtho/tomte/server/internal/db"
+	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 func main() {
@@ -139,130 +127,33 @@ func intFromEnv(name string, fallback int) int {
 }
 
 func serve(ctx context.Context) error {
-	if err := db.Migrate(ctx, mustEnv("DATABASE_URL")); err != nil {
-		return err
+	opts := server.Options{
+		DatabaseURL:            mustEnv("DATABASE_URL"),
+		ListenAddr:             os.Getenv("TOMTE_LISTEN_ADDR"),
+		PublicBaseURL:          os.Getenv("TOMTE_PUBLIC_BASE_URL"), // optional: default is the bound loopback origin
+		RunnerKey:              keyFromEnv("TOMTE_RUNNER_KEY"),
+		VaultKey:               keyFromEnv("TOMTE_VAULT_KEY"),
+		StateDir:               os.Getenv("TOMTE_STATE_DIR"),
+		RunProvider:            os.Getenv("TOMTE_RUN_PROVIDER"),
+		RunModel:               os.Getenv("TOMTE_RUN_MODEL"),
+		RunTokenTTL:            durationFromEnv("TOMTE_RUN_TOKEN_TTL", time.Hour),
+		RunDeadline:            durationFromEnv("TOMTE_RUN_DEADLINE", 2*time.Hour),
+		DefaultMonthlyCapCents: intFromEnv("TOMTE_DEFAULT_MONTHLY_CAP_CENTS", 0),
+		// Proxy-specific names, deliberately NOT the SDKs' well-known key
+		// variables: the pinned SDK constructors auto-load those from the
+		// environment, which on Local compute (shared process) would put
+		// real keys back into harness memory.
+		PlatformKeys: map[string]string{
+			"anthropic":  os.Getenv("TOMTE_PLATFORM_ANTHROPIC_KEY"),
+			"openai":     os.Getenv("TOMTE_PLATFORM_OPENAI_KEY"),
+			"openrouter": os.Getenv("TOMTE_PLATFORM_OPENROUTER_KEY"),
+		},
 	}
-	pool, err := db.NewPool(ctx, mustEnv("DATABASE_URL"))
+	sv, err := server.Start(ctx, opts)
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
-
-	s := store.New(pool)
-	publicBase, err := httpapi.ParsePublicBaseURL(mustEnv("TOMTE_PUBLIC_BASE_URL"))
-	if err != nil {
-		return err
-	}
-	// The catalog refuses to load on invalid definitions or any drift
-	// from its committed baseline (reach-widening or otherwise) — serve
-	// does not start with an unenforceable or unreviewed catalog.
-	cat, err := catalog.Load()
-	if err != nil {
-		return err
-	}
-	signer := token.New(keyFromEnv("TOMTE_RUNNER_KEY"))
-	master, err := vault.NewMaster(keyFromEnv("TOMTE_VAULT_KEY"))
-	if err != nil {
-		return err
-	}
-	// Proxy-specific names, deliberately NOT the SDKs' well-known key
-	// variables: the pinned SDK constructors auto-load those from the
-	// environment into client options, which on Local compute (shared
-	// process) would put real keys back into harness memory. These names
-	// are invisible to the SDKs.
-	platform := map[string]string{
-		"anthropic":  os.Getenv("TOMTE_PLATFORM_ANTHROPIC_KEY"),
-		"openai":     os.Getenv("TOMTE_PLATFORM_OPENAI_KEY"),
-		"openrouter": os.Getenv("TOMTE_PLATFORM_OPENROUTER_KEY"),
-	}
-
-	secretVals := make([]string, 0, len(platform))
-	for _, v := range platform {
-		secretVals = append(secretVals, v)
-	}
-	// The inner handler must not be slog.Default().Handler(): that handler
-	// writes through the log package, and slog.SetDefault rewires log's
-	// output back through the new slog default — the first log call would
-	// re-enter this handler and deadlock on log's mutex.
-	slog.SetDefault(slog.New(redact.Handler{
-		Inner: slog.NewTextHandler(os.Stderr, nil),
-		R:     redact.New(secretVals),
-	}))
-
-	addr := os.Getenv("TOMTE_LISTEN_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8080"
-	}
-	stateDir := os.Getenv("TOMTE_STATE_DIR")
-	if stateDir == "" {
-		stateDir = filepath.Join(os.TempDir(), "tomte-actors")
-	}
-
-	baseURL := "http://" + addr
-	factory := llm.NewProxyFactory(baseURL)
-	local := compute.NewLocal(stateDir, func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
-		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, tools, err := client.Context(ctx)
-		if err != nil {
-			slog.Error("harness: fetch context", "run", req.RunID, "err", err)
-			return
-		}
-		if _, err := harness.Run(ctx,
-			harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken},
-			harness.Deps{ProviderFactory: factory, Sink: client, Tools: client}); err != nil {
-			slog.Error("harness: run failed", "run", req.RunID, "err", err)
-		}
-	})
-
-	tokenTTL := durationFromEnv("TOMTE_RUN_TOKEN_TTL", time.Hour)
-	runDeadline := durationFromEnv("TOMTE_RUN_DEADLINE", 2*time.Hour)
-	if err := engine.ValidateRunLifetimes(tokenTTL, runDeadline); err != nil {
-		return err
-	}
-	defaultCap := intFromEnv("TOMTE_DEFAULT_MONTHLY_CAP_CENTS", 0)
-
-	eng := &engine.Engine{Store: s, Signer: signer, Compute: local, TokenTTL: tokenTTL}
-	m := &meter.Meter{Store: s, DefaultCap: defaultCap}
-
-	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{
-		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase,
-		RunProvider: os.Getenv("TOMTE_RUN_PROVIDER"),
-		RunModel:    os.Getenv("TOMTE_RUN_MODEL"),
-		Catalog:     cat,
-	})
-	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
-
-	adapters := proxyadapter.New(s, signer, master, platform)
-	cfg := proxy.DefaultConfig()
-	cfg.InternalBase = baseURL
-	proxy.RegisterRoutes(mux, proxy.Deps{
-		Auth: adapters.Auth, Permits: adapters.Permits,
-		Credentials: adapters.Credentials, Events: adapters.Events,
-		Endpoints: adapters.Endpoints,
-		Hook:      m, Config: cfg, Catalog: cat,
-	})
-
-	loopCtx, cancelLoops := context.WithCancel(context.Background())
-	defer cancelLoops()
-	sched := &engine.Scheduler{Engine: eng, Store: s, Caps: m}
-	reaper := &engine.Reaper{Store: s, Deadline: runDeadline}
-	go sched.Run(loopCtx)
-	go reaper.Run(loopCtx)
-
-	slog.Info("tomte: serving", "addr", addr)
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       5 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-		// WriteTimeout deliberately zero: streamed LLM responses run for
-		// minutes and a server-wide write deadline would sever them.
-		// ReadTimeout bounds slow-body clients (LLM prompts are modest);
-		// IdleTimeout reclaims idle keep-alive connections.
-	}
-	return srv.ListenAndServe()
+	return <-sv.Err()
 }
 
 func devSession(ctx context.Context, args []string) error {
@@ -329,7 +220,7 @@ func devSession(ctx context.Context, args []string) error {
 		return err
 	}
 
-	cookie, err := httpapi.MintLocalSession(ctx, s, tn.ID, user.ID)
+	cookie, err := httpapi.MintLocalSession(ctx, s, nil, tn.ID, user.ID)
 	if err != nil {
 		return err
 	}

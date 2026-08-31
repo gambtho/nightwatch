@@ -53,7 +53,7 @@ func TestMintLocalSessionAuthenticates(t *testing.T) {
 	ctx := context.Background()
 	tn, u, err := httpapi.EnsureLocalOwner(ctx, e.store, e.vault)
 	require.NoError(t, err)
-	cookie, err := httpapi.MintLocalSession(ctx, e.store, tn, u)
+	cookie, err := httpapi.MintLocalSession(ctx, e.store, e.baseURL, tn, u)
 	require.NoError(t, err)
 
 	req, err := http.NewRequest("GET", e.ts.URL+"/v1/me", nil)
