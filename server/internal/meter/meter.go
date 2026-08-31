@@ -47,18 +47,18 @@ func (m *Meter) CapCents(ctx context.Context, tenantID uuid.UUID) (int, error) {
 }
 
 func (m *Meter) OverCap(ctx context.Context, tenantID uuid.UUID) (bool, error) {
-	cap, err := m.CapCents(ctx, tenantID)
+	capCents, err := m.CapCents(ctx, tenantID)
 	if err != nil {
 		return false, err
 	}
-	if cap <= 0 {
+	if capCents <= 0 {
 		return false, nil
 	}
 	spent, err := m.Store.MonthSpendCents(ctx, tenantID, MonthStartUTC(m.now()))
 	if err != nil {
 		return false, err
 	}
-	return spent >= cap, nil
+	return spent >= capCents, nil
 }
 
 // Before implements proxy.Hook.
