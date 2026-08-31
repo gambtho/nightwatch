@@ -52,13 +52,6 @@ export function getMe(): Promise<Me> {
   return request<Me>("/v1/me");
 }
 
-export function requestMagicLink(email: string, next?: string): Promise<void> {
-  return request("/v1/auth/magic-link", {
-    method: "POST",
-    body: JSON.stringify(next ? { email, next } : { email }),
-  });
-}
-
 export function logout(): Promise<void> {
   return request("/v1/auth/logout", { method: "POST" });
 }

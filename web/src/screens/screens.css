@@ -3,37 +3,6 @@
   margin: 0 0 12px;
 }
 
-/* Login */
-
-.login {
-  max-width: 420px;
-  margin: 8vh auto 0;
-}
-
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 20px;
-}
-
-.login-form input {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--text);
-  padding: 10px 12px;
-  font: inherit;
-}
-
-.login-form input::placeholder {
-  color: var(--dim);
-}
-
-.login-form .btn {
-  margin-top: 6px;
-}
-
 /* Home */
 
 .wf-list {
