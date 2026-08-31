@@ -57,8 +57,8 @@ this spec adds is new code beside it): the hardcoded
 `TemplateRef{Name: "harness-v1"}` becomes configuration
 (`NIGHTSHIFT_HARNESS_TEMPLATE`), because the template names a deployed
 harness release, not a constant — see the template mapping below — and
-`dispatch` clears the workflow's `actor_suspended_at` stamp (one new
-column; see the suspender loop).
+`dispatch` stamps the workflow's `actor_invoked_at` (two new timestamp
+columns; see the suspender loop).
 
 ## Harness containerization
 
@@ -157,8 +157,12 @@ survives image changes is future work and out of scope here.
 
 ```
 EnsureActor: GetActor(wf-<id>) in t-<tenant>; if absent, ensure atespace
-             then CreateActor(template). Found-with-older-template is left
-             running (upgrades are the explicit op above). Idempotent.
+             then CreateActor(template). Idempotent under concurrency:
+             AlreadyExists from CreateAtespace or CreateActor is not an
+             error — re-read and return the existing resource (two
+             replicas racing get-then-create must both succeed). Found-
+             with-older-template is left running (upgrades are the
+             explicit op above).
 Invoke:      POST http://<router-svc>/invoke with Host: wf-<id>.t-<tenant>
              .actors.resources.substrate.ate.dev — the router resumes the
              actor (idempotent, singleflight upstream) and tunnels us to
@@ -193,24 +197,29 @@ time, and nothing upstream was verified to suspend idle actors for us; the
 control plane owns it. A **suspender loop** joins the scheduler and reaper in
 the engine's family of ticking loops:
 
-- **"Needs suspending" is DB state, not loop memory.** The workflow row
-  gains `actor_suspended_at timestamptz` (migration numbered whenever the
-  implementation plan reaches it): the engine's `dispatch` clears it on
-  every invoke, the suspender sets it after a successful `Suspend`. Each
-  tick (default 60 s) the query is: workflows with `actor_suspended_at IS
-NULL`, **no active run** (the admission index makes this a cheap check),
-  and latest run finalized more than an idle threshold ago (default 60 s) —
-  call `Compute.Suspend`, then stamp the column. Because the state lives in
-  the DB and both transitions are idempotent, the loop is safe across
-  control-plane restarts and replicas: a crash between suspend and stamp
-  costs one redundant Suspend call next tick, never a missed suspension or
-  a per-tick spam of the upstream API.
+- **"Needs suspending" is DB state, not loop memory — two timestamps,
+  compared, never cleared.** The workflow row gains `actor_invoked_at` and
+  `actor_suspended_at` (both `timestamptz`; migration numbered whenever the
+  implementation plan reaches it): the engine's `dispatch` sets
+  `actor_invoked_at = now()` on every invoke, the suspender sets
+  `actor_suspended_at = now()` after a successful `Suspend`. Each tick
+  (default 60 s) the eligibility query is: workflows with
+  `actor_suspended_at IS NULL OR actor_suspended_at < actor_invoked_at`
+  (the actor has been woken since it was last suspended), **no active run**
+  (the admission index makes this a cheap check), and latest run finalized
+  more than an idle threshold ago (default 60 s) — call `Compute.Suspend`,
+  then stamp. Because the state lives in the DB and both writes are
+  monotonic set-to-now (a clear-the-flag design was rejected: a dispatch
+  clearing the flag while a slow suspender stamps after it would leave the
+  actor awake until the next fire), every interleaving self-heals: a fire
+  that lands mid-suspend advances `actor_invoked_at` past the stamp the
+  suspender is about to write, so the workflow is simply eligible again
+  next tick. A crash between suspend and stamp costs one redundant Suspend
+  call; nothing is ever missed and nothing spams the upstream API per tick.
 - Suspending an already-suspended actor is a no-op upstream; racing a fresh
   fire is benign — the router's resume-on-request undoes a suspend that lands
-  just before an invoke, at the cost of one resume. The stamp/clear race in
-  our own DB resolves the same way: a fire that lands mid-tick clears the
-  column, and the worst case is one unnecessary Suspend immediately undone
-  by the invoke's resume.
+  just before an invoke, at the cost of one resume, and the timestamp
+  comparison above re-queues the workflow for suspension afterward.
 - On `Local` and `KubeJobs`, `Suspend` is a no-op, so the loop is inert
   off-Substrate.
 
@@ -244,6 +253,19 @@ recorded as an open item, not silently ignored.
 - **Dispatch failures are already handled**: `Invoke` errors flow into
   `engine.failDispatch` (run finalized `dispatch_failed`), and the reaper
   sweeps runs whose harness died mid-episode. Neither changes.
+- **After the 202, the reaper is the backstop — by design, not omission.**
+  Once the harness acks, the run is marked dispatched and no delivery
+  failure can surface to the engine; an episode lost after that point (a
+  transient context-fetch failure that exhausts the harness's brief local
+  retries, a worker crash that rolls the actor back to its last snapshot)
+  leaves the run active until the reaper finalizes it as orphaned at the
+  run deadline. This is deliberately the same contract Local compute ships
+  today: nothing in the control plane can distinguish a lost episode from a
+  slow one without per-run heartbeat state, and a control-plane retry of
+  accepted-but-unfinalized runs would duplicate LLM spend against
+  legitimately slow episodes. If reap-latency on lost episodes ever hurts,
+  the fix is run heartbeats (harness pings, reaper tightens its deadline
+  for silent runs) — recorded as future work, not smuggled in here.
 - **First fire after actor creation** cold-boots (seconds, not the 257 ms
   resume); the 202-ack-with-retry protocol absorbs it. Golden-memory resume
   is microvm-only; on the v1 gVisor pool a fresh actor cold-boots — accepted.
@@ -292,12 +314,18 @@ Mechanics:
 - `Invoke` creates a Job named **`run-<run-uuid>`** in the runner namespace:
   the harness image, `args: [once]`, RunID/RunToken in env, proxy base URL,
   labels `nightshift.io/tenant|workflow|run` for log correlation.
-  **Job-name idempotency:** a duplicate invoke hits `AlreadyExists`, which is
-  treated as success — the Kubernetes API enforces the RunID dedupe the
-  token lifecycle provides on Substrate. (Residual: a `Redispatch` after a
-  double `MarkRunDispatched` failure mints a token the existing Job never
-  received; the run strands until the reaper — the same documented residual
-  the engine already carries.)
+  **Job-name idempotency, by state, not blindly:** a duplicate invoke hits
+  `AlreadyExists`, and the existing Job's status decides — **active or
+  succeeded** is success (the Kubernetes API is enforcing the RunID dedupe
+  the token lifecycle provides on Substrate); **terminally failed** means
+  delete-then-recreate with the current token, so a `Redispatch` genuinely
+  re-attempts a run whose first pod died. Treating every `AlreadyExists` as
+  success would let a failed Job absorb the retry and strand the run until
+  the reaper. The delete-then-recreate path also shrinks the engine's
+  documented residual: a `Redispatch` after a double `MarkRunDispatched`
+  failure now delivers its fresh token whenever the first Job has already
+  failed — only a still-active Job holding the invalidated token still
+  strands until the reaper.
 - Job spec: `restartPolicy: Never`, `backoffLimit: 0` (a retried pod is
   duplicate LLM spend; at-least-onceness lives in the control plane, and the
   reaper finalizes orphans), `activeDeadlineSeconds` = run deadline,
@@ -469,22 +497,27 @@ nightshift-runners   Jobs-backend namespace (empty on Substrate deployments)
 
 - **Unit (`compute` package):** `Substrate` against a fake gRPC
   control-plane + httptest router — EnsureActor idempotency (present/absent
-  atespace and actor), invoke retry-until-202 with a flapping router,
-  suspend/destroy idempotency on NotFound. `KubeJobs` against the fake
-  clientset — Job shape, `AlreadyExists`-is-success, Destroy label
-  selection.
+  atespace and actor, **and two concurrent callers racing get-then-create:
+  both succeed on `AlreadyExists`**), invoke retry-until-202 with a
+  flapping router, suspend/destroy idempotency on NotFound. `KubeJobs`
+  against the fake clientset — Job shape; `AlreadyExists` against an
+  **active** and a **succeeded** Job is success; against a **failed** Job
+  it deletes and recreates with the current token; Destroy label selection.
 - **Harness server:** a duplicate `POST /invoke` of a finalized run queues,
   gets 401/403 on its context fetch, and produces no second episode (the
   token-lifecycle dedupe, tested against a fake internal API); a duplicate
   of a crashed-before-finalize run **re-executes**; serial execution under
   concurrent invokes; a forged-token invoke is discarded with no recorded
   state; a transient context-fetch failure leaves the run re-invokable;
-  `readyz`.
+  **process loss immediately after the 202** leaves the run active and
+  reap-eligible, never wedged in a state the reaper won't sweep; `readyz`.
 - **Suspender loop:** fake Compute records suspend calls — idle workflow
   suspended once and `actor_suspended_at` stamped, active-run workflow
-  skipped, already-stamped workflow skipped, dispatch clears the stamp, a
-  crash between suspend and stamp yields one redundant (harmless) suspend,
-  no-op backends inert.
+  skipped, stamped-and-not-reinvoked workflow skipped, **a dispatch that
+  lands between selection and stamping advances `actor_invoked_at` so the
+  workflow is re-eligible next tick (the stale-stamp race)**, a crash
+  between suspend and stamp yields one redundant (harmless) suspend, no-op
+  backends inert.
 - **e2e (kind, CI):** on each backend — fire a workflow through the real
   sandbox path with a fake LLM upstream behind the proxy; assert the run
   record; then the conformance suite above, plus (Substrate) resume-with-
