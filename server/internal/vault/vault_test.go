@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 func testMaster(t *testing.T) *vault.Master {

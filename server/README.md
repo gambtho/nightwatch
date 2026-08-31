@@ -1,6 +1,6 @@
-# Nightshift server
+# Tomte server
 
-The Nightshift control plane: a Go module exposing a session-authenticated
+The Tomte control plane: a Go module exposing a session-authenticated
 public API for workflows/versions/runs and a run-JWT-authenticated internal
 API that the run harness pushes events and results back over. See the
 [platform design spec](../docs/superpowers/specs/2026-08-30-nightshift-platform-design.md)
@@ -16,15 +16,15 @@ Requires Postgres 16 (e.g. via Docker) and a `DATABASE_URL`:
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
 
-go run ./cmd/nightshift migrate
+go run ./cmd/tomte migrate
 
-export NIGHTSHIFT_PUBLIC_BASE_URL=http://localhost:8080
-export NIGHTSHIFT_RUNNER_KEY=$(openssl rand -base64 32)
-export NIGHTSHIFT_VAULT_KEY=$(openssl rand -base64 32)
-go run ./cmd/nightshift serve
+export TOMTE_PUBLIC_BASE_URL=http://localhost:8080
+export TOMTE_RUNNER_KEY=$(openssl rand -base64 32)
+export TOMTE_VAULT_KEY=$(openssl rand -base64 32)
+go run ./cmd/tomte serve
 ```
 
-`NIGHTSHIFT_PUBLIC_BASE_URL` is the canonical customer-facing origin
+`TOMTE_PUBLIC_BASE_URL` is the canonical customer-facing origin
 (scheme + host, nothing else). It must be HTTPS — plain `http` is accepted
 for `localhost`/`127.0.0.1`/`::1` only — because it carries magic-link
 tokens, defines the trusted `Origin` for CSRF checks, and anchors
@@ -34,30 +34,30 @@ those.
 Login is an email magic link (`POST /v1/auth/magic-link` →
 `GET /auth/verify` interstitial → consuming `POST /v1/auth/verify`); the
 first verified login mints the tenant. Sessions are opaque DB-backed
-cookies (`__Host-ns_session`) with a 7-day idle window inside a 30-day
+cookies (`__Host-tomte_session`) with a 7-day idle window inside a 30-day
 cap. Magic-link email goes through Postmark when
-`NIGHTSHIFT_POSTMARK_TOKEN` and `NIGHTSHIFT_MAIL_FROM` are both set
+`TOMTE_POSTMARK_TOKEN` and `TOMTE_MAIL_FROM` are both set
 (setting exactly one refuses startup); with neither set, the link is
 written to the server log — allowed only for a localhost base URL, so a
 production deployment cannot silently run without mail.
 
-`nightshift dev-session` mints a tenant, owner user, and session row for
+`tomte dev-session` mints a tenant, owner user, and session row for
 local use, printing the cookie. It reuses the tenant an existing email
 already belongs to; only a genuinely new email mints a tenant. Other env
 vars — listen
 address, actor state directory, platform model credentials — are documented
-in `cmd/nightshift/main.go`'s package comment. The `*_API_KEY`-shaped vars
-are gone: `NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY`,
-`NIGHTSHIFT_PLATFORM_OPENAI_KEY`, and `NIGHTSHIFT_PLATFORM_OPENROUTER_KEY`
+in `cmd/tomte/main.go`'s package comment. The `*_API_KEY`-shaped vars
+are gone: `TOMTE_PLATFORM_ANTHROPIC_KEY`,
+`TOMTE_PLATFORM_OPENAI_KEY`, and `TOMTE_PLATFORM_OPENROUTER_KEY`
 are the operator's platform-default keys, read only by the egress proxy and
 injected at the boundary — no credential reaches the harness.
 
-Three more govern scheduling and metering: `NIGHTSHIFT_RUN_TOKEN_TTL`
-(default `1h`) and `NIGHTSHIFT_RUN_DEADLINE` (default `2h`) are Go
+Three more govern scheduling and metering: `TOMTE_RUN_TOKEN_TTL`
+(default `1h`) and `TOMTE_RUN_DEADLINE` (default `2h`) are Go
 durations; `serve` refuses to start unless the deadline strictly exceeds
 the token TTL, since a run whose token has already expired can never
 finalize itself before the reaper would be allowed to sweep it.
-`NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS` (default `0`, meaning unlimited)
+`TOMTE_DEFAULT_MONTHLY_CAP_CENTS` (default `0`, meaning unlimited)
 sets the tenant monthly spend cap in cents.
 
 ### Scheduler and reaper
@@ -70,7 +70,7 @@ occurrences — and admits at most one active run per workflow at a time,
 via a store-level admission index rather than an in-process queue. A tick
 that finds cap-exceeded or already-active workflows simply skips them.
 
-`internal/engine.Reaper` sweeps runs stuck past `NIGHTSHIFT_RUN_DEADLINE`
+`internal/engine.Reaper` sweeps runs stuck past `TOMTE_RUN_DEADLINE`
 and finalizes them as failed, recovering from harness crashes and lost
 dispatches. A run's deadline is measured from its latest dispatch
 episode (`dispatched_at`, falling back to `created_at` for runs that
@@ -94,7 +94,7 @@ reaper itself can see or prevent.
 
 `internal/meter.Meter` is wired as the egress proxy's `Hook`: every
 provider call is checked against the tenant's monthly spend cap
-(`NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS`, UTC calendar month) before it is
+(`TOMTE_DEFAULT_MONTHLY_CAP_CENTS`, UTC calendar month) before it is
 allowed to reach the upstream — the cap is enforced at the proxy hook,
 not before a run is admitted.
 
@@ -130,7 +130,7 @@ go test ./...
 ```
 server/
   go.mod, go.sum
-  cmd/nightshift/main.go        serve | migrate | dev-session
+  cmd/tomte/main.go        serve | migrate | dev-session
   internal/db/                  pool, goose migrate, migrations/*.sql
   internal/testpg/              shared Postgres testcontainer helper
   internal/store/               hand-written pgx queries; one file per aggregate

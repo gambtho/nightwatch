@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/mail"
-	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
+	"github.com/gambtho/tomte/server/internal/mail"
+	"github.com/gambtho/tomte/server/internal/mail/mailtest"
 )
 
 func TestRecorderCapturesSends(t *testing.T) {
@@ -34,12 +34,12 @@ func TestPostmarkSendsExpectedRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := mail.NewPostmark("server-token", "login@nightshift.test")
+	p := mail.NewPostmark("server-token", "login@tomte.test")
 	p.BaseURL = srv.URL
 	require.NoError(t, p.Send(context.Background(), "pat@acme.test", "Sign in", "https://x/auth/verify?token=abc"))
 	require.Equal(t, "server-token", gotToken)
 	require.Equal(t, "pat@acme.test", gotBody["To"])
-	require.Equal(t, "login@nightshift.test", gotBody["From"])
+	require.Equal(t, "login@tomte.test", gotBody["From"])
 	require.Equal(t, "Sign in", gotBody["Subject"])
 	require.Contains(t, gotBody["TextBody"], "token=abc")
 }
@@ -51,7 +51,7 @@ func TestPostmarkErrorSurfaces(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := mail.NewPostmark("server-token", "login@nightshift.test")
+	p := mail.NewPostmark("server-token", "login@tomte.test")
 	p.BaseURL = srv.URL
 	err := p.Send(context.Background(), "bad", "Sign in", "body")
 	require.Error(t, err)
@@ -65,7 +65,7 @@ func TestPostmarkRejects200WithErrorCode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := mail.NewPostmark("server-token", "login@nightshift.test")
+	p := mail.NewPostmark("server-token", "login@tomte.test")
 	p.BaseURL = srv.URL
 	require.Error(t, p.Send(context.Background(), "bad", "Sign in", "body"),
 		"a 200 carrying a nonzero ErrorCode is not a delivery")

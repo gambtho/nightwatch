@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/redact"
+	"github.com/gambtho/tomte/server/internal/redact"
 )
 
 func TestHandlerRedactsMessageAndAttrs(t *testing.T) {

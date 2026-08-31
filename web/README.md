@@ -1,4 +1,4 @@
-# Nightshift web
+# Tomte web
 
 The real frontend, served over the `/v1` API — realizing the four surfaces of
 [the UX design](../docs/superpowers/specs/2026-08-28-nightshift-design.md).
@@ -45,8 +45,8 @@ public origin and proxies `/v1` and `/auth` through:
 
 ```bash
 # terminal 1 — the API, with the Vite origin as its public base URL
-export NIGHTSHIFT_PUBLIC_BASE_URL=http://localhost:5173
-go run ./server/cmd/nightshift serve   # plus DATABASE_URL etc., see server/README.md
+export TOMTE_PUBLIC_BASE_URL=http://localhost:5173
+go run ./server/cmd/tomte serve   # plus DATABASE_URL etc., see server/README.md
 
 # terminal 2 — the app
 cd web
@@ -55,7 +55,7 @@ npm run dev
 ```
 
 With no Postmark configured, the magic link is printed to the server log —
-open it in the browser to sign in. `NIGHTSHIFT_SERVER_URL` overrides the
+open it in the browser to sign in. `TOMTE_SERVER_URL` overrides the
 proxy target (default `http://localhost:8080`).
 
 ## Scripts

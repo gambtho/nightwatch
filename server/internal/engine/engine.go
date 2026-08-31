@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/compute"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/compute"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/token"
 )
 
 type Engine struct {

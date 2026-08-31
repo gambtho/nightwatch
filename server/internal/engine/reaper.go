@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // Reaper finalizes runs stuck in a non-terminal state past the deadline —

@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/harness"
-	"github.com/gambtho/nightwatch/server/internal/llm"
-	"github.com/gambtho/nightwatch/server/internal/llm/llmtest"
+	"github.com/gambtho/tomte/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/llm/llmtest"
 )
 
 type memSink struct {

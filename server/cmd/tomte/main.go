@@ -1,51 +1,51 @@
-// Command nightshift runs the Nightshift control plane.
+// Command tomte runs the Tomte control plane.
 //
-//	nightshift migrate      apply database migrations and exit
-//	nightshift serve        migrate, then serve the public and internal APIs
-//	nightshift dev-session  mint a tenant, owner, and session cookie for local use
+//	tomte migrate      apply database migrations and exit
+//	tomte serve        migrate, then serve the public and internal APIs
+//	tomte dev-session  mint a tenant, owner, and session cookie for local use
 //
 // Configuration (env):
 //
 //	DATABASE_URL            Postgres DSN (required)
-//	NIGHTSHIFT_PUBLIC_BASE_URL
+//	TOMTE_PUBLIC_BASE_URL
 //	                        canonical customer-facing origin, scheme + host
 //	                        (required for serve). HTTPS required; http is
 //	                        allowed for localhost only. Single source for
 //	                        magic-link URLs, the Origin check, and redirect
 //	                        joining — Host/proxy headers are never used.
-//	NIGHTSHIFT_POSTMARK_TOKEN, NIGHTSHIFT_MAIL_FROM
+//	TOMTE_POSTMARK_TOKEN, TOMTE_MAIL_FROM
 //	                        Postmark server token and From address, set
 //	                        together. Unset is allowed only for a localhost
 //	                        base URL (magic links then go to the log);
 //	                        setting exactly one refuses startup.
-//	NIGHTSHIFT_RUNNER_KEY   base64, 32 bytes (required for serve)
-//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for serve;
+//	TOMTE_RUNNER_KEY   base64, 32 bytes (required for serve)
+//	TOMTE_VAULT_KEY    base64, 32 bytes (required for serve;
 //	                        dev-session needs it only when minting a new
 //	                        tenant)
-//	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
-//	NIGHTSHIFT_STATE_DIR    actor state root, default $TMPDIR/nightshift-actors
-//	NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_ID, NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_SECRET,
-//	NIGHTSHIFT_OAUTH_SLACK_CLIENT_ID, NIGHTSHIFT_OAUTH_SLACK_CLIENT_SECRET
+//	TOMTE_LISTEN_ADDR  default 127.0.0.1:8080
+//	TOMTE_STATE_DIR    actor state root, default $TMPDIR/tomte-actors
+//	TOMTE_OAUTH_GOOGLE_CLIENT_ID, TOMTE_OAUTH_GOOGLE_CLIENT_SECRET,
+//	TOMTE_OAUTH_SLACK_CLIENT_ID, TOMTE_OAUTH_SLACK_CLIENT_SECRET
 //	                        platform OAuth apps for curated connectors;
 //	                        a provider with no app configured fails the
 //	                        connect flow with a clear error, everything
 //	                        else runs
-//	NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY, NIGHTSHIFT_PLATFORM_OPENAI_KEY,
-//	NIGHTSHIFT_PLATFORM_OPENROUTER_KEY
+//	TOMTE_PLATFORM_ANTHROPIC_KEY, TOMTE_PLATFORM_OPENAI_KEY,
+//	TOMTE_PLATFORM_OPENROUTER_KEY
 //	                        platform model credentials, per provider — injected
 //	                        by the egress proxy, never visible to the harness
-//	NIGHTSHIFT_RUN_PROVIDER, NIGHTSHIFT_RUN_MODEL
+//	TOMTE_RUN_PROVIDER, TOMTE_RUN_MODEL
 //	                        platform-selected execution model compiled into
 //	                        every approved version (decision 9); defaults
 //	                        anthropic / claude-haiku-4-5. Must be a priced
 //	                        pair or approvals 400.
-//	NIGHTSHIFT_RUN_TOKEN_TTL  Go duration, default 1h
-//	NIGHTSHIFT_RUN_DEADLINE   Go duration, default 2h; must exceed
-//	                          NIGHTSHIFT_RUN_TOKEN_TTL — a run whose token
+//	TOMTE_RUN_TOKEN_TTL  Go duration, default 1h
+//	TOMTE_RUN_DEADLINE   Go duration, default 2h; must exceed
+//	                          TOMTE_RUN_TOKEN_TTL — a run whose token
 //	                          expired can never finalize itself, so the
 //	                          reaper only sweeps runs past a strictly longer
 //	                          deadline
-//	NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS
+//	TOMTE_DEFAULT_MONTHLY_CAP_CENTS
 //	                          tenant monthly spend cap in cents, default 0
 //	                          (unlimited)
 package main
@@ -64,29 +64,29 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
-	"github.com/gambtho/nightwatch/server/internal/compute"
-	"github.com/gambtho/nightwatch/server/internal/db"
-	"github.com/gambtho/nightwatch/server/internal/engine"
-	"github.com/gambtho/nightwatch/server/internal/harness"
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
-	"github.com/gambtho/nightwatch/server/internal/internalapi"
-	"github.com/gambtho/nightwatch/server/internal/llm"
-	"github.com/gambtho/nightwatch/server/internal/mail"
-	"github.com/gambtho/nightwatch/server/internal/meter"
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/proxy"
-	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
-	"github.com/gambtho/nightwatch/server/internal/redact"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/token"
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/compute"
+	"github.com/gambtho/tomte/server/internal/db"
+	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/internalapi"
+	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/mail"
+	"github.com/gambtho/tomte/server/internal/meter"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/proxyadapter"
+	"github.com/gambtho/tomte/server/internal/redact"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/vault"
 	"github.com/google/uuid"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: nightshift <serve|migrate|dev-session>")
+		fmt.Fprintln(os.Stderr, "usage: tomte <serve|migrate|dev-session>")
 		os.Exit(2)
 	}
 	ctx := context.Background()
@@ -102,7 +102,7 @@ func main() {
 		err = fmt.Errorf("unknown command %q", os.Args[1])
 	}
 	if err != nil {
-		slog.Error("nightshift", "err", err)
+		slog.Error("tomte", "err", err)
 		os.Exit(1)
 	}
 }
@@ -162,11 +162,11 @@ func serve(ctx context.Context) error {
 	defer pool.Close()
 
 	s := store.New(pool)
-	publicBase, err := httpapi.ParsePublicBaseURL(mustEnv("NIGHTSHIFT_PUBLIC_BASE_URL"))
+	publicBase, err := httpapi.ParsePublicBaseURL(mustEnv("TOMTE_PUBLIC_BASE_URL"))
 	if err != nil {
 		return err
 	}
-	mailer, err := mail.Select(os.Getenv("NIGHTSHIFT_POSTMARK_TOKEN"), os.Getenv("NIGHTSHIFT_MAIL_FROM"),
+	mailer, err := mail.Select(os.Getenv("TOMTE_POSTMARK_TOKEN"), os.Getenv("TOMTE_MAIL_FROM"),
 		httpapi.IsLocalhost(publicBase))
 	if err != nil {
 		return err
@@ -181,13 +181,13 @@ func serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
+	signer := token.New(keyFromEnv("TOMTE_RUNNER_KEY"))
 	// The state-nonce key is derived, not reused raw: signatures made
 	// with it can never validate as run tokens or vice versa.
-	stateKey := sha256.Sum256(append([]byte("nightshift-oauth-state:"), keyFromEnv("NIGHTSHIFT_RUNNER_KEY")...))
+	stateKey := sha256.Sum256(append([]byte("tomte-oauth-state:"), keyFromEnv("TOMTE_RUNNER_KEY")...))
 	stateSigner := oauth.NewSigner(stateKey[:], 15*time.Minute)
 	oauthSvc := &oauth.Service{Providers: oauth.Providers(), Clients: oauth.EnvClients(os.Getenv)}
-	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
+	master, err := vault.NewMaster(keyFromEnv("TOMTE_VAULT_KEY"))
 	if err != nil {
 		return err
 	}
@@ -197,9 +197,9 @@ func serve(ctx context.Context) error {
 	// process) would put real keys back into harness memory. These names
 	// are invisible to the SDKs.
 	platform := map[string]string{
-		"anthropic":  os.Getenv("NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY"),
-		"openai":     os.Getenv("NIGHTSHIFT_PLATFORM_OPENAI_KEY"),
-		"openrouter": os.Getenv("NIGHTSHIFT_PLATFORM_OPENROUTER_KEY"),
+		"anthropic":  os.Getenv("TOMTE_PLATFORM_ANTHROPIC_KEY"),
+		"openai":     os.Getenv("TOMTE_PLATFORM_OPENAI_KEY"),
+		"openrouter": os.Getenv("TOMTE_PLATFORM_OPENROUTER_KEY"),
 	}
 
 	secretVals := make([]string, 0, len(platform))
@@ -215,13 +215,13 @@ func serve(ctx context.Context) error {
 		R:     redact.New(secretVals),
 	}))
 
-	addr := os.Getenv("NIGHTSHIFT_LISTEN_ADDR")
+	addr := os.Getenv("TOMTE_LISTEN_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	stateDir := os.Getenv("NIGHTSHIFT_STATE_DIR")
+	stateDir := os.Getenv("TOMTE_STATE_DIR")
 	if stateDir == "" {
-		stateDir = filepath.Join(os.TempDir(), "nightshift-actors")
+		stateDir = filepath.Join(os.TempDir(), "tomte-actors")
 	}
 
 	baseURL := "http://" + addr
@@ -244,12 +244,12 @@ func serve(ctx context.Context) error {
 		}
 	})
 
-	tokenTTL := durationFromEnv("NIGHTSHIFT_RUN_TOKEN_TTL", time.Hour)
-	runDeadline := durationFromEnv("NIGHTSHIFT_RUN_DEADLINE", 2*time.Hour)
+	tokenTTL := durationFromEnv("TOMTE_RUN_TOKEN_TTL", time.Hour)
+	runDeadline := durationFromEnv("TOMTE_RUN_DEADLINE", 2*time.Hour)
 	if err := engine.ValidateRunLifetimes(tokenTTL, runDeadline); err != nil {
 		return err
 	}
-	defaultCap := intFromEnv("NIGHTSHIFT_DEFAULT_MONTHLY_CAP_CENTS", 0)
+	defaultCap := intFromEnv("TOMTE_DEFAULT_MONTHLY_CAP_CENTS", 0)
 
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: local, TokenTTL: tokenTTL}
 	m := &meter.Meter{Store: s, DefaultCap: defaultCap}
@@ -257,8 +257,8 @@ func serve(ctx context.Context) error {
 	mux := http.NewServeMux()
 	httpapi.RegisterRoutes(mux, httpapi.Deps{
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
-		RunProvider: os.Getenv("NIGHTSHIFT_RUN_PROVIDER"),
-		RunModel:    os.Getenv("NIGHTSHIFT_RUN_MODEL"),
+		RunProvider: os.Getenv("TOMTE_RUN_PROVIDER"),
+		RunModel:    os.Getenv("TOMTE_RUN_MODEL"),
 		Catalog:     cat, OAuth: oauthSvc, StateSigner: stateSigner,
 	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
@@ -279,7 +279,7 @@ func serve(ctx context.Context) error {
 	go sched.Run(loopCtx)
 	go reaper.Run(loopCtx)
 
-	slog.Info("nightshift: serving", "addr", addr)
+	slog.Info("tomte: serving", "addr", addr)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -339,7 +339,7 @@ func devSession(ctx context.Context, args []string) error {
 				return err
 			}
 		} else {
-			master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
+			master, err := vault.NewMaster(keyFromEnv("TOMTE_VAULT_KEY"))
 			if err != nil {
 				return err
 			}

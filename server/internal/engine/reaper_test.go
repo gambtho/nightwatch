@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/engine"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
 )
 
 func TestReaperSweepsStuckRuns(t *testing.T) {

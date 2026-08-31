@@ -138,8 +138,8 @@ export default function Setup() {
     <div className="screen setup">
       <h1>Developer setup</h1>
       <p className="dim">
-        The hand-written path, for development and demos — not how Nightshift is meant to
-        be handed a job. The <Link to="/build">build conversation</Link> replaces this.
+        The hand-written path, for development and demos — not how Tomte is meant to be
+        handed a job. The <Link to="/build">build conversation</Link> replaces this.
         Whatever you write here still waits at the approval gate before it can run.
       </p>
 

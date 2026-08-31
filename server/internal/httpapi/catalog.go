@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
-	"github.com/gambtho/nightwatch/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/permit"
 )
 
 // The discovery surface: what the build conversation (and the approval

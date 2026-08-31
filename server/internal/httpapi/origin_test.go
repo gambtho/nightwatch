@@ -35,7 +35,7 @@ func TestOriginPolicyOnMutatingRoutes(t *testing.T) {
 
 	// Anything else: 403 before the handler runs.
 	require.Equal(t, http.StatusForbidden, originRequest(t, e, "https://evil.test"))
-	require.Equal(t, http.StatusForbidden, originRequest(t, e, "http://app.nightshift.test"))
+	require.Equal(t, http.StatusForbidden, originRequest(t, e, "http://app.tomte.test"))
 	require.Equal(t, http.StatusForbidden, originRequest(t, e, "null"))
 }
 

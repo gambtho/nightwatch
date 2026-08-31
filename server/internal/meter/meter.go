@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/proxy"
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 type Meter struct {

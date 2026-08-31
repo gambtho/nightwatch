@@ -5,13 +5,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/httpapi"
 )
 
 func TestParsePublicBaseURL(t *testing.T) {
 	valid := []string{
-		"https://app.nightshift.test",
-		"https://app.nightshift.test:8443",
+		"https://app.tomte.test",
+		"https://app.tomte.test:8443",
 		"http://localhost:8080",
 		"http://127.0.0.1:8080",
 		"http://[::1]:8080",
@@ -24,13 +24,13 @@ func TestParsePublicBaseURL(t *testing.T) {
 
 	invalid := []string{
 		"",
-		"app.nightshift.test",             // no scheme
-		"http://app.nightshift.test",      // http off localhost: carries tokens, defines Origin
-		"https://app.nightshift.test/",    // trailing slash
-		"https://app.nightshift.test/app", // path
-		"https://app.nightshift.test?x=1", // query
-		"https://user@app.nightshift.test",
-		"ftp://app.nightshift.test",
+		"app.tomte.test",             // no scheme
+		"http://app.tomte.test",      // http off localhost: carries tokens, defines Origin
+		"https://app.tomte.test/",    // trailing slash
+		"https://app.tomte.test/app", // path
+		"https://app.tomte.test?x=1", // query
+		"https://user@app.tomte.test",
+		"ftp://app.tomte.test",
 	}
 	for _, in := range invalid {
 		_, err := httpapi.ParsePublicBaseURL(in)

@@ -75,7 +75,7 @@ describe("Setup", () => {
   it("labels itself as the developer path, not the product", async () => {
     renderSetup({});
     expect(await screen.findByText("Developer setup")).toBeInTheDocument();
-    expect(screen.getByText(/not how Nightshift is meant/)).toBeInTheDocument();
+    expect(screen.getByText(/not how Tomte is meant/)).toBeInTheDocument();
   });
 
   it("shows catalog connectors with their connection state", async () => {

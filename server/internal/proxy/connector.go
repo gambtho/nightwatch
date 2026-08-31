@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/catalog"
 )
 
 // The curated op-invocation gateway: the harness posts {args} naming an
@@ -228,7 +228,7 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	// what lets the harness tell a relayed upstream 401 (broken
 	// connector credential — a tool-level failure the model sees) from
 	// the proxy's own 401 (dead run token — fatal to the run).
-	w.Header().Set("Nightshift-Upstream", "1")
+	w.Header().Set("Tomte-Upstream", "1")
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

@@ -26,11 +26,11 @@ func Select(postmarkToken, from string, devFallbackOK bool) (Sender, error) {
 	case postmarkToken != "" && from != "":
 		return NewPostmark(postmarkToken, from), nil
 	case postmarkToken != "" || from != "":
-		return nil, errors.New("mail: NIGHTSHIFT_POSTMARK_TOKEN and NIGHTSHIFT_MAIL_FROM must be set together")
+		return nil, errors.New("mail: TOMTE_POSTMARK_TOKEN and TOMTE_MAIL_FROM must be set together")
 	case devFallbackOK:
 		return LogSender{}, nil
 	default:
-		return nil, errors.New("mail: no provider configured; set NIGHTSHIFT_POSTMARK_TOKEN and NIGHTSHIFT_MAIL_FROM (log delivery is only allowed for a localhost base URL)")
+		return nil, errors.New("mail: no provider configured; set TOMTE_POSTMARK_TOKEN and TOMTE_MAIL_FROM (log delivery is only allowed for a localhost base URL)")
 	}
 }
 

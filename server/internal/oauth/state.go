@@ -23,7 +23,7 @@ type State struct {
 	ReturnTo  string
 }
 
-const stateAudience = "nightshift-oauth-state"
+const stateAudience = "tomte-oauth-state"
 
 // validReturnTo accepts only a same-origin path: it must start with a
 // single "/" — "//host" is a scheme-relative URL and "/\" is treated

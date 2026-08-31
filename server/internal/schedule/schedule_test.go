@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/schedule"
+	"github.com/gambtho/tomte/server/internal/schedule"
 )
 
 func TestParseValidAndNext(t *testing.T) {

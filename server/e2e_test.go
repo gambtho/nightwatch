@@ -20,22 +20,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
-	"github.com/gambtho/nightwatch/server/internal/compute"
-	"github.com/gambtho/nightwatch/server/internal/engine"
-	"github.com/gambtho/nightwatch/server/internal/harness"
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
-	"github.com/gambtho/nightwatch/server/internal/internalapi"
-	"github.com/gambtho/nightwatch/server/internal/llm"
-	"github.com/gambtho/nightwatch/server/internal/llm/llmtest"
-	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/proxy"
-	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
-	"github.com/gambtho/nightwatch/server/internal/token"
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/compute"
+	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/internalapi"
+	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/llm/llmtest"
+	"github.com/gambtho/tomte/server/internal/mail/mailtest"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/proxyadapter"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 func TestEndToEndRun(t *testing.T) {
@@ -157,7 +157,7 @@ func TestEndToEndMagicLinkLogin(t *testing.T) {
 	page, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.NoError(t, err)
-	require.Contains(t, string(page), "Continue to Nightshift")
+	require.Contains(t, string(page), "Continue to Tomte")
 
 	// The consuming POST: first login redirects to /build and sets the
 	// session cookie (into the jar, under its real attributes).

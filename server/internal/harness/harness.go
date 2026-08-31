@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/llm"
 )
 
 type Status string

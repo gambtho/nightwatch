@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
 )
 
 func newUser(t *testing.T) (*pgxpool.Pool, *store.Store, store.Tenant, store.User) {

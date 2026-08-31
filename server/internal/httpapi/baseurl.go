@@ -5,7 +5,7 @@ import (
 	"net/url"
 )
 
-// ParsePublicBaseURL validates NIGHTSHIFT_PUBLIC_BASE_URL: scheme + host,
+// ParsePublicBaseURL validates TOMTE_PUBLIC_BASE_URL: scheme + host,
 // nothing else. It carries magic-link tokens, defines the trusted Origin,
 // and pairs with a Secure cookie, so HTTPS is required — with an explicit
 // exception only for localhost development (the secure-context carve-out).

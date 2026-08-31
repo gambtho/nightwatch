@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
-	"github.com/gambtho/nightwatch/server/internal/engine"
-	"github.com/gambtho/nightwatch/server/internal/mail"
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/mail"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 type Deps struct {
@@ -22,13 +22,13 @@ type Deps struct {
 	Engine *engine.Engine
 	Vault  *vault.Master
 	// PublicBaseURL is the canonical customer-facing origin
-	// (NIGHTSHIFT_PUBLIC_BASE_URL): the single source for magic-link
+	// (TOMTE_PUBLIC_BASE_URL): the single source for magic-link
 	// URLs, the Origin comparison, and redirect joining. Never inferred
 	// from Host or proxy headers.
 	PublicBaseURL *url.URL
 	Mailer        mail.Sender
 	// RunProvider/RunModel are the platform-selected execution model
-	// (NIGHTSHIFT_RUN_PROVIDER / NIGHTSHIFT_RUN_MODEL) baked into the
+	// (TOMTE_RUN_PROVIDER / TOMTE_RUN_MODEL) baked into the
 	// compiled document at approval time — decision 9 took provider and
 	// model out of the user's hands. Empty values fall back to the
 	// defaults below.

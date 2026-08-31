@@ -15,13 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/engine"
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
-	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
-	"github.com/gambtho/nightwatch/server/internal/token"
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/engine"
+	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/mail/mailtest"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 type env struct {
@@ -73,7 +73,7 @@ func newEnv(t *testing.T, mods ...func(*httpapi.Deps)) *env {
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: fc}
 
-	base := &url.URL{Scheme: "https", Host: "app.nightshift.test"}
+	base := &url.URL{Scheme: "https", Host: "app.tomte.test"}
 	mailer := &mailtest.Recorder{}
 	mux := http.NewServeMux()
 	deps := httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer}

@@ -8,12 +8,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
-	"github.com/gambtho/nightwatch/server/internal/harness"
-	"github.com/gambtho/nightwatch/server/internal/internalapi"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
-	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/internalapi"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/token"
 )
 
 // The run context's tools array is server-derived from the approved

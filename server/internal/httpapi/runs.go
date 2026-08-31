@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 type runJSON struct {

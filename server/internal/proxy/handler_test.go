@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/permit"
-	"github.com/gambtho/nightwatch/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/proxy"
 )
 
 type fakeAuth struct {

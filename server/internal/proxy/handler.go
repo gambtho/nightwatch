@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/permit"
 )
 
 type handler struct {

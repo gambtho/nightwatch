@@ -171,13 +171,13 @@ func TestBundleJSONRoundTrip(t *testing.T) {
 
 func TestEnvClients(t *testing.T) {
 	env := map[string]string{
-		"NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_ID":     "gid",
-		"NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_SECRET": "gsec",
+		"TOMTE_OAUTH_GOOGLE_CLIENT_ID":     "gid",
+		"TOMTE_OAUTH_GOOGLE_CLIENT_SECRET": "gsec",
 	}
 	src := EnvClients(func(k string) string { return env[k] })
 	c, err := src(context.Background(), "google")
 	require.NoError(t, err)
 	require.Equal(t, ClientCreds{ID: "gid", Secret: "gsec"}, c)
 	_, err = src(context.Background(), "slack")
-	require.ErrorContains(t, err, "NIGHTSHIFT_OAUTH_SLACK_CLIENT_ID")
+	require.ErrorContains(t, err, "TOMTE_OAUTH_SLACK_CLIENT_ID")
 }

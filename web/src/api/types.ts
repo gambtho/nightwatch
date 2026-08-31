@@ -1,4 +1,4 @@
-// Wire types for the Nightshift /v1 API (docs/api/v1.md). Field names are
+// Wire types for the Tomte /v1 API (docs/api/v1.md). Field names are
 // the server's snake_case, verbatim. Sparse run fields are omitted by the
 // server until the run reaches that stage — they are optional here, never null.
 

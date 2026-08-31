@@ -20,7 +20,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               fill="var(--moon)"
             />
           </svg>
-          Nightshift
+          Tomte
         </Link>
         {session.status === "signed-in" && (
           <div className="shell-user">
@@ -45,7 +45,7 @@ function RequireSession({ children }: { children: React.ReactElement }) {
   if (session.status === "unreachable") {
     return (
       <div className="boot-note">
-        <p className="error-note">Couldn't reach Nightshift. Your work is untouched.</p>
+        <p className="error-note">Couldn't reach Tomte. Your work is untouched.</p>
         <button className="btn btn-secondary" onClick={retry}>
           Try again
         </button>
