@@ -3,6 +3,9 @@
 **Date:** 2026-08-31
 **Purpose:** the live picture of which work runs in parallel, which work is
 serialized on `server/`, and ready-to-paste prompts for the next sessions.
+**Single writer:** the coordinating session owns this file. Route board
+findings to it rather than editing here; if its socket is stale, ask the user
+which session currently holds the board.
 Owned by the coordinating session; updated when a plan merges, a session
 finishes, or a cross-cutting decision is taken.
 
@@ -15,7 +18,7 @@ finishes, or a cross-cutting decision is taken.
 | Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                 |
 | Identity spec                    | **Merged** (PR #6)                                                  |
 | Identity implementation          | **Merged** (PR #17)                                                 |
-| Steps v1 (decision 9)            | **PR #19 open** (branch `feat/steps-v1`) — **owns `server/`**       |
+| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**          |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                      |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed    |
 | Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane             |
@@ -43,33 +46,27 @@ it extends the existing `server/cmd/nightshift` binary
 1. ~~**Plan 3**~~ (merged, PR #10) →
 2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
    mechanism across httpapi and every test helper; retired
-   `NIGHTSHIFT_SESSION_KEY`. **`server/` is now free and unassigned. The next
-   owner is a decision, not a default** — see the note under item 3. →
-3. **Connectors** (plan + implementation — collides with `permit.Parse`, the
-   proxy, and the harness, and wants identity's session changes settled; four
-   downstream specs depend on its operation vocabulary). **Contested:** the
-   build-conversation spec's first server item — user-facing steps v1 plus the
-   approval-time compile, resolving scoping decision 9 — is deliberately
-   independent of connectors and is a much smaller slot. Taking it first
-   unblocks the frontend sooner, because the frontend cannot consume a `steps`
-   contract that is still the compiled execution form. Connectors is the bigger
-   unlock but the longer occupancy. →
-4. **Plan 4** — grading + alerting. Creates `workflow.status`
+   `NIGHTSHIFT_SESSION_KEY`. →
+3. ~~**Steps v1 (decision 9)**~~ (merged, PR #19) — the user-facing steps
+   artifact plus the approval-time compiler. Taken ahead of connectors because
+   it was small, independent of everything else, and the frontend cannot
+   consume a `steps` contract that is still the compiled execution form.
+   **`server/` has been free and unassigned since it merged.** →
+4. **Connectors** — NEXT IN LINE. Plan and implementation; collides with
+   `permit.Parse`, the proxy, and the harness, and four downstream specs
+   depend on its operation vocabulary. The bigger unlock and the longer
+   occupancy. →
+5. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
-5. **Escalation** (carries Plan 3 amendment 1) →
-6. **Objectives** (widens `workflow.status`; no longer carries amendment 3) →
-7. **Graduated permits** (hard dependency on Plan 4's grader) →
-8. **Plan 5** — Substrate + K8s-Jobs Compute
+6. **Escalation** (carries Plan 3 amendment 1) →
+7. **Objectives** (widens `workflow.status`; no longer carries amendment 3) →
+8. **Graduated permits** (hard dependency on Plan 4's grader) →
+9. **Plan 5** — Substrate + K8s-Jobs Compute
 
 Escalation precedes objectives because the objectives spec declares the
 dependency. Plan 5 stays last, and the verification spike confirmed that was
 right rather than merely asserted.
-
-**Unslotted, needs a decision:** the build-conversation spec resolves roadmap
-scoping decision 9 (the user-facing `steps` artifact joins the version
-document; the execution form becomes server-derived). That is a `server/`
-change with no queue position yet. It most likely rides with connectors.
 
 ### Parallel-safe lanes, open now
 
@@ -173,19 +170,26 @@ scheduler/reaper/meter wiring in `serve()` (do not displace it),
   coordinating session has green-lit the identity implementation — it owns
   `server/` until its PR merges.
 
-## Delta sheet: what steps v1 changes (PR #19, not yet merged)
+## Delta sheet: what steps v1 changes (merged)
 
-Relayed by the steps-v1 session and **verified against `origin/feat/steps-v1`,
-not commit messages**. PR #19 is open — none of this is on `main` yet, so every
-entry reads "once #19 merges".
+**Merged as `3d48839` (PR #19); this is live on `main`.** Verified against the
+tree, not against session summaries. The v1 steps contract is now what the
+build-conversation spec defines, so the frontend lane can rely on it.
 
-- **Migration `00010_steps_v1.sql` is taken**; next free is **00011**.
+- **Migrations on `main` now run through `00010_steps_v1.sql`**
+  (`00009_identity.sql` landed with identity); next free is **00011**.
 - **`workflow_version` gains `compiled jsonb`**, with a DB CHECK enforcing
-  **approved ⇒ compiled**. The dev-data migration copies each old
+  **approved ⇒ compiled** — and tighter than that phrase suggests:
+  `CHECK (status <> 'approved' OR (compiled IS NOT NULL AND jsonb_typeof(compiled) = 'object'))`,
+  which rejects SQL `NULL`, JSONB `null`, **and** non-object values. The dev-data migration copies each old
   execution-form steps document into `compiled` stamped `compiler_v 0` and
   synthesizes a v1 user-facing artifact from the old kickoff.
 - **`store.ApproveVersion` now takes a trailing `compiled json.RawMessage`**
-  and writes the column inside the approval transaction.
+  and writes the column inside the approval transaction. Its doc comment names
+  the escalation amendment flow as the documented second caller that must
+  **recompile rather than copy**.
+- **The internal run context refuses a compiled document lacking
+  provider/model** before marking the run running (a pre-merge review fix).
 - **`store.StepsDoc` is gone**; `VersionDoc.Steps` is `json.RawMessage`.
   `harness.Steps` is unchanged.
 - **`httpapi.Deps` gains `RunProvider` / `RunModel`**
@@ -227,14 +231,18 @@ Plan 3 merged (2026-08-31):
     dropping them.
 
 - **Two consequences of steps v1 for the amendment flow** (raised by the
-  delegation-specs session; applies once PR #19 merges). The escalation spec's
+  delegation-specs session; **live on `main` since PR #19**). The escalation spec's
   amendment flow creates workflow version N+1 and approves it
   **programmatically**, not through the HTTP approve handler — so it inherits
   both approval-time changes without passing through their validation.
   - **Recompile, do not copy.** `approved ⇒ compiled` is a DB CHECK, and
     copying the prior version's `compiled` blob satisfies it while silently
     pinning a stale compilation if the platform provider or model has moved.
-    That path must run the compiler.
+    That path must run the compiler — `store.ApproveVersion`'s doc comment
+    names it as the caller that must. The CHECK also tests
+    `jsonb_typeof(compiled) = 'object'`, so a programmatic approve passing a
+    JSONB `null` or a non-object now fails the constraint rather than slipping
+    through with an unusable zero-valued context.
   - **Pre-check pricing when the escalation is opened, not when it is
     answered.** The priced-pair gate lands on this path too, and lands badly:
     an unpriced provider/model becomes a 400 at the moment a user clicks
