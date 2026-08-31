@@ -37,8 +37,12 @@ type Steps struct {
 }
 
 type Input struct {
-	Steps  Steps
-	APIKey string
+	Steps Steps
+	// RunToken is the run's bearer JWT. It rides in the provider-native
+	// auth-header slot (CallOptions.APIKey) so the egress proxy can
+	// authenticate the request, strip it, and inject the real credential.
+	// No API key ever enters the harness.
+	RunToken string
 }
 
 type RunEvent struct {
@@ -121,7 +125,7 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 
 	var out strings.Builder
 	usage, err := provider.Chat(ctx, msgs,
-		llm.CallOptions{Model: in.Steps.Model, MaxTokens: maxTokens, APIKey: in.APIKey},
+		llm.CallOptions{Model: in.Steps.Model, MaxTokens: maxTokens, APIKey: in.RunToken},
 		func(c llm.StreamChunk) { out.WriteString(c.Delta) })
 	if err != nil {
 		return fail("llm_error", err)
