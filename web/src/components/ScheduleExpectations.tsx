@@ -1,9 +1,10 @@
 // The sleeping-machine copy at the schedule confirmation (pivot spec,
 // "The sleeping machine" and "The always-on option"). The promise
-// paragraph is load-bearing product copy — quoted from the spec, not
-// paraphrased — and the three always-on options keep the spec's order:
-// keep this machine awake, move to a machine that stays on, and the
-// hosted tier named honestly as not existing yet.
+// paragraph is the spec's load-bearing product copy, adapted only from
+// "a job" to "this" for the screen it sits on — keep any further edit
+// against the spec text — and the three always-on options keep the
+// spec's order: keep this machine awake, move to a machine that stays
+// on, and the hosted tier named honestly as not existing yet.
 
 export default function ScheduleExpectations() {
   return (
