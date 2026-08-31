@@ -82,7 +82,9 @@ export default function Home() {
         </Link>
         <p className="dim home-dev-link">
           <Link to="/setup">Developer setup</Link> — write the version-1 document by hand
-          (for development and demos).
+          (for development and demos). Or walk the{" "}
+          <Link to="/welcome">first-run flow</Link> — in the packaged app it's the first
+          thing you see.
         </p>
       </div>
     );
@@ -105,7 +107,8 @@ export default function Home() {
         + Something else you want taken care of
       </Link>
       <p className="dim home-dev-link">
-        <Link to="/setup">Developer setup</Link>
+        <Link to="/setup">Developer setup</Link> ·{" "}
+        <Link to="/welcome">First-run flow</Link>
       </p>
     </div>
   );

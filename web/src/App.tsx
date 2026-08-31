@@ -6,6 +6,8 @@ import WorkflowDetail from "./screens/WorkflowDetail";
 import Approve from "./screens/Approve";
 import Build from "./screens/Build";
 import Setup from "./screens/Setup";
+import FirstRun from "./screens/FirstRun";
+import Settings from "./screens/Settings";
 import "./App.css";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -24,6 +26,9 @@ function Shell({ children }: { children: React.ReactNode }) {
         </Link>
         {session.status === "signed-in" && (
           <div className="shell-user">
+            <Link className="dim" to="/settings">
+              Settings
+            </Link>
             <span className="dim">{session.me.user.email}</span>
             <button className="btn-quiet" onClick={() => void signOut()}>
               Sign out
@@ -90,6 +95,25 @@ export default function App() {
           element={
             <RequireSession>
               <Setup />
+            </RequireSession>
+          }
+        />
+        {/* First run and settings sit behind the session gate for now; the
+            shell-minted local session (P1) replaces the gate, and /welcome
+            becomes the packaged app's first paint. */}
+        <Route
+          path="/welcome"
+          element={
+            <RequireSession>
+              <FirstRun />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireSession>
+              <Settings />
             </RequireSession>
           }
         />

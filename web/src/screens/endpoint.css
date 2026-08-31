@@ -1,0 +1,128 @@
+/* First-run and settings — the endpoint chooser, capture step, budget,
+   and the switch confirmation. Kept in its own file so the endpoint
+   surfaces never contend with screens.css across parallel branches. */
+
+.endpoint-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  margin-top: 12px;
+}
+
+.endpoint-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.endpoint-option:hover {
+  border-color: var(--accent);
+}
+
+.endpoint-option-label {
+  font-weight: 600;
+}
+
+.endpoint-baseurl {
+  display: block;
+  width: 100%;
+  max-width: 440px;
+}
+
+.endpoint-baseurl input {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.endpoint-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.endpoint-budget-copy {
+  max-width: 520px;
+}
+
+.endpoint-budget-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.endpoint-budget-row input {
+  width: 110px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 1rem;
+}
+
+.endpoint-foot {
+  font-size: 0.82rem;
+  max-width: 520px;
+}
+
+.settings-section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.endpoint-confirm {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 18px;
+  max-width: 560px;
+}
+
+.endpoint-prices {
+  margin-top: 8px;
+}
+
+.endpoint-price-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.endpoint-price-model {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.endpoint-price-row input {
+  display: block;
+  width: 140px;
+  margin-top: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 8px;
+}

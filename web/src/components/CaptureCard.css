@@ -1,0 +1,55 @@
+/* Guided capture card — shared by first-run key capture and the
+   connections manager. Byte-identical between those branches; see the
+   note in CaptureCard.tsx. */
+
+.capture-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px 18px;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.capture-title {
+  font-weight: 600;
+}
+
+.capture-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.9rem;
+}
+
+.capture-steps li {
+  margin-top: 4px;
+}
+
+.capture-secret {
+  width: 100%;
+}
+
+.capture-secret-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.capture-secret-row input {
+  flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.capture-disclosure {
+  font-size: 0.82rem;
+  margin: 0;
+}
