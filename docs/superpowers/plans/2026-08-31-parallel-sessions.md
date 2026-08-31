@@ -81,10 +81,17 @@ Two clarifications from the user, after the coordinating session over-read
 
 Two hard problems this hands the pivot spec: **packaging** (the store is pgx
 throughout — bundled-invisible Postgres vs a SQLite rewrite is a real
-decision), and **the sleeping machine**. The second is half-solved already:
-`scheduler.mostRecentDue` fires the latest occurrence ≤ now and skips older,
-so a slept-through 3AM digest fires once on wake. The spec owes the honest
-product copy for that, and an always-on option for people who want true 3AM.
+decision), and **the sleeping machine**.
+
+**Correction (2026-08-31, found by the pivot-spec session, verified against
+the code): fire-on-wake does NOT work today.** This section previously called
+it half-solved; that was wrong. `mostRecentDue` has the right shape (latest
+occurrence ≤ now, skip older), but it walks from `now.Add(-window)` and
+`Scheduler.window()` defaults to max(2×interval, 5min) with no override from
+`serve()` — an occurrence more than ~5 minutes old at wake never fires. The
+pivot spec designs the fix (wake-aware lookback + a persisted
+`scheduler_heartbeat` row) in its roadmap item P1. The board lesson repeats:
+verify the parameters, not just the mechanism.
 
 **The serialized queue is FROZEN pending the pivot spec.** No session takes
 `server/` until the pivot spec merges and the queue is re-derived from it.
@@ -145,6 +152,64 @@ right rather than merely asserted.
 - **Docs, specs, research** — always open.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
+
+## Pivot spec delivered (PR #37); NAME UNDER REVIEW
+
+`docs/superpowers/specs/2026-08-31-tomte-pivot-design.md`, branch
+`spec/pivot-click-install`. Carries the Tomte naming, the reusable
+connections manager (charter item 4 upgrade), and the I/O palette positioned
+in the build-conversation triage.
+
+**The name is CONFIRMED: Tomte** (user, 2026-08-31, after leadership review;
+trademark counsel still owed). The hold is released: the mechanical rename is
+complete and ready to merge as **PR #38** (verified: server suite green, web
+tsc + 110 tests + build green, real `tomte serve` boot); PR #37's naming is
+final as written. Screening history for the record: Duende died (Duende
+Software is IdentityServer's company), Momoy was legally clean but loaded
+(sacred Chumash Datura figure; "ugly/nasty" in Hiligaynon; Momo-adjacent).
+Two rename facts worth memory: the derived-key labels
+(`tomte:run-jwt` HKDF info, `tomte-oauth-state` salt) are cryptographic
+inputs — renaming them invalidates outstanding run tokens, fine pre-release,
+not fine later; and `src/` (retired prototype) deliberately still greps as
+nightshift.
+
+Board-relevant spec contents:
+
+- **Proposed queue re-derivation** (adopt on merge unless the user objects):
+  P1 subtraction + floor (OAuth/login/mail removal, local-session mint, the
+  wake-window fix, endpoint record + custom base URLs, pricing-gate rework,
+  budget rename) → P2 connectors main road (Slack token capture, then old
+  phases 5→6; phase 3 on demand) → P3 build conversation → P4 grading/alerting
+  (OS notifications replace Postmark delivery; grader-consent copy) →
+  P5–P7 escalation / objectives / graduated permits unchanged.
+- **`serve()` becomes a library entry point in P1** so the packaging lane
+  (desktop shell) never needs the `server/` lock.
+- **CI / catalog-gate ownership is now pivot-critical, not hygiene:**
+  auto-update ships catalog changes to users' machines, so the narrow-only
+  rule is what keeps a silent update compatible with approve-once. Still
+  unowned.
+- Sunk cost named plainly: connector phase 2's OAuth (~2,000 lines incl.
+  `internal/oauth` and migration 00011's oauth/epoch surface), identity's
+  magic-link/signup half, Postmark, and the CASA decision retired.
+
+## UX feedback intake (2026-08-31)
+
+From the user, routed to the pivot-spec session the same day:
+
+- **A standalone, reusable connections manager.** Add a connector once
+  (paste a token, register an MCP server); every later build conversation
+  finds it connected. The data layer already supports it — connections are
+  tenant-scoped and the catalog reports `connected` — so this is surface
+  design only. Folded into the pivot spec's charter item 4 (guided capture
+  without OAuth) as a scope upgrade: the capture surface is durable, and
+  build conversations link into it rather than owning capture.
+- **A post-verdict graphical inputs/outputs palette.** The verdict's
+  "I'd need access to" block made visual: possible inputs (read) and
+  outputs (write) from the catalog, connected vs available-but-unconnected.
+  Positioned in the pivot spec's estate triage as an amendment the
+  build-conversation spec's successor gains — not designed yet. The
+  build-conversation frontend items 5–6 become entry points into the
+  connections manager; item 5's OAuth framing is dead regardless.
 
 ## Rule: no pre-stacked PR bases
 
