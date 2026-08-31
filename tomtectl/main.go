@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 
@@ -24,9 +25,9 @@ Usage:
   tomtectl logs [--follow] show the agent's output
   tomtectl down            remove the agent from the cluster
 
-Every command reads the agent from -f (default ./agent.yaml); the file
-is the single source of truth. -n picks a namespace, --context a
-kubeconfig context.
+init writes a fresh agent file to -f; every other command reads the
+agent from -f (default ./agent.yaml) — the file is the single source
+of truth. -n picks a namespace, --context a kubeconfig context.
 `
 
 func main() {
@@ -43,7 +44,7 @@ func run(args []string) error {
 	}
 	cmd, rest := args[0], args[1:]
 
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	file := fs.String("f", "agent.yaml", "path to the agent file")
 	ns := fs.String("n", "", "namespace (default: the kubeconfig context's)")
 	kctx := fs.String("context", "", "kubeconfig context (default: current)")
@@ -84,10 +85,20 @@ func run(args []string) error {
 		case "status":
 			return client.Status(ctx, name, os.Stdout)
 		case "logs":
-			return client.Logs(ctx, name, follow, os.Stdout)
+			err := client.Logs(ctx, name, follow, os.Stdout)
+			// Ctrl-C while following is how streaming ends, not a failure.
+			if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+				return nil
+			}
+			return err
 		case "down":
-			if err := client.Delete(ctx, name); err != nil {
+			removed, err := client.Delete(ctx, name)
+			if err != nil {
 				return err
+			}
+			if !removed {
+				fmt.Printf("agent %q was not deployed in namespace %q — nothing to remove\n", name, client.Namespace)
+				return nil
 			}
 			fmt.Printf("agent %q removed from namespace %q\n", name, client.Namespace)
 			return nil
@@ -105,6 +116,8 @@ func run(args []string) error {
 func initFile(path string) error {
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("%s already exists — edit it, or pass -f for a new path", path)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("checking %s: %w", path, err)
 	}
 	if err := os.WriteFile(path, agentfile.Template, 0o644); err != nil {
 		return err

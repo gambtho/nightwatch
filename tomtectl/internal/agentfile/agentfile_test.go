@@ -59,9 +59,15 @@ func TestParseRejects(t *testing.T) {
 		}, "id and text"},
 		{"bad every", func(s string) string {
 			return strings.Replace(s, "every: 30s", "every: soonish", 1)
-		}, "not a duration"},
+		}, "one unit"},
 		{"negative every", func(s string) string {
 			return strings.Replace(s, "every: 30s", "every: -5s", 1)
+		}, "one unit"},
+		{"compound every busybox cannot sleep", func(s string) string {
+			return strings.Replace(s, "every: 30s", "every: 1m30s", 1)
+		}, "one unit"},
+		{"zero every", func(s string) string {
+			return strings.Replace(s, "every: 30s", "every: 0s", 1)
 		}, "must be positive"},
 		{"llm set too early", func(s string) string {
 			return strings.Replace(s, "llm: {}", "llm: {endpoint: {kind: anthropic}}", 1)

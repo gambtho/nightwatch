@@ -59,6 +59,12 @@ type Schedule struct {
 // from metadata.name.
 var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
+// everyShape is deliberately narrower than Go's duration syntax: the
+// K1 runtime hands the value to busybox sleep, which accepts a whole
+// number with at most one unit. Compound forms like 1m30s would
+// crash-loop the pod, so they are rejected here instead.
+var everyShape = regexp.MustCompile(`^[0-9]+[smh]$`)
+
 // Load reads, strictly parses, and validates an agent file. The raw
 // bytes are returned too: the ConfigMap carries the file verbatim.
 func Load(path string) (*Agent, []byte, error) {
@@ -109,11 +115,10 @@ func (a *Agent) validate() error {
 		}
 		seen[s.ID] = true
 	}
-	d, err := time.ParseDuration(a.Spec.Schedule.Every)
-	if err != nil {
-		return fmt.Errorf("spec.schedule.every: %q is not a duration (try 30s, 5m): %v", a.Spec.Schedule.Every, err)
+	if !everyShape.MatchString(a.Spec.Schedule.Every) {
+		return fmt.Errorf("spec.schedule.every must be a whole number with one unit — 30s, 5m, 2h — got %q", a.Spec.Schedule.Every)
 	}
-	if d <= 0 {
+	if d, _ := time.ParseDuration(a.Spec.Schedule.Every); d <= 0 {
 		return fmt.Errorf("spec.schedule.every must be positive, got %q", a.Spec.Schedule.Every)
 	}
 	if len(a.Spec.LLM) != 0 {

@@ -44,8 +44,15 @@ func New(kubeContext, namespace string) (*Client, error) {
 		return nil, err
 	}
 	if namespace == "" {
+		// A context with no namespace legitimately means "default"; a
+		// kubeconfig we cannot read does not, and deploying into the
+		// wrong namespace on a swallowed error would be worse than
+		// stopping.
 		namespace, _, err = cfg.Namespace()
-		if err != nil || namespace == "" {
+		if err != nil {
+			return nil, fmt.Errorf("resolving namespace from kubeconfig: %w", err)
+		}
+		if namespace == "" {
 			namespace = "default"
 		}
 	}
@@ -53,8 +60,9 @@ func New(kubeContext, namespace string) (*Client, error) {
 }
 
 // Apply creates or updates the agent's ConfigMap and Deployment.
-// Updates mutate the freshly-fetched object under RetryOnConflict —
-// the deployment controller bumps ResourceVersions concurrently.
+// Updates mutate the freshly-fetched object under RetryOnConflict so
+// a concurrent writer (the deployment controller, another tomtectl)
+// costs a retry, not a failure.
 func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.Deployment) error {
 	cms := c.cs.CoreV1().ConfigMaps(c.Namespace)
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -122,11 +130,18 @@ func (c *Client) Status(ctx context.Context, name string, out io.Writer) error {
 	}
 	for _, p := range pods {
 		restarts := int32(0)
+		reason := ""
 		for _, cs := range p.Status.ContainerStatuses {
 			restarts += cs.RestartCount
+			// Surface why a container is stuck (ImagePullBackOff,
+			// CreateContainerConfigError, CrashLoopBackOff) — a bare
+			// phase reads healthier than it is.
+			if w := cs.State.Waiting; w != nil && w.Reason != "" {
+				reason = " (" + w.Reason + ")"
+			}
 		}
-		fmt.Fprintf(out, "  pod %s: %s, %d restart(s), started %s\n",
-			p.Name, p.Status.Phase, restarts, p.CreationTimestamp.Format(time.RFC3339))
+		fmt.Fprintf(out, "  pod %s: %s%s, %d restart(s), started %s\n",
+			p.Name, p.Status.Phase, reason, restarts, p.CreationTimestamp.Format(time.RFC3339))
 	}
 	return nil
 }
@@ -140,7 +155,15 @@ func (c *Client) Logs(ctx context.Context, name string, follow bool, out io.Writ
 	if len(pods) == 0 {
 		return fmt.Errorf("no pods for agent %q in namespace %q — run `tomtectl up` and check `tomtectl status`", name, c.Namespace)
 	}
-	pod := pods[len(pods)-1] // newest
+	// Prefer the newest Running pod — during a rollout the newest by
+	// timestamp can still be Pending, with no logs to stream yet.
+	pod := pods[len(pods)-1]
+	for i := len(pods) - 1; i >= 0; i-- {
+		if pods[i].Status.Phase == corev1.PodRunning {
+			pod = pods[i]
+			break
+		}
+	}
 	req := c.cs.CoreV1().Pods(c.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{Follow: follow})
 	stream, err := req.Stream(ctx)
 	if err != nil {
@@ -151,17 +174,24 @@ func (c *Client) Logs(ctx context.Context, name string, follow bool, out io.Writ
 	return err
 }
 
-// Delete removes the agent's objects; missing objects are fine.
-func (c *Client) Delete(ctx context.Context, name string) error {
+// Delete removes the agent's objects. Missing objects are tolerated,
+// but the caller is told whether anything actually existed — "removed"
+// on a wrong namespace would leave the real agent running.
+func (c *Client) Delete(ctx context.Context, name string) (bool, error) {
+	removed := false
 	err := c.cs.AppsV1().Deployments(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("deleting Deployment: %w", err)
+	if err == nil {
+		removed = true
+	} else if !apierrors.IsNotFound(err) {
+		return removed, fmt.Errorf("deleting Deployment: %w", err)
 	}
 	err = c.cs.CoreV1().ConfigMaps(c.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("deleting ConfigMap: %w", err)
+	if err == nil {
+		removed = true
+	} else if !apierrors.IsNotFound(err) {
+		return removed, fmt.Errorf("deleting ConfigMap: %w", err)
 	}
-	return nil
+	return removed, nil
 }
 
 func (c *Client) pods(ctx context.Context, name string) ([]corev1.Pod, error) {
@@ -173,6 +203,9 @@ func (c *Client) pods(ctx context.Context, name string) ([]corev1.Pod, error) {
 	}
 	pods := list.Items
 	sort.Slice(pods, func(i, j int) bool {
+		if pods[i].CreationTimestamp.Equal(&pods[j].CreationTimestamp) {
+			return pods[i].Name < pods[j].Name
+		}
 		return pods[i].CreationTimestamp.Before(&pods[j].CreationTimestamp)
 	})
 	return pods, nil

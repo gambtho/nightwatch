@@ -12,7 +12,8 @@ spec:
   steps:
     - id: greet
       text: Hello, world — from the hello agent.
-  # When it runs. The agent stays resident and wakes on this interval.
+  # When it runs. The agent stays resident and wakes on this interval —
+  # a whole number with one unit: 30s, 5m, 2h.
   schedule:
     every: 30s
   # K2 — the model this agent thinks with. Empty means no LLM: the

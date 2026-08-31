@@ -53,6 +53,7 @@ cd tomtectl && go build -o tomtectl .
 ```
 
 ```
+tomte agent starting: waking every 30s
 2026-08-31T21:04:11Z Hello, world — from the hello agent.
 2026-08-31T21:04:41Z Hello, world — from the hello agent.
 ```

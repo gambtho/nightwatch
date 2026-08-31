@@ -5,6 +5,8 @@
 package manifest
 
 import (
+	"maps"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -35,11 +37,21 @@ const (
 const RunScript = `#!/bin/sh
 # Tomte K1 placeholder runtime: prints each step's text on the
 # schedule. Replaced by the real agent runtime image in K2. Behavior
-# comes from the mounted agent.yaml, never from this image.
+# comes from the mounted agent.yaml, never from this image; steps and
+# schedule are re-read each wake, so a ConfigMap edit takes effect on
+# the next iteration once the volume syncs. A missing file or missing
+# schedule is a loud crash, never a silent default.
 set -eu
 FILE=` + mountPath + `/agent.yaml
-every=$(sed -n 's/^[[:space:]]*every:[[:space:]]*//p' "$FILE" | head -n1 | tr -d '"')
-[ -n "$every" ] || every=30s
+read_every() {
+  every=$(sed -n 's/^[[:space:]]*every:[[:space:]]*//p' "$FILE" | head -n1 | tr -d '"')
+  if [ -z "$every" ]; then
+    echo "tomte agent: no schedule.every found in $FILE" >&2
+    exit 1
+  fi
+}
+[ -f "$FILE" ] || { echo "tomte agent: $FILE is not mounted" >&2; exit 1; }
+read_every
 echo "tomte agent starting: waking every $every"
 while true; do
   sed -n 's/^[[:space:]]*text:[[:space:]]*//p' "$FILE" | while IFS= read -r line; do
@@ -48,6 +60,7 @@ while true; do
     esac
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $line"
   done
+  read_every
   sleep "$every"
 done
 `
@@ -65,7 +78,12 @@ func Labels(name string) map[string]string {
 // so the in-cluster copy stays the readable artifact.
 func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deployment) {
 	name := a.Metadata.Name
-	labels := Labels(name)
+	// User labels from the file propagate; tomtectl's own labels win on
+	// collision. The Deployment selector stays AgentLabel alone — it is
+	// immutable and must not depend on user-editable labels.
+	labels := map[string]string{}
+	maps.Copy(labels, a.Metadata.Labels)
+	maps.Copy(labels, Labels(name))
 
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
