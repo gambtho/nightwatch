@@ -11,6 +11,14 @@ import (
 
 var ErrNotFound = errors.New("store: not found")
 
+// ErrAlreadyFired: a run for this (workflow, fire_time) occurrence exists —
+// idempotent-tick collisions map here and are treated as success by callers.
+var ErrAlreadyFired = errors.New("store: occurrence already fired")
+
+// ErrActiveRun: the one-active-run-per-workflow admission index rejected the
+// insert. Manual fires surface this as 409; scheduled fires skip.
+var ErrActiveRun = errors.New("store: a run is already active for this workflow")
+
 type Store struct {
 	pool *pgxpool.Pool
 }

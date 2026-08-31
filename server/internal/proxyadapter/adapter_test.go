@@ -66,7 +66,7 @@ func (e *env) mintRun(t *testing.T) (uuid.UUID, string) {
 		RunID: runID, TenantID: e.tenant.ID, ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
-	_, err = e.store.CreateRun(context.Background(), e.tenant.ID, e.wf.ID, runID, 1, hash)
+	_, err = e.store.CreateRun(context.Background(), e.tenant.ID, e.wf.ID, runID, 1, hash, "manual", nil)
 	require.NoError(t, err)
 	return runID, bearer
 }
@@ -82,7 +82,7 @@ func TestVerifyRunTokenLifecycle(t *testing.T) {
 	require.Equal(t, e.tenant.ID, id.TenantID)
 
 	// A finalized run's token is dead: cleared hash AND inactive status.
-	_, err = e.store.FinalizeRun(ctx, e.tenant.ID, runID, store.RunFinal{Status: "succeeded"})
+	_, err = e.store.FinalizeRun(ctx, e.tenant.ID, runID, store.RunFinal{Status: "succeeded"}, 0)
 	require.NoError(t, err)
 	_, err = e.set.Auth.VerifyRunToken(ctx, bearer)
 	require.Error(t, err)

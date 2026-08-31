@@ -73,7 +73,7 @@ func (d Deps) fireRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	run, err := d.Store.CreateRun(r.Context(), claims.TenantID, wfID, runID, version.Number, hash)
+	run, err := d.Store.CreateRun(r.Context(), claims.TenantID, wfID, runID, version.Number, hash, "manual", nil)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -104,7 +104,7 @@ func (d Deps) failDispatch(ctx context.Context, tenantID, runID uuid.UUID, cause
 	ctx = context.WithoutCancel(ctx)
 	if _, err := d.Store.FinalizeRun(ctx, tenantID, runID, store.RunFinal{
 		Status: "failed", ErrorKind: "dispatch_failed", ErrorMsg: cause.Error(),
-	}); err != nil {
+	}, 0); err != nil {
 		slog.Error("httpapi: record dispatch failure", "run", runID, "err", err)
 	}
 }

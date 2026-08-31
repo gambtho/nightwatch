@@ -220,3 +220,31 @@ func (s *Store) GetApprovedVersion(ctx context.Context, tenantID, workflowID uui
 		 WHERE workflow_id = $1 AND tenant_id = $2 AND status = 'approved'`,
 		workflowID, tenantID))
 }
+
+type SchedulableWorkflow struct {
+	TenantID   uuid.UUID
+	WorkflowID uuid.UUID
+	Version    int
+	Schedule   json.RawMessage
+}
+
+// System query: the scheduler is a platform actor scanning every tenant's
+// approved, scheduled versions; rows carry their TenantID.
+func (s *Store) ListSchedulableWorkflows(ctx context.Context) ([]SchedulableWorkflow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT tenant_id, workflow_id, version, schedule FROM workflow_version
+		 WHERE status = 'approved' AND schedule IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SchedulableWorkflow
+	for rows.Next() {
+		var w SchedulableWorkflow
+		if err := rows.Scan(&w.TenantID, &w.WorkflowID, &w.Version, &w.Schedule); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}

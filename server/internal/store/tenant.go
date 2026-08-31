@@ -8,9 +8,10 @@ import (
 )
 
 type Tenant struct {
-	ID        uuid.UUID
-	Name      string
-	CreatedAt time.Time
+	ID              uuid.UUID
+	Name            string
+	CreatedAt       time.Time
+	MonthlyCapCents *int
 }
 
 // CreateTenant inserts the tenant and its wrapped KEK in one transaction:
@@ -24,9 +25,9 @@ func (s *Store) CreateTenant(ctx context.Context, name string, wrappedKEK []byte
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx,
-		`INSERT INTO tenant (name) VALUES ($1) RETURNING id, name, created_at`,
+		`INSERT INTO tenant (name) VALUES ($1) RETURNING id, name, created_at, monthly_cap_cents`,
 		name,
-	).Scan(&t.ID, &t.Name, &t.CreatedAt)
+	).Scan(&t.ID, &t.Name, &t.CreatedAt, &t.MonthlyCapCents)
 	if err != nil {
 		return t, err
 	}
@@ -64,8 +65,21 @@ func (s *Store) TenantKEKAt(ctx context.Context, tenantID uuid.UUID, version int
 func (s *Store) GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error) {
 	var t Tenant
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, created_at FROM tenant WHERE id = $1`,
+		`SELECT id, name, created_at, monthly_cap_cents FROM tenant WHERE id = $1`,
 		id,
-	).Scan(&t.ID, &t.Name, &t.CreatedAt)
+	).Scan(&t.ID, &t.Name, &t.CreatedAt, &t.MonthlyCapCents)
 	return t, notFound(err)
+}
+
+func (s *Store) SetTenantMonthlyCap(ctx context.Context, tenantID uuid.UUID, capCents *int) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE tenant SET monthly_cap_cents = $2 WHERE id = $1`,
+		tenantID, capCents)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

@@ -57,7 +57,7 @@ func mintRun(t *testing.T, s *store.Store, signer *token.Signer, tn store.Tenant
 		RunID: runID, TenantID: tn.ID, ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
-	_, err = s.CreateRun(context.Background(), tn.ID, wf.ID, runID, 1, hash)
+	_, err = s.CreateRun(context.Background(), tn.ID, wf.ID, runID, 1, hash, "manual", nil)
 	require.NoError(t, err)
 	return runID, bearer
 }
@@ -98,7 +98,27 @@ func TestHarnessClientAgainstInternalAPI(t *testing.T) {
 func TestInternalAPIAuth(t *testing.T) {
 	s, signer, ts, tn, wf := setup(t)
 	runID, _ := mintRun(t, s, signer, tn, wf)
-	otherRunID, otherBearer := mintRun(t, s, signer, tn, wf)
+
+	// The admission index allows only one active run per workflow, so the
+	// second run needs its own workflow.
+	ctx2 := context.Background()
+	user2, err := s.UpsertUser(ctx2, tn.ID, "second@acme.test")
+	require.NoError(t, err)
+	wf2, _, err := s.CreateWorkflow(ctx2, tn.ID, "second workflow", store.VersionDoc{
+		Steps: store.StepsDoc{
+			SystemPrompt: "You prepare the weekly support digest.",
+			Kickoff:      "Summarize last week's tickets.",
+			Provider:     "anthropic",
+			Model:        "claude-sonnet-5",
+			MaxTokens:    2048,
+		},
+		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
+		Rubric: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	_, err = s.ApproveVersion(ctx2, tn.ID, wf2.ID, 1, user2.ID)
+	require.NoError(t, err)
+	otherRunID, otherBearer := mintRun(t, s, signer, tn, wf2)
 	_ = otherRunID
 
 	// No bearer: 401.
@@ -128,7 +148,7 @@ func TestInternalAPIRejectsMismatchedTokenHash(t *testing.T) {
 		RunID: runID, TenantID: tn.ID, ExpiresAt: time.Now().Add(time.Hour),
 	})
 	require.NoError(t, err)
-	_, err = s.CreateRun(context.Background(), tn.ID, wf.ID, runID, 1, "not-the-real-hash")
+	_, err = s.CreateRun(context.Background(), tn.ID, wf.ID, runID, 1, "not-the-real-hash", "manual", nil)
 	require.NoError(t, err)
 
 	req, err := http.NewRequest("GET", ts.URL+"/internal/runs/"+runID.String()+"/context", nil)
