@@ -19,7 +19,7 @@ finishes, or a cross-cutting decision is taken.
 | Identity spec                    | **Merged** (PR #6)                                                                                                       |
 | Identity implementation          | **Merged** (PR #17)                                                                                                      |
 | Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
-| Connectors                       | **In flight** — phase 1 in PR #27, phase 2 underway; **owns `server/`**                                                  |
+| Connectors                       | **In flight** — phase 1 merged; phase 2 re-landing as PR #31; phase 4 as PR #30; **owns `server/`**                      |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
 | Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
@@ -89,6 +89,32 @@ right rather than merely asserted.
 - **Docs, specs, research** — always open.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
+
+## Rule: no pre-stacked PR bases
+
+Added 2026-08-31 after a stacked PR merged into the wrong target and a full
+phase of work was silently stranded off `main`.
+
+**What happened.** The connectors lane stacked phase 2 on phase 1 and phase 4
+on phase 2, each PR based on its predecessor's branch. Phase 1 was
+squash-merged to `main`; phase 2 was merged **into `feat/connectors-phase1`**
+rather than being retargeted first. GitHub reported it MERGED, so it looked
+done — but 24 files and roughly 2,000 lines of vault-OAuth work existed only on
+that branch. It was caught by noticing `main`'s migrations stopped at `00010`
+when phase 2 should have added `00011`.
+
+**The rule for lanes shipping a phased plan: each phase PR targets `main`, and
+waits for its predecessor to merge.** Review latency is cheaper than a routing
+accident. Do not pre-stack bases.
+
+If a stack already exists, the only safe merge order is: merge the base to
+`main`, **retarget the child to `main`**, then merge the child. A child merged
+while still pointing at its base lands in the base, not in `main`.
+
+**A merge is not confirmation that work is on `main`.** Verify against the
+tree — a migration number, a package directory, a diff against the branch —
+before recording a phase as landed. This board recorded phase 2 as merged on
+the strength of a MERGED status, and it was wrong.
 
 ## Rule: outward-facing actions
 
