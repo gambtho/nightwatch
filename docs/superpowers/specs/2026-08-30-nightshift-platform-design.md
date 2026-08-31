@@ -132,7 +132,8 @@ proxy we operate**, and actors get no direct egress at all.
 - A default-deny worker egress NetworkPolicy stays as defence in depth — with the proxy
   the only permitted destination — and it is **ours to build**: upstream's WorkerPool
   NetworkPolicy is ingress-only by pinned contract, so this belongs in our deployment
-  manifests.
+  manifests. The Plan 5 compute spec designs it
+  (`2026-08-31-nightshift-compute-design.md`, PR #12, unmerged).
 
 Enforcing in the proxy rather than in the harness is deliberate: the harness shares a
 sandbox with an LLM, so anything it enforces is advisory. The proxy is outside the blast
@@ -189,8 +190,12 @@ now ours. Ordered by how much of the product breaks without it.
 7. **Tool permissions** — which tools a workflow may use, enforced by the harness and
    bounded by the proxy.
 8. **Versioning** — a workflow's permit and steps are versioned; edits require re-approval.
-   Note this couples to ActorTemplate immutability: a new version is a new template and a
-   new golden snapshot.
+   _Corrected 2026-08-31:_ this does **not** couple to ActorTemplate immutability. The
+   harness fetches its steps at run time from our store, keyed by the run's version
+   (`server/internal/internalapi`), so ActorTemplates map to **harness releases**, not
+   workflow versions — versioning's governance lives entirely in our database. See the
+   Plan 5 compute spec's "Identity mapping" section
+   (`2026-08-31-nightshift-compute-design.md`, PR #12, unmerged).
 
 ## Harvest from CronFoundry
 
@@ -240,7 +245,10 @@ replaces them.
   Acceptable?~~ **Dissolved 2026-08-30:** storage is pluggable (GCS or S3); the project
   itself runs dev on an in-cluster S3 store. Snapshot GC is ours to operate.
 - **Verified state reset.** The threat model flags suspend/resume state cleanup as needing
-  testing. Hosting strangers' agents means verifying it ourselves, not taking it on faith.
+  testing — upstream's own open item too. Hosting strangers' agents means verifying it
+  ourselves, not taking it on faith. The Plan 5 compute spec's acceptance tests include a
+  cross-actor state-leak probe (`2026-08-31-nightshift-compute-design.md`, PR #12,
+  unmerged).
 - **Fixed cost before customer one.** A k8s fleet with microVM-capable nodes is a standing
   bill. What is the runway assumption?
 - **Connector catalog** — still the top product risk from the UX spec, now with per-tenant
