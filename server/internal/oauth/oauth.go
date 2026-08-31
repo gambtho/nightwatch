@@ -164,7 +164,16 @@ func (s *Service) token(ctx context.Context, provider string, form url.Values) (
 		return tokenResponse{}, err
 	}
 	var tr tokenResponse
-	if err := json.Unmarshal(body, &tr); err != nil || resp.StatusCode >= 400 {
+	if jerr := json.Unmarshal(body, &tr); jerr != nil {
+		return tokenResponse{}, fmt.Errorf("oauth: %s token endpoint status %d: unparseable body", provider, resp.StatusCode)
+	}
+	if resp.StatusCode >= 400 {
+		// Surface the provider's error code (invalid_grant etc.) — it is
+		// exactly the context a needs_reauth diagnosis needs. Never the
+		// body wholesale: error codes only.
+		if tr.Error != "" {
+			return tokenResponse{}, fmt.Errorf("oauth: %s token endpoint status %d: %s", provider, resp.StatusCode, tr.Error)
+		}
 		return tokenResponse{}, fmt.Errorf("oauth: %s token endpoint status %d", provider, resp.StatusCode)
 	}
 	if tr.OK != nil && !*tr.OK {
@@ -267,6 +276,15 @@ func (s *Service) Revoke(ctx context.Context, provider string, b Bundle) error {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("oauth: %s revoke status %d", provider, resp.StatusCode)
+	}
+	// Slack signals failure as 200 + ok:false, like its token endpoint.
+	var out struct {
+		OK    *bool  `json:"ok"`
+		Error string `json:"error"`
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if json.Unmarshal(body, &out) == nil && out.OK != nil && !*out.OK {
+		return fmt.Errorf("oauth: %s revoke: %s", provider, out.Error)
 	}
 	return nil
 }

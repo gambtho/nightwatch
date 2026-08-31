@@ -55,6 +55,16 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and value required"})
 		return
 	}
+	// A PUT stores llm_api_key material; silently flipping an existing
+	// oauth connection's kind would destroy its bundle outside the
+	// refresh lock. Rotating an oauth credential is a re-consent (or a
+	// delete + reconnect), never a PUT.
+	if existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name); gerr == nil && existing.Kind != "llm_api_key" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "connection exists with kind " + existing.Kind + " — delete it first or re-connect via oauth",
+		})
+		return
+	}
 	wrappedKEK, kekVersion, err := d.Store.TenantKEK(r.Context(), claims.TenantID)
 	if err != nil {
 		writeErr(w, err)
