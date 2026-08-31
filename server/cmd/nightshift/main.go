@@ -9,11 +9,13 @@
 //	DATABASE_URL            Postgres DSN (required)
 //	NIGHTSHIFT_SESSION_KEY  base64, 32 bytes (required for serve/dev-session)
 //	NIGHTSHIFT_RUNNER_KEY   base64, 32 bytes (required for serve)
-//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for dev-session)
+//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for serve/dev-session)
 //	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
 //	NIGHTSHIFT_STATE_DIR    actor state root, default $TMPDIR/nightshift-actors
-//	ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
-//	                        platform model credentials, per provider
+//	NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY, NIGHTSHIFT_PLATFORM_OPENAI_KEY,
+//	NIGHTSHIFT_PLATFORM_OPENROUTER_KEY
+//	                        platform model credentials, per provider — injected
+//	                        by the egress proxy, never visible to the harness
 package main
 
 import (
@@ -33,6 +35,9 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
 	"github.com/gambtho/nightwatch/server/internal/llm"
+	"github.com/gambtho/nightwatch/server/internal/proxy"
+	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
+	"github.com/gambtho/nightwatch/server/internal/redact"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/token"
 	"github.com/gambtho/nightwatch/server/internal/vault"
@@ -80,18 +85,6 @@ func keyFromEnv(name string) []byte {
 	return key
 }
 
-func apiKeyFor(provider string) string {
-	switch provider {
-	case "anthropic":
-		return os.Getenv("ANTHROPIC_API_KEY")
-	case "openai":
-		return os.Getenv("OPENAI_API_KEY")
-	case "openrouter":
-		return os.Getenv("OPENROUTER_API_KEY")
-	}
-	return ""
-}
-
 func serve(ctx context.Context) error {
 	if err := db.Migrate(ctx, mustEnv("DATABASE_URL")); err != nil {
 		return err
@@ -105,7 +98,29 @@ func serve(ctx context.Context) error {
 	s := store.New(pool)
 	sessionKey := keyFromEnv("NIGHTSHIFT_SESSION_KEY")
 	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
-	factory := llm.NewFactory(llm.Config{})
+	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
+	if err != nil {
+		return err
+	}
+	// Proxy-specific names, deliberately NOT the SDKs' well-known key
+	// variables: the pinned SDK constructors auto-load those from the
+	// environment into client options, which on Local compute (shared
+	// process) would put real keys back into harness memory. These names
+	// are invisible to the SDKs.
+	platform := map[string]string{
+		"anthropic":  os.Getenv("NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY"),
+		"openai":     os.Getenv("NIGHTSHIFT_PLATFORM_OPENAI_KEY"),
+		"openrouter": os.Getenv("NIGHTSHIFT_PLATFORM_OPENROUTER_KEY"),
+	}
+
+	secretVals := make([]string, 0, len(platform))
+	for _, v := range platform {
+		secretVals = append(secretVals, v)
+	}
+	slog.SetDefault(slog.New(redact.Handler{
+		Inner: slog.Default().Handler(),
+		R:     redact.New(secretVals),
+	}))
 
 	addr := os.Getenv("NIGHTSHIFT_LISTEN_ADDR")
 	if addr == "" {
@@ -117,6 +132,11 @@ func serve(ctx context.Context) error {
 	}
 
 	baseURL := "http://" + addr
+	factory := llm.NewFactory(llm.Config{
+		AnthropicBaseURL:  baseURL + "/proxy/llm/anthropic",
+		OpenAIBaseURL:     baseURL + "/proxy/llm/openai",
+		OpenRouterBaseURL: baseURL + "/proxy/llm/openrouter",
+	})
 	local := compute.NewLocal(stateDir, func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
 		steps, err := client.Context(ctx)
@@ -132,11 +152,27 @@ func serve(ctx context.Context) error {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Signer: signer, Compute: local})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Signer: signer, Compute: local, Vault: master})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 
+	adapters := proxyadapter.New(s, signer, master, platform)
+	cfg := proxy.DefaultConfig()
+	cfg.InternalBase = baseURL
+	proxy.RegisterRoutes(mux, proxy.Deps{
+		Auth: adapters.Auth, Permits: adapters.Permits,
+		Credentials: adapters.Credentials, Events: adapters.Events,
+		Hook: proxy.NopHook{}, Config: cfg,
+	})
+
 	slog.Info("nightshift: serving", "addr", addr)
-	return http.ListenAndServe(addr, mux)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		// WriteTimeout deliberately zero: streamed LLM responses run for
+		// minutes and a server-wide write deadline would sever them.
+	}
+	return srv.ListenAndServe()
 }
 
 func devSession(ctx context.Context, args []string) error {

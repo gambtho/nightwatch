@@ -57,7 +57,7 @@ proxy (ours)  /proxy/llm/{provider}/{path...}   and   /proxy/internal/{path...}
    │  2 resolve permit (per request; no cache) ── PermitSource
    │  3 Hook.Before(...)                    ── no-op now; Plan 3 metering
    │  4 inject credential                   ── CredentialSource (vault)
-   │  5 reverse-proxy, streaming            ── httputil.ReverseProxy, FlushInterval -1
+   │  5 reverse-proxy, streaming            ── httputil.ReverseProxy, default FlushInterval
    │  6 append run event (request/denied/error) ── EventSink
    ▼
 provider (TLS, system roots)   /   internal API (pass-through)
@@ -253,9 +253,14 @@ live.
 4. **Inject** — strip all inbound auth headers; set the provider's real shape
    (`x-api-key` for anthropic; `Authorization: Bearer` for openai/openrouter)
    from the resolved connection; update `last_used_at` async.
-5. **Forward, streaming** — one `httputil.ReverseProxy` per provider,
-   `FlushInterval: -1` so SSE streams immediately; upstream TLS verified
-   against system roots. The server runs with `ReadHeaderTimeout` set and a
+5. **Forward, streaming** — one `httputil.ReverseProxy` per provider, with
+   `FlushInterval` left at its default: Go's `ReverseProxy` already
+   auto-flushes `text/event-stream` responses and responses of unknown
+   length immediately, which is what SSE needs; an explicit `-1` would
+   additionally force eager per-write flushing of ordinary buffered
+   responses, racing the client's read against the audit event recorded
+   after `ServeHTTP` returns. Upstream TLS is verified against system
+   roots. The server runs with `ReadHeaderTimeout` set and a
    **deliberately unset write timeout** — streamed LLM responses run for
    minutes and a server-wide `WriteTimeout` would sever them; per-upstream
    deadlines are a later concern if abuse appears.
