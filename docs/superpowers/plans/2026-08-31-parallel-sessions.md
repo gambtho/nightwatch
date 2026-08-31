@@ -33,10 +33,10 @@ finishes, or a cross-cutting decision is taken.
 | Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
-| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 delivered; impl on `feat/p1-subtraction-floor`; one plan amendment pending  |
+| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 amended + coordinator-accepted; Codex review, then impl on `feat/p1-…`      |
 | CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
 | Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
-| Pivot demo (`demo/tomte-pivot`)  | **Lane opened** — prototype re-skin telling the click-install story; not for merge; prompt below           |
+| Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
@@ -510,6 +510,15 @@ undocumented for third parties and needs token exchange.
   github preset (free → $0 classification with honest copy; paid → the
   user-entered price path), switchable in settings since an org can enable
   paid usage after first run.
+  **Resolved (plan PR #45, commit 0023855), coordinator-accepted:**
+  `zero_cost` is an explicit per-endpoint boolean on the `llm_endpoint`
+  record, never preset-inferred — `local` forces true, `github` takes the
+  user's free-vs-paid answer from the capture card, every other preset
+  forces false, all DB CHECK-enforced. The settings toggle exists by
+  construction: flipping it goes through `PUT /v1/settings/endpoint`, the
+  recorded governance switch that re-runs the pricing gate and recompiles
+  approved versions. Compiled docs always carry resolved prices, so no
+  preset special-casing survives at runtime.
 - Preset enum for the record:
   `anthropic|openai|openrouter|github|azure|custom|local`. Next migration
   confirmed 00012.
