@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/testpg"
 	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/nightwatch/server/internal/vault"
 )
 
 type env struct {
@@ -27,15 +29,28 @@ type env struct {
 	tenant  store.Tenant
 	user    store.User
 	compute *fakeCompute
+	vault   *vault.Master
 }
 
-var testKEK = []byte("test-wrapped-kek") // opaque to the store; real KEKs arrive with vault tests
+// testKEK is a placeholder wrapped KEK for tests that don't exercise the
+// encrypt path; newEnv mints a real one from a real vault.Master so the
+// connections API's encrypt path works end to end.
+var testKEK = []byte("test-wrapped-kek")
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
-	tn, err := s.CreateTenant(ctx, "acme", testKEK)
+
+	vkey := make([]byte, vault.KeyLen)
+	_, err := rand.Read(vkey)
+	require.NoError(t, err)
+	master, err := vault.NewMaster(vkey)
+	require.NoError(t, err)
+	wrapped, err := master.NewTenantKEK()
+	require.NoError(t, err)
+
+	tn, err := s.CreateTenant(ctx, "acme", wrapped)
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
@@ -50,10 +65,10 @@ func newEnv(t *testing.T) *env {
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Signer: signer, Compute: fc})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: key, Signer: signer, Compute: fc, Vault: master})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user, compute: fc}
+	return &env{ts: ts, store: s, key: key, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master}
 }
 
 func (e *env) do(t *testing.T, method, path string, body any) (*http.Response, map[string]any) {

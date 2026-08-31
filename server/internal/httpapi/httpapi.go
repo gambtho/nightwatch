@@ -11,6 +11,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/compute"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/nightwatch/server/internal/vault"
 )
 
 type Deps struct {
@@ -18,6 +19,7 @@ type Deps struct {
 	SessionKey []byte
 	Signer     *token.Signer
 	Compute    compute.Compute
+	Vault      *vault.Master
 }
 
 func RegisterRoutes(mux *http.ServeMux, d Deps) {
@@ -33,6 +35,9 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/workflows/{id}/runs", auth(d.listRuns))
 	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
 	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
+	mux.Handle("PUT /v1/connections/{name}", auth(d.putConnection))
+	mux.Handle("GET /v1/connections", auth(d.listConnections))
+	mux.Handle("DELETE /v1/connections/{name}", auth(d.deleteConnection))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
