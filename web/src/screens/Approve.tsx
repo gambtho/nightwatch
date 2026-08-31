@@ -4,6 +4,7 @@ import { approveVersion, getWorkflow, isAuthError } from "../api/client";
 import { useSession } from "../session";
 import type { Version, Workflow } from "../api/types";
 import PermitDiagram from "../components/PermitDiagram";
+import ScheduleExpectations from "../components/ScheduleExpectations";
 import { parseSteps } from "../lib/steps";
 import { summarizeVersions } from "../lib/versions";
 import { describeSchedule } from "../lib/schedule";
@@ -100,9 +101,12 @@ function ApproveInner({ id }: { id: string }) {
     <div className="screen">
       <h1>{workflow.name}</h1>
       {draft.schedule && (
-        <p className="dim approve-schedule">
-          Runs {describeSchedule(draft.schedule.cron, draft.schedule.tz)}
-        </p>
+        <>
+          <p className="dim approve-schedule">
+            Runs {describeSchedule(draft.schedule.cron, draft.schedule.tz)}
+          </p>
+          <ScheduleExpectations />
+        </>
       )}
 
       <section className="approve-steps">

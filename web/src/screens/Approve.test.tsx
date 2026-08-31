@@ -140,3 +140,42 @@ describe("Approve — unreadable steps", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("Approve — sleeping-machine guidance", () => {
+  it("carries the promise and the always-on options next to the schedule", async () => {
+    renderApprove({ "GET /v1/workflows/wf1": workflowResponse });
+
+    expect(
+      await screen.findByText(/works while your computer is on/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/once, not twelve times/i)).toBeInTheDocument();
+    // The three always-on options, in the spec's order.
+    const items = screen
+      .getAllByRole("listitem")
+      .map((li) => li.textContent ?? "")
+      .filter((t) => /keep this computer awake|stays on|hosted, always-on/i.test(t));
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatch(/keep this computer awake/i);
+    expect(items[1]).toMatch(/machine that stays on/i);
+    expect(items[2]).toMatch(/doesn't today/i);
+  });
+
+  it("stays quiet when the draft has no schedule", async () => {
+    const { schedule: _schedule, ...unscheduled } = draft;
+    renderApprove({
+      "GET /v1/workflows/wf1": {
+        body: {
+          workflow: {
+            id: "wf1",
+            name: "weekly digest",
+            created_at: "2026-08-30T00:00:00Z",
+          },
+          versions: [unscheduled],
+        },
+      },
+    });
+
+    expect(await screen.findByText("weekly digest")).toBeInTheDocument();
+    expect(screen.queryByText(/works while your computer is on/i)).toBeNull();
+  });
+});
