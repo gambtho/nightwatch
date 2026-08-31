@@ -69,7 +69,8 @@ Three specs written together after validating the product direction against the
 "agent-first" scenario document. They address the three structural gaps that review
 found: no way to ask a human mid-run, no way for trust to grow with evidence, and no
 way for a workflow to have a goal and finish. Each depends on the connector catalog for
-its operation vocabulary, so none can be planned before that spec lands.
+its operation vocabulary; that spec has merged (PR #8), so all three are now plannable,
+sequenced in the execution order above.
 
 - **[Escalation](../specs/2026-08-31-nightshift-escalation-design.md)** — async
   runtime escalation. Amends the UX spec's "no runtime approval gate" decision by making
