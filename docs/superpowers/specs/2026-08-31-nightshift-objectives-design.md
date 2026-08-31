@@ -49,10 +49,15 @@ changing the goal requires re-approval exactly as changing the permit does.
   "v": 1,
   "goal": "Get the incorrect roaming charges reversed on my mobile account.",
   "done_when": "A credit for the disputed roaming charges appears on a statement, and the roaming block shows as active.",
-  "horizon": { "kind": "duration", "value": "P60D" },
-  "check_cadence": "0 9 * * MON"
+  "horizon": { "kind": "duration", "value": "P60D" }
 }
 ```
+
+**Cadence is not part of the objective.** Plan 3 adds a `schedule` artifact
+(`{cron, tz}` on `workflow_version`), and a goal workflow uses it exactly as a standing
+one does — "how often do I check" is the same question in both modes. An earlier draft of
+this document carried a `check_cadence` field; it would have been a second, conflicting
+place to write a cron expression.
 
 In the user's words, per the three-artifact table's pattern:
 
@@ -68,7 +73,7 @@ the actor model that the platform spec does not currently make.
 
 `workflow.status`: `active` → `paused` | `completed` | `abandoned`.
 
-- **Active.** Fires on `check_cadence` like any workflow.
+- **Active.** Fires on its `schedule` like any workflow.
 - **Believes it is done.** The run emits a `completion` escalation carrying its evidence.
   The run finishes normally; the workflow stays `active` until a human answers.
 - **Confirmed.** Workflow → `completed`, `completed_at` set, scheduling stops, the actor is
@@ -97,8 +102,16 @@ with how permits fail closed at version creation.
 ## Interaction with scheduling (Plan 3)
 
 The scheduler must read `workflow.status` and fire only `active` workflows. A `completed` or
-`abandoned` workflow is never scheduled again. This is a constraint on a plan that has not
-been written yet, and it belongs in the roadmap's Plan 3 notes.
+`abandoned` workflow is never scheduled again.
+
+Plan 3 is in flight on branch `sched-spec` (`2026-08-31-nightshift-scheduling-metering-design.md`,
+unmerged) and does not know about `workflow.status`, because it does not exist yet. Its `engine.Fire` is the single firing
+path shared by the HTTP handler and the scheduler tick, which makes this a one-place
+change — but it is a change to a file another session currently owns, so it lands after
+Plan 3 merges, not concurrently.
+
+Manual fires of a `completed` or `abandoned` workflow return `409`, matching the shape
+Plan 3 already uses for a workflow with a run in flight.
 
 ## Actor retention after completion
 

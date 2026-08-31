@@ -86,6 +86,65 @@ reading the code, not the specs:
 `InvokeRequest` (`server/internal/compute/compute.go`) gains an optional answer payload;
 the interface is otherwise unchanged.
 
+## Reconciliation with Plan 3 (scheduling and metering)
+
+Plan 3 is in flight on branch `sched-spec` and lands three mechanisms that a fourth run
+status interacts with directly. Written against
+`2026-08-31-nightshift-scheduling-metering-design.md` (branch `sched-spec`, unmerged);
+re-verify against the merged tree before implementing.
+
+**1. `awaiting_input` must join the single-active-run index.** Plan 3 adds:
+
+```sql
+CREATE UNIQUE INDEX run_one_active_per_workflow
+    ON run (workflow_id) WHERE status IN ('pending', 'running');
+```
+
+If `awaiting_input` stays outside that predicate, the scheduler fires a second run of a
+workflow whose first run is still waiting on a human — two concurrent runs, defeating the
+parent spec's "default to serialize", and a second escalation on the same workflow. The
+one-open-escalation index is per _run_ and would not catch it.
+
+So the predicate becomes `status IN ('pending', 'running', 'awaiting_input')`.
+
+**Consequence, stated plainly:** a workflow with an open escalation does not fire again
+until it is answered or expires. That is the correct behavior — the workflow is blocked on
+a person — but it means the escalation deadline is also a cap on how long a workflow can
+stall. A 72-hour deadline costs a weekly workflow nothing and costs a daily workflow three
+runs. **The deadline default should be chosen against the workflow's cadence**, not set
+globally, and skipped occurrences must be visible the way Plan 3 makes scheduled skips
+visible.
+
+**2. The reaper must key off `dispatched_at`, not `created_at`.** Plan 3's reaper sweeps:
+
+```sql
+status IN ('pending','running') AND created_at < now() - deadline
+```
+
+`awaiting_input` is already outside that predicate, so a waiting run is safe — no change
+needed there, and this spec's earlier concern is satisfied by the implementation as
+written. **Keep it that way.**
+
+The real problem is on the far side. A run that waits 72 hours and then resumes returns to
+`running` with a `created_at` three days old, and the next five-minute tick reaps it
+immediately. This design would introduce that bug into a correct mechanism.
+
+The fix is already available: Plan 3 adds `dispatched_at`, set when `Invoke` succeeds, and
+resuming an escalation calls `Invoke` again. So:
+
+- The reaper's predicate becomes `COALESCE(dispatched_at, created_at) < now() - deadline`,
+  preserving today's semantics for a run that never dispatched.
+- Resume re-stamps `dispatched_at`.
+
+This also keeps Plan 3's `deadline > TTL` startup invariant meaningful: it now bounds a
+single dispatch episode rather than the run's whole wall-clock life, which is what it was
+always actually protecting.
+
+**3. The permit is no longer LLM-only.** Plan 3 adds `spend.per_run_cents` to the permit
+document. An amendment delta can therefore widen a spend cap as well as add operations —
+which is a scope widening like any other and must appear in the diagram diff, not slip
+through as a numeric field. Amendment validation covers the `spend` section too.
+
 ## Where an escalation comes from
 
 **Proxy-originated (`amendment`).** The harness calls a connector operation outside the
@@ -225,8 +284,9 @@ harness's internal API, or control-plane policy.
 - **Server restart with runs awaiting input.** Unlike the orphaned-run gap the roadmap
   records as decision 10, `awaiting_input` is durable by construction: the state is in
   Postgres and resumption is driven by a human answer, not by an in-memory handle. This path
-  is more robust than the current `running` path. **The Plan 3 reaper must not treat
-  `awaiting_input` as orphaned** — it has its own deadline.
+  is more robust than the current `running` path. An `awaiting_input` run is governed by the
+  escalation deadline rather than the run deadline — see
+  [Reconciliation with Plan 3](#reconciliation-with-plan-3-scheduling-and-metering).
 - **Answer after expiry.** Rejected, `409`.
 - **A different version is approved while a run waits.** The delta was computed against a
   version that is no longer approved. Recommend invalidating the escalation with a clear
@@ -258,6 +318,10 @@ A fifth surface, sibling to the alert, with the same four-block shape:
 - The pre-suspension run token is rejected at the proxy after resume.
 - The one-open-escalation index holds under concurrent creation.
 - The reaper does not finalize `awaiting_input` runs.
+- **A run resumed after waiting longer than the run deadline is not reaped** — the
+  `dispatched_at` regression, and the one most likely to be missed.
+- **A scheduled fire is refused while the workflow has a run in `awaiting_input`**, and
+  resumes firing normally once it is answered.
 - A suspended run can still append control-plane events.
 
 ## Open questions
