@@ -51,8 +51,16 @@ its operation vocabulary, so none can be planned before that spec lands.
   depends on the Plan 4 grader and must not ship before it.
 - **[Objectives](../specs/2026-08-31-nightshift-objectives-design.md)** — a fourth
   artifact beside steps/permit/rubric, plus `workflow.mode` and `workflow.status`.
-  **Plan 3 must fire only `active` workflows**, and its orphaned-run reaper (decision 10
-  below) **must not treat `awaiting_input` as orphaned**.
+  Cadence stays in Plan 3's `schedule` artifact rather than the objective.
+
+**Three amendments these specs owe Plan 3**, all landing after it merges (it owns
+`server/`); the escalation spec carries the detail:
+
+1. `awaiting_input` joins the `run_one_active_per_workflow` index predicate, or the
+   scheduler fires a second run while the first waits on a human.
+2. The reaper keys off `COALESCE(dispatched_at, created_at)`, not `created_at`, or a
+   resumed run is reaped immediately for having been created days ago.
+3. `engine.Fire` fires only `active` workflows.
 
 ## Scoping decisions made during decomposition
 
