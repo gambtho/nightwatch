@@ -158,3 +158,17 @@ func TestCreateWorkflowRejectsUnpricedModel(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	require.Contains(t, out["error"], "pricing")
 }
+
+func TestWorkflowScheduleValidation(t *testing.T) {
+	e := newEnv(t)
+
+	body := workflowBody()
+	body["schedule"] = map[string]any{"cron": "not cron", "tz": "UTC"}
+	resp, _ := e.do(t, "POST", "/v1/workflows", body)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	body["schedule"] = map[string]any{"cron": "0 9 * * MON", "tz": "America/New_York"}
+	resp, out := e.do(t, "POST", "/v1/workflows", body)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NotNil(t, out["version"].(map[string]any)["schedule"])
+}

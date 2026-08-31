@@ -11,6 +11,7 @@ import (
 
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/permit"
+	"github.com/gambtho/nightwatch/server/internal/schedule"
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
 
@@ -30,15 +31,17 @@ type versionJSON struct {
 	Steps      store.StepsDoc  `json:"steps"`
 	Permit     json.RawMessage `json:"permit"`
 	Rubric     json.RawMessage `json:"rubric"`
+	Schedule   json.RawMessage `json:"schedule,omitempty"`
 	ApprovedAt *time.Time      `json:"approved_at,omitempty"`
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
 type versionDocJSON struct {
-	Name   string          `json:"name"`
-	Steps  store.StepsDoc  `json:"steps"`
-	Permit json.RawMessage `json:"permit"`
-	Rubric json.RawMessage `json:"rubric"`
+	Name     string          `json:"name"`
+	Steps    store.StepsDoc  `json:"steps"`
+	Permit   json.RawMessage `json:"permit"`
+	Rubric   json.RawMessage `json:"rubric"`
+	Schedule json.RawMessage `json:"schedule,omitempty"`
 }
 
 func toWorkflowJSON(wf store.Workflow) workflowJSON {
@@ -48,7 +51,7 @@ func toWorkflowJSON(wf store.Workflow) workflowJSON {
 func toVersionJSON(v store.Version) versionJSON {
 	return versionJSON{
 		Number: v.Number, Status: v.Status, Steps: v.Doc.Steps,
-		Permit: v.Doc.Permit, Rubric: v.Doc.Rubric,
+		Permit: v.Doc.Permit, Rubric: v.Doc.Rubric, Schedule: v.Doc.Schedule,
 		ApprovedAt: v.ApprovedAt, CreatedAt: v.CreatedAt,
 	}
 }
@@ -81,6 +84,12 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 	if body.Rubric == nil {
 		body.Rubric = json.RawMessage(`{}`)
 	}
+	if body.Schedule != nil {
+		if _, err := schedule.Parse(body.Schedule); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return body, false
+		}
+	}
 	return body, true
 }
 
@@ -95,7 +104,7 @@ func (d Deps) createWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wf, v, err := d.Store.CreateWorkflow(r.Context(), claims.TenantID, body.Name,
-		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric})
+		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric, Schedule: body.Schedule})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -155,7 +164,7 @@ func (d Deps) addVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := d.Store.AddVersion(r.Context(), claims.TenantID, id,
-		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric})
+		store.VersionDoc{Steps: body.Steps, Permit: body.Permit, Rubric: body.Rubric, Schedule: body.Schedule})
 	if err != nil {
 		writeErr(w, err)
 		return

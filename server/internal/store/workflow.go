@@ -18,9 +18,10 @@ type StepsDoc struct {
 }
 
 type VersionDoc struct {
-	Steps  StepsDoc        `json:"steps"`
-	Permit json.RawMessage `json:"permit"`
-	Rubric json.RawMessage `json:"rubric"`
+	Steps    StepsDoc        `json:"steps"`
+	Permit   json.RawMessage `json:"permit"`
+	Rubric   json.RawMessage `json:"rubric"`
+	Schedule json.RawMessage `json:"schedule,omitempty"`
 }
 
 type Workflow struct {
@@ -42,13 +43,13 @@ type Version struct {
 }
 
 const versionCols = `workflow_id, tenant_id, version, steps, permit, rubric,
-	status, approved_by, approved_at, created_at`
+	schedule, status, approved_by, approved_at, created_at`
 
 func scanVersion(row pgx.Row) (Version, error) {
 	var v Version
 	var steps []byte
 	err := row.Scan(&v.WorkflowID, &v.TenantID, &v.Number, &steps,
-		&v.Doc.Permit, &v.Doc.Rubric, &v.Status, &v.ApprovedBy,
+		&v.Doc.Permit, &v.Doc.Rubric, &v.Doc.Schedule, &v.Status, &v.ApprovedBy,
 		&v.ApprovedAt, &v.CreatedAt)
 	if err != nil {
 		return v, notFound(err)
@@ -83,10 +84,10 @@ func (s *Store) CreateWorkflow(ctx context.Context, tenantID uuid.UUID, name str
 	}
 	v, err = scanVersion(tx.QueryRow(ctx,
 		`INSERT INTO workflow_version
-		   (workflow_id, tenant_id, version, steps, permit, rubric)
-		 VALUES ($1, $2, 1, $3, $4, $5)
+		   (workflow_id, tenant_id, version, steps, permit, rubric, schedule)
+		 VALUES ($1, $2, 1, $3, $4, $5, $6)
 		 RETURNING `+versionCols,
-		wf.ID, tenantID, steps, doc.Permit, doc.Rubric))
+		wf.ID, tenantID, steps, doc.Permit, doc.Rubric, doc.Schedule))
 	if err != nil {
 		return wf, v, err
 	}
@@ -117,12 +118,12 @@ func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, 
 
 	v, err := scanVersion(tx.QueryRow(ctx,
 		`INSERT INTO workflow_version
-		   (workflow_id, tenant_id, version, steps, permit, rubric)
+		   (workflow_id, tenant_id, version, steps, permit, rubric, schedule)
 		 VALUES ($1, $2,
 		        (SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_version WHERE workflow_id = $1),
-		        $3, $4, $5)
+		        $3, $4, $5, $6)
 		 RETURNING `+versionCols,
-		workflowID, tenantID, steps, doc.Permit, doc.Rubric))
+		workflowID, tenantID, steps, doc.Permit, doc.Rubric, doc.Schedule))
 	if err != nil {
 		return Version{}, err
 	}
