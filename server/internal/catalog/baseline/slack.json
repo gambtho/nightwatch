@@ -9,7 +9,7 @@
       "name": "list_channels",
       "description": "List the channels in the workspace, with their names and IDs.",
       "effect": "read",
-      "scopes": ["channels:read", "admin"],
+      "scopes": ["channels:read"],
       "args_schema": {
         "type": "object",
         "properties": {
