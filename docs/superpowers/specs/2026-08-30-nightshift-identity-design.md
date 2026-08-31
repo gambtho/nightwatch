@@ -30,7 +30,11 @@ Spec only. No implementation plan exists yet; this feeds one.
   flag, 24 h TTL hardcoded in the mint.
 - `store.CreateTenant` already creates tenant + wrapped KEK in one transaction ("a
   tenant without a KEK cannot hold secrets, so the two are born together"). Signup
-  reuses it unchanged.
+  reuses its semantics but not its shape: `CreateTenant` opens and commits its own
+  transaction (`server/internal/store/tenant.go`) and `UpsertUser` executes
+  directly on the pool (`server/internal/store/user.go`), so the atomic signup
+  below needs a transaction-scoped store operation — see
+  [Verifying](#verifying).
 - `app_user` is unique on `(tenant_id, email)` with `role` constrained to
   `CHECK (role IN ('owner'))`. There is no cross-tenant identity: nothing prevents
   the same email existing in two tenants, and nothing maps an email to a tenant.
@@ -98,13 +102,22 @@ the user ever clicks. Standard mitigation, adopted here:
    transaction:
    - looks up the hash; rejects if missing, expired, or already consumed;
    - marks it consumed;
-   - resolves `lower(email)` → user. **If none exists:** `store.CreateTenant`
-     (tenant named from the email's local part — the user is never asked to name
-     a workspace) then `UpsertUser` → the `owner`. Tenant + KEK + user + consumed
-     token commit together;
-   - inserts a session row and sets the cookie;
+   - resolves `lower(email)` → user. **If none exists:** create tenant + wrapped
+     KEK (the tenant named from the email's local part — the user is never asked
+     to name a workspace) and the `owner` user. Tenant + KEK + user + consumed
+     token + session row commit together;
+   - sets the session cookie;
    - redirects: first login → the build conversation (the UX spec's entry point);
-     returning login → wherever the link's `next` pointed, validated same-origin.
+     returning login → wherever the link's `next` pointed — accepted only as a
+     relative path resolved against the public base URL, never an absolute URL.
+
+**This is one store operation, not a handler-side composition.** Today's
+`store.CreateTenant` begins and commits its own transaction and `UpsertUser` runs
+directly on the pool, so composing them cannot roll back together — a later
+failure would strand an orphaned tenant and KEK. The store grows a single
+`ConsumeLoginToken`/signup operation (or transaction-scoped variants of the
+existing methods) so that everything above commits or rolls back as one unit,
+which is what [Failure handling](#failure-handling) promises.
 
 A consumed or expired token renders "this link has expired — request a new one"
 with the email form. Never an error page a non-technical user has to interpret.
@@ -112,7 +125,12 @@ with the email form. Never an error page a non-technical user has to interpret.
 ### Sessions
 
 Table `session`: `id`, `token_hash` (SHA-256 of a 256-bit random value, unique),
-`user_id`, `tenant_id`, `created_at`, `last_seen_at`, `expires_at`.
+`user_id`, `tenant_id`, `created_at`, `last_seen_at`, `expires_at` — with
+`FOREIGN KEY (tenant_id, user_id) REFERENCES app_user (tenant_id, id)`, the same
+composite-FK pattern every child table uses (roadmap decision 4;
+`server/internal/db/migrations/00003_workflow.sql`). The database itself then
+refuses a session that pairs user A with tenant B, so buggy issuance can never
+mint a cross-tenant credential.
 
 - Cookie: `__Host-ns_session` — `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`.
   (The `__Host-` prefix requires Secure + no Domain attribute; local dev runs
@@ -131,15 +149,31 @@ Table `session`: `id`, `token_hash` (SHA-256 of a 256-bit random value, unique),
 
 **CSRF.** `SameSite=Lax` blocks cross-site POSTs from forms and scripts in modern
 browsers; as defence in depth every mutating `/v1` endpoint also rejects requests
-whose `Origin` header is present and not our own origin. No token dance — the API
-is same-origin `fetch` only.
+whose `Origin` header is present and does not exactly match the configured public
+origin (below). No token dance — the API is same-origin `fetch` only.
+
+**The canonical public origin is configuration, not inference.** The server today
+knows only its listen address and derives an internal base URL from it
+(`server/cmd/nightshift/main.go`), which behind a reverse proxy is neither the
+customer-facing origin nor trustworthy for security decisions. A new required env
+var, `NIGHTSHIFT_PUBLIC_BASE_URL` (scheme + host, no trailing slash), is the
+single source for: the links placed in magic-link emails, the Origin comparison
+above, and `next`-redirect validation (relative paths joined to this base only).
+Host-header or proxy-header inference is never used for any of the three.
 
 ### `dev-session` after this
 
-The command survives for local development but changes output: it inserts a session
-row and prints the cookie value, rather than signing claims. It stops needing
-`NIGHTSHIFT_SESSION_KEY` (which no longer exists) and keeps needing `DATABASE_URL`
-and `NIGHTSHIFT_VAULT_KEY`, exactly as today.
+The command survives for local development but changes in two ways:
+
+- **Output**: it inserts a session row and prints the cookie value, rather than
+  signing claims. It stops needing `NIGHTSHIFT_SESSION_KEY` (which no longer
+  exists) and keeps needing `DATABASE_URL` and `NIGHTSHIFT_VAULT_KEY`.
+- **Reuse semantics**: today every default invocation mints a _new_ tenant while
+  reusing `dev@example.test` (`server/cmd/nightshift/main.go`), which the global
+  unique email index would reject on the second run. The command changes to
+  resolve the email first: if it exists, reuse its tenant (as `-tenant-id` does
+  today); only a genuinely new email mints a tenant. `-tenant` with an email
+  that already belongs elsewhere becomes an error, not a duplicate.
 
 ## Schema changes
 
@@ -149,6 +183,11 @@ and `NIGHTSHIFT_VAULT_KEY`, exactly as today.
 - `CREATE UNIQUE INDEX ON app_user (lower(email))` — the v1 one-tenant-per-email
   constraint. `UpsertUser`'s `(tenant_id, email)` conflict target still works;
   the new index only forbids the same email appearing under a second tenant.
+  **Migration note:** the current schema validly permits cross-tenant duplicates,
+  and repeated default `dev-session` runs create them, so this migration can fail
+  on existing development databases. No production data exists; the migration
+  ships as a plain index creation and a dev database that trips it is recreated
+  (`nightshift migrate` against a fresh DB) rather than deduplicated in place.
 - No change to `tenant`, `tenant_kek`, or `app_user` columns.
 
 ## What "one person builds and approves" means for roles
@@ -190,7 +229,9 @@ account, several memberships" model changes login resolution and nothing else.
 ## Testing
 
 - Store tests: token single-use under concurrent consumption (two simultaneous
-  verifies, one wins); global email uniqueness across tenants; session
+  verifies, one wins); signup atomicity (a failure after tenant creation leaves
+  no tenant, KEK, user, or consumed token behind); global email uniqueness across
+  tenants; the session composite FK rejecting a user-A/tenant-B pair; session
   idle/absolute expiry boundaries; log-out-everywhere.
 - Handler tests: enumeration resistance (known vs unknown email produce
   byte-identical responses), rate-budget behaviour, interstitial consumes nothing
