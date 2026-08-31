@@ -230,10 +230,13 @@ func (s *Store) ListUndispatchedScheduledRuns(ctx context.Context) ([]Run, error
 }
 
 // System query: the reaper is a platform actor; rows carry their TenantID.
+// The cutoff compares against the latest dispatch episode — a redispatched
+// run's reap window tracks its freshest token; never-dispatched rows key
+// off creation, per the merged escalation design's amendment 2.
 func (s *Store) ListStuckRuns(ctx context.Context, cutoff time.Time) ([]Run, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+runCols+` FROM run
-		 WHERE status IN ('pending', 'running') AND created_at < $1
+		 WHERE status IN ('pending', 'running') AND COALESCE(dispatched_at, created_at) < $1
 		 ORDER BY created_at`, cutoff)
 	if err != nil {
 		return nil, err
