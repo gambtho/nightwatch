@@ -1,6 +1,5 @@
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { useSession } from "./session";
-import Login from "./screens/Login";
 import Home from "./screens/Home";
 import WorkflowDetail from "./screens/WorkflowDetail";
 import Approve from "./screens/Approve";
@@ -44,7 +43,6 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function RequireSession({ children }: { children: React.ReactElement }) {
   const { session, retry } = useSession();
-  const location = useLocation();
   if (session.status === "loading") {
     return <div className="dim boot-note">One moment…</div>;
   }
@@ -59,12 +57,20 @@ function RequireSession({ children }: { children: React.ReactElement }) {
     );
   }
   if (session.status === "anonymous") {
-    const next = location.pathname + location.search;
+    // There is no login screen: the session arrives from outside the SPA —
+    // the shell (or `tomte dev-session`) mints it, and "open in browser"
+    // lands through GET /local/handoff?token=&next=, which sets the cookie.
     return (
-      <Navigate
-        to={next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
-        replace
-      />
+      <div className="boot-note">
+        <p>This browser isn't signed in to Tomte.</p>
+        <p className="dim">
+          Open Tomte from the app and it signs the browser in for you. If you're
+          developing, mint a session with <code>tomte dev-session</code>.
+        </p>
+        <button className="btn btn-secondary" onClick={retry}>
+          Check again
+        </button>
+      </div>
     );
   }
   return children;
@@ -74,7 +80,6 @@ export default function App() {
   return (
     <Shell>
       <Routes>
-        <Route path="/login" element={<Login />} />
         <Route
           path="/"
           element={
@@ -107,9 +112,9 @@ export default function App() {
             </RequireSession>
           }
         />
-        {/* First run and settings sit behind the session gate for now; the
-            shell-minted local session (P1) replaces the gate, and /welcome
-            becomes the packaged app's first paint. */}
+        {/* The shell mints the session before the SPA loads, so /welcome is
+            the packaged app's first paint; the gate only catches a browser
+            that arrived without the handoff. */}
         <Route
           path="/welcome"
           element={

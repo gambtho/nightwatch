@@ -10,10 +10,12 @@ import { ApiError, getMe, logout as apiLogout } from "./api/client";
 import type { Me } from "./api/types";
 
 // GET /v1/me is the bootstrap call: it resolves the session cookie to the
-// user and tenant, or 401s, which is how the app decides between the login
-// screen and the product. Only a 401 means "not signed in" — any other
-// failure is reported as unreachable, with a retry, rather than silently
-// showing a signed-in user the login screen.
+// user and tenant, or 401s, which is how the app decides between the
+// signed-out notice and the product. The cookie arrives from outside the
+// SPA — the shell or `tomte dev-session` mints it, delivered via
+// GET /local/handoff. Only a 401 means "not signed in" — any other failure
+// is reported as unreachable, with a retry, rather than silently showing a
+// signed-in user the signed-out notice.
 
 type SessionState =
   | { status: "loading" }
@@ -25,7 +27,7 @@ interface SessionContextValue {
   session: SessionState;
   retry: () => void;
   signOut: () => Promise<void>;
-  /** For data screens that get a 401 mid-session: routes back to login. */
+  /** For data screens that get a 401 mid-session: drops to signed-out. */
   expire: () => void;
 }
 
