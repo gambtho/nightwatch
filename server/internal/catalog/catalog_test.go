@@ -71,6 +71,15 @@ func TestParseDefsValidation(t *testing.T) {
 		{"bad method", []string{`"method":"GET"`, `"method":"CONNECT"`}, "method"},
 		{"empty scopes", []string{`"scopes": ["things:read"]`, `"scopes": []`}, "scope"},
 		{"unknown top-level field", []string{`"id": "fake"`, `"id": "fake", "surprise": 1`}, "surprise"},
+		{"overlapping body paths", []string{
+			`"body":{"box":"box","text":"text"}`, `"body":{"box":"box","box.inner":"text"}`,
+		}, "overlap"},
+		{"non-string path placeholder", []string{
+			`"path":"/api/things","query":{"limit":"limit"}`,
+			`"path":"/api/things/{limit}","query":{}`,
+			`"args_schema": {"type":"object","properties":{"limit":{"type":"integer"}},"additionalProperties":false}`,
+			`"args_schema": {"type":"object","properties":{"limit":{"type":"integer"}},"required":["limit"],"additionalProperties":false}`,
+		}, "must be a string arg"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

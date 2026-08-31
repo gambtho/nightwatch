@@ -36,6 +36,9 @@ func TestWideningsFlagsReachChanges(t *testing.T) {
 			`"query":{"limit":"limit"}`, `"query":{"limit":"limit","verbose":"verbose"}`,
 		}, "property \"verbose\" added"},
 		{"required dropped", []string{`"required":["box","text"]`, `"required":["box"]`}, "no longer required"},
+		{"query param remap", []string{`"query":{"limit":"limit"}`, `"query":{"deep_limit":"limit"}`}, "query placement changed"},
+		{"body path remap", []string{`"body":{"box":"box","text":"text"}`, `"body":{"box":"box","override.text":"text"}`}, "body placement changed"},
+		{"auth provider change", []string{`"auth": {"provider": "fake"}`, `"auth": {"provider": "other"}`}, "auth provider changed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

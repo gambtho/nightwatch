@@ -18,7 +18,6 @@ import (
 // additionalProperties:false; property types string (with optional
 // enum), integer, number, boolean.
 type Schema struct {
-	raw      json.RawMessage
 	props    map[string]schemaProp
 	order    []string
 	required map[string]bool
@@ -53,13 +52,16 @@ func ParseSchema(raw json.RawMessage) (*Schema, error) {
 	if err := dec.Decode(&rs); err != nil {
 		return nil, fmt.Errorf("unsupported schema construct: %w", err)
 	}
+	if dec.More() {
+		return nil, fmt.Errorf("trailing data after schema")
+	}
 	if rs.Type != "object" {
 		return nil, fmt.Errorf("root type must be object")
 	}
 	if rs.AdditionalProperties == nil || *rs.AdditionalProperties {
 		return nil, fmt.Errorf("additionalProperties must be false")
 	}
-	s := &Schema{raw: raw, props: map[string]schemaProp{}, required: map[string]bool{}}
+	s := &Schema{props: map[string]schemaProp{}, required: map[string]bool{}}
 	for name, p := range rs.Properties {
 		switch p.Type {
 		case "string":

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -112,6 +113,7 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	entry := p.Connections[connector]
 	secret, err := h.d.Credentials.Credential(r.Context(), id.TenantID, entry.Connection, con.Auth.Provider)
 	if err != nil {
+		slog.Error("proxy: connector credential resolution", "connector", connector, "op", op, "err", err)
 		h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "credential"})
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -126,18 +128,14 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	}
 	target := compiled.URL
 	if base, ok := h.d.Config.ConnectorUpstreams[connector]; ok {
-		u, err := url.Parse(compiled.URL)
+		rewritten, err := rewriteUpstream(compiled.URL, base)
 		if err != nil {
+			slog.Error("proxy: connector upstream override", "connector", connector, "op", op, "err", err)
+			h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "upstream_override"})
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		b, err := url.Parse(base)
-		if err != nil || b.Scheme == "" || b.Host == "" {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		u.Scheme, u.Host = b.Scheme, b.Host
-		target = u.String()
+		target = rewritten
 	}
 
 	timeout := h.d.Config.ConnectorTimeout
@@ -153,6 +151,8 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	}
 	upReq, err := http.NewRequestWithContext(ctx, compiled.Method, target, reqBody)
 	if err != nil {
+		slog.Error("proxy: connector request build", "connector", connector, "op", op, "err", err)
+		h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "request"})
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -168,6 +168,7 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	resp, err := connectorClient.Do(upReq)
 	if err != nil {
+		slog.Error("proxy: connector upstream", "connector", connector, "op", op, "err", err)
 		h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "upstream"})
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
@@ -191,6 +192,22 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 		"status":      resp.StatusCode,
 		"duration_ms": time.Since(start).Milliseconds(),
 	})
+}
+
+func rewriteUpstream(compiledURL, base string) (string, error) {
+	u, err := url.Parse(compiledURL)
+	if err != nil {
+		return "", err
+	}
+	b, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+	if b.Scheme == "" || b.Host == "" {
+		return "", errors.New("override base must be scheme://host")
+	}
+	u.Scheme, u.Host = b.Scheme, b.Host
+	return u.String(), nil
 }
 
 // connectorClient never follows redirects: a 3xx is relayed verbatim,

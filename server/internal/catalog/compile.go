@@ -26,6 +26,12 @@ type CompiledRequest struct {
 // rejection of traversal segments, so `/`, `?`, `#`, `.` and `..` can
 // never alter the compiled path.
 func Compile(op *Op, args map[string]any) (CompiledRequest, error) {
+	// Only ops that came out of catalog validation compile: a hand-built
+	// Op never acquired its parsed schema, and refusing it here keeps
+	// "the binding was validated" a property of the type, not a comment.
+	if op.schema == nil {
+		return CompiledRequest{}, fmt.Errorf("compile: op %q is not from a validated catalog", op.Name)
+	}
 	b := op.Binding
 
 	path := b.Path

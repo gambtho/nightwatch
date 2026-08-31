@@ -131,6 +131,9 @@ func ParseDefs(defs ...[]byte) (*Catalog, error) {
 		if err := dec.Decode(&c); err != nil {
 			return nil, fmt.Errorf("catalog: %w", err)
 		}
+		if dec.More() {
+			return nil, fmt.Errorf("catalog: trailing data after definition %q", c.ID)
+		}
 		if err := validateConnector(&c); err != nil {
 			return nil, fmt.Errorf("catalog %q: %w", c.ID, err)
 		}
@@ -239,6 +242,9 @@ func validateOp(c *Connector, op *Op) error {
 		if !schema.Required(arg) {
 			return fmt.Errorf("binding: path placeholder {%s} must be a required arg", arg)
 		}
+		if schema.Type(arg) != "string" {
+			return fmt.Errorf("binding: path placeholder {%s} must be a string arg", arg)
+		}
 		placed[arg]++
 	}
 	for param, arg := range b.Query {
@@ -250,6 +256,7 @@ func validateOp(c *Connector, op *Op) error {
 		}
 		placed[arg]++
 	}
+	bodyPaths := make([]string, 0, len(b.Body))
 	for path, arg := range b.Body {
 		if path == "" {
 			return fmt.Errorf("binding: empty body path")
@@ -257,7 +264,18 @@ func validateOp(c *Connector, op *Op) error {
 		if !schema.Has(arg) {
 			return fmt.Errorf("binding: body arg %q not in args_schema", arg)
 		}
+		bodyPaths = append(bodyPaths, path)
 		placed[arg]++
+	}
+	// Dotted body paths must be prefix-disjoint: with both "a" and
+	// "a.b", whichever compiles second silently clobbers the first,
+	// nondeterministically. An authoring bug, so it fails here.
+	for i, a := range bodyPaths {
+		for _, b2 := range bodyPaths[i+1:] {
+			if strings.HasPrefix(a, b2+".") || strings.HasPrefix(b2, a+".") {
+				return fmt.Errorf("binding: body paths %q and %q overlap", a, b2)
+			}
+		}
 	}
 	for _, prop := range schema.Properties() {
 		switch placed[prop] {

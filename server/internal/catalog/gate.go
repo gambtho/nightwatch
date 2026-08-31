@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -24,12 +25,18 @@ import (
 // change from old to new. Removal of a connector or op is not widening
 // (matching permit entries fail closed as 403s). Where "narrower" is
 // hard to compute, equality is required — conservative by design.
-func Widenings(old, new *Catalog) []string {
+func Widenings(prev, cur *Catalog) []string {
 	var out []string
-	for _, oldCon := range old.Connectors() {
-		newCon, ok := new.Connector(oldCon.ID)
+	for _, oldCon := range prev.Connectors() {
+		newCon, ok := cur.Connector(oldCon.ID)
 		if !ok {
 			continue // removal: fail-closed, not widening
+		}
+		// The credential namespace is reach: a changed auth provider
+		// re-points every op's injected credential.
+		if newCon.Auth.Provider != oldCon.Auth.Provider {
+			out = append(out, fmt.Sprintf("%s: auth provider changed %s -> %s",
+				oldCon.ID, oldCon.Auth.Provider, newCon.Auth.Provider))
 		}
 		for oldName, oldOp := range oldCon.ops {
 			newOp, ok := newCon.ops[oldName]
@@ -46,9 +53,9 @@ func Widenings(old, new *Catalog) []string {
 	return out
 }
 
-func opWidenings(old, new *Op) []string {
+func opWidenings(prev, cur *Op) []string {
 	var out []string
-	b0, b1 := old.Binding, new.Binding
+	b0, b1 := prev.Binding, cur.Binding
 	if b1.Method != b0.Method {
 		out = append(out, fmt.Sprintf("method changed %s -> %s", b0.Method, b1.Method))
 	}
@@ -58,20 +65,29 @@ func opWidenings(old, new *Op) []string {
 	if b1.Path != b0.Path {
 		out = append(out, fmt.Sprintf("path template changed %s -> %s", b0.Path, b1.Path))
 	}
-	if new.Effect != old.Effect {
-		out = append(out, fmt.Sprintf("effect changed %s -> %s", old.Effect, new.Effect))
+	// Arg placement is reach: moving an existing arg to a different
+	// query parameter or body path changes what it means upstream.
+	// Equality required — remaps ship as new op names.
+	if !maps.Equal(b1.Query, b0.Query) {
+		out = append(out, "query placement changed")
 	}
-	for _, s := range new.Scopes {
-		if !slices.Contains(old.Scopes, s) {
+	if !maps.Equal(b1.Body, b0.Body) {
+		out = append(out, "body placement changed")
+	}
+	if cur.Effect != prev.Effect {
+		out = append(out, fmt.Sprintf("effect changed %s -> %s", prev.Effect, cur.Effect))
+	}
+	for _, s := range cur.Scopes {
+		if !slices.Contains(prev.Scopes, s) {
 			out = append(out, fmt.Sprintf("scope %s added", s))
 		}
 	}
-	oldFields := make([]string, 0, len(old.Constraints))
-	for _, c := range old.Constraints {
+	oldFields := make([]string, 0, len(prev.Constraints))
+	for _, c := range prev.Constraints {
 		oldFields = append(oldFields, c.Field)
 	}
-	newFields := make([]string, 0, len(new.Constraints))
-	for _, c := range new.Constraints {
+	newFields := make([]string, 0, len(cur.Constraints))
+	for _, c := range cur.Constraints {
 		newFields = append(newFields, c.Field)
 	}
 	for _, f := range oldFields {
@@ -79,7 +95,7 @@ func opWidenings(old, new *Op) []string {
 			out = append(out, fmt.Sprintf("constraint on %q removed", f))
 		}
 	}
-	out = append(out, schemaWidenings(old.schema, new.schema)...)
+	out = append(out, schemaWidenings(prev.schema, cur.schema)...)
 	return out
 }
 
@@ -87,24 +103,24 @@ func opWidenings(old, new *Op) []string {
 // accepted. Within the supported subset that is exactly computable:
 // no new properties, no required dropped, types unchanged, enums only
 // introduced or shrunk.
-func schemaWidenings(old, new *Schema) []string {
+func schemaWidenings(prev, cur *Schema) []string {
 	var out []string
-	for _, p := range new.Properties() {
-		if !old.Has(p) {
+	for _, p := range cur.Properties() {
+		if !prev.Has(p) {
 			out = append(out, fmt.Sprintf("schema property %q added", p))
 		}
 	}
-	for _, p := range old.Properties() {
-		if !new.Has(p) {
+	for _, p := range prev.Properties() {
+		if !cur.Has(p) {
 			continue // property removed: narrowing
 		}
-		if old.Required(p) && !new.Required(p) {
+		if prev.Required(p) && !cur.Required(p) {
 			out = append(out, fmt.Sprintf("schema property %q no longer required", p))
 		}
-		if new.Type(p) != old.Type(p) {
-			out = append(out, fmt.Sprintf("schema property %q type changed %s -> %s", p, old.Type(p), new.Type(p)))
+		if cur.Type(p) != prev.Type(p) {
+			out = append(out, fmt.Sprintf("schema property %q type changed %s -> %s", p, prev.Type(p), cur.Type(p)))
 		}
-		oldEnum, newEnum := old.EnumOf(p), new.EnumOf(p)
+		oldEnum, newEnum := prev.EnumOf(p), cur.EnumOf(p)
 		if len(oldEnum) > 0 {
 			if len(newEnum) == 0 {
 				out = append(out, fmt.Sprintf("schema property %q enum removed", p))

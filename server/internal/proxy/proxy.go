@@ -82,7 +82,8 @@ type Config struct {
 	// fake upstreams with it.
 	ConnectorUpstreams map[string]string
 	// ConnectorTimeout bounds one compiled upstream request end to end;
-	// zero means the 60s default (the harness per-tool budget).
+	// zero or negative means the 60s default (the harness per-tool
+	// budget).
 	ConnectorTimeout time.Duration
 }
 

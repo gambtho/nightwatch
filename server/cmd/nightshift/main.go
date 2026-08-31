@@ -166,9 +166,9 @@ func serve(ctx context.Context) error {
 	if _, isLog := mailer.(mail.LogSender); isLog {
 		slog.Warn("mail: no Postmark config; magic links go to the log (localhost dev mode)")
 	}
-	// The catalog refuses to load on invalid definitions or a
-	// reach-widening drift from its committed baseline — serve does not
-	// start with an unenforceable catalog.
+	// The catalog refuses to load on invalid definitions or any drift
+	// from its committed baseline (reach-widening or otherwise) — serve
+	// does not start with an unenforceable or unreviewed catalog.
 	cat, err := catalog.Load()
 	if err != nil {
 		return err
