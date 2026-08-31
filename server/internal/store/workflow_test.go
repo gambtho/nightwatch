@@ -21,8 +21,9 @@ func testDoc() store.VersionDoc {
 			Model:        "claude-sonnet-5",
 			MaxTokens:    2048,
 		},
-		Permit: json.RawMessage(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
-		Rubric: json.RawMessage(`{"rules":["never miss a security issue"]}`),
+		Permit:   json.RawMessage(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
+		Rubric:   json.RawMessage(`{"rules":["never miss a security issue"]}`),
+		Schedule: json.RawMessage(`{"cron":"0 9 * * MON","tz":"UTC"}`),
 	}
 }
 
@@ -59,6 +60,7 @@ func TestWorkflowVersionLifecycle(t *testing.T) {
 	got, err := s.GetApprovedVersion(ctx, tn.ID, wf.ID)
 	require.NoError(t, err)
 	require.Equal(t, 2, got.Number)
+	require.JSONEq(t, `{"cron":"0 9 * * MON","tz":"UTC"}`, string(got.Doc.Schedule))
 
 	old, err := s.GetVersion(ctx, tn.ID, wf.ID, 1)
 	require.NoError(t, err)
