@@ -10,9 +10,10 @@ the model (`llm:`, phase K2) and its reach (`connectors:`, phase K3) arrive.
 A small CLI, `tomtectl`, runs that file on whatever cluster your kubeconfig
 points at; hello world takes about five minutes on a local
 [kind](https://kind.sigs.k8s.io/) cluster — see
-[tomtectl/README.md](tomtectl/README.md). The phase-K1 runtime is a
-deliberate placeholder that prints its steps on the schedule; the LLM
-arrives in K2.
+[tomtectl/README.md](tomtectl/README.md). As of phase K2 the `llm:` slot is
+live: a small Go runtime hands the agent's steps to the model the file
+names, with the API key held in a Kubernetes Secret (`tomtectl set-key`) —
+never in the YAML.
 
 The K8s track runs with **no database of its own** — none is planned,
 either. The cluster is the store: the agent file lives in a ConfigMap,
