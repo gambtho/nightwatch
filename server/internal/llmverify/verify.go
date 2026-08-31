@@ -28,6 +28,11 @@ type Result struct {
 	OK      bool
 	Message string
 	Usage   llm.Usage
+	// Billed reports whether the upstream answered 2xx — it executed
+	// (and, on a paid endpoint, billed) the call, whatever we made of
+	// the response. The metering caller records billed attempts even
+	// when verification failed.
+	Billed bool
 }
 
 const (
@@ -113,26 +118,64 @@ func (c *Client) Verify(ctx context.Context, e endpoint.Endpoint, secret string)
 		} `json:"usage"`
 	}
 	parseErr := json.Unmarshal(respRaw, &envelope)
+	detail := errorDetail(envelope.Error)
+	billed := resp.StatusCode >= 200 && resp.StatusCode <= 299
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		// An auth-status rejection is a re-paste, never a retry.
-		return Result{Message: "The service didn't accept this key. Copy it again and re-paste — a character may be missing."}, nil
-	case resp.StatusCode < 200 || resp.StatusCode > 299:
-		return Result{Message: fmt.Sprintf("The service returned an error (HTTP %d) while checking the key. Try again in a moment.", resp.StatusCode)}, nil
+		msg := "The service didn't accept this key. Copy it again and re-paste — a character may be missing."
+		if detail != "" {
+			msg += " (" + detail + ")"
+		}
+		return Result{Message: msg}, nil
+	case !billed:
+		msg := fmt.Sprintf("The service returned an error (HTTP %d) while checking the key.", resp.StatusCode)
+		if detail != "" {
+			msg += " " + detail
+		} else {
+			msg += " Try again in a moment."
+		}
+		return Result{Message: msg}, nil
+	}
+
+	// A 2xx with a populated error field is a gateway-style rejection
+	// (OpenRouter-class: HTTP 200 + {"error": ...} for a bad key) — a
+	// status-only check would store garbage.
+	if parseErr == nil && detail != "" {
+		return Result{Billed: true, Message: "The service didn't accept this key: " + detail}, nil
 	}
 
 	// Fail closed on a 2xx we cannot read — an interstitial or truncated
-	// body must never verify a key.
+	// body must never verify a key. It still billed.
 	if readErr != nil || parseErr != nil {
 		slog.Warn("llmverify: unreadable 2xx verify response",
 			"base_url", e.BaseURL, "status", resp.StatusCode, "read_err", readErr, "parse_err", parseErr)
-		return Result{Message: "The service sent an unexpected response while checking the key. Try again in a moment."}, nil
+		return Result{Billed: true, Message: "The service sent an unexpected response while checking the key. Try again in a moment."}, nil
 	}
 
 	u := llm.Usage{
 		InputTokens:  envelope.Usage.InputTokens + envelope.Usage.PromptTokens,
 		OutputTokens: envelope.Usage.OutputTokens + envelope.Usage.CompletionTokens,
 	}
-	return Result{OK: true, Usage: u}, nil
+	return Result{OK: true, Billed: true, Usage: u}, nil
+}
+
+// errorDetail extracts a human-readable message from an error field that
+// may be an object ({"message": ...}), a bare string, or absent/null.
+func errorDetail(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && obj.Message != "" {
+		return obj.Message
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return ""
 }

@@ -230,8 +230,9 @@ func TestEndpointVerifyRecordsMeteredCost(t *testing.T) {
 	e := verifyEnv(t, 0)
 
 	// A user-entered price for the candidate (endpoint, model): $1/M in,
-	// $5/M out — 20000*100 + 1000*500 = 2.5M micro-cents → 2 cents,
-	// floored once on the combined numerator like llm.CostCents.
+	// $5/M out — 20000*100 + 1000*500 = 2.5M micro-cents → 3 cents:
+	// the ledger rounds UP (a metered call must advance the budget;
+	// flooring would record every 1-token verify as free).
 	resp, _ := e.do(t, "PUT", "/v1/settings/prices", map[string]any{
 		"base_url": ts.URL, "model": "test-model",
 		"input_cents_per_1m": 100, "output_cents_per_1m": 500,
@@ -243,12 +244,12 @@ func TestEndpointVerifyRecordsMeteredCost(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, true, out["ok"])
-	require.Equal(t, float64(2), out["cost_cents"])
+	require.Equal(t, float64(3), out["cost_cents"])
 	require.Equal(t, true, out["recorded"])
 
 	spent, err := e.store.MonthSpendCents(context.Background(), e.tenant.ID, meter.MonthStartUTC(time.Now().UTC()))
 	require.NoError(t, err)
-	require.Equal(t, 2, spent)
+	require.Equal(t, 3, spent)
 }
 
 func TestEndpointVerifyUnpricedRecordsZeroWithTokens(t *testing.T) {
@@ -327,4 +328,61 @@ func TestEndpointVerifyValidation(t *testing.T) {
 		"preset": "nope", "base_url": "https://x.example.com", "run_model": "m", "value": "k",
 	})
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "unknown preset")
+}
+
+func TestEndpointVerifyTinyCallStillCostsACent(t *testing.T) {
+	ts := fakeLLM(t, 200, `{"usage":{"prompt_tokens":10,"completion_tokens":1}}`)
+	e := verifyEnv(t, 0)
+	resp, _ := e.do(t, "PUT", "/v1/settings/prices", map[string]any{
+		"base_url": ts.URL, "model": "m", "input_cents_per_1m": 100, "output_cents_per_1m": 500,
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, out := e.do(t, "POST", "/v1/settings/endpoint/verify", map[string]any{
+		"preset": "custom", "base_url": ts.URL, "run_model": "m", "value": "sk-x",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, float64(1), out["cost_cents"], "a priced verify never meters as free")
+}
+
+func TestEndpointVerifyUnpricedIsFlagged(t *testing.T) {
+	ts := fakeLLM(t, 200, `{"usage":{"prompt_tokens":12,"completion_tokens":1}}`)
+	e := verifyEnv(t, 0)
+	resp, out := e.do(t, "POST", "/v1/settings/endpoint/verify", map[string]any{
+		"preset": "custom", "base_url": ts.URL, "run_model": "unpriced-model", "value": "sk-x",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, true, out["unpriced"], "zero cost from a missing price is not zero cost")
+}
+
+func TestEndpointVerifyBilledFailureIsRecorded(t *testing.T) {
+	// A 2xx the client cannot read still billed the provider: the ledger
+	// records the attempt (priced endpoints at the 1-cent floor).
+	ts := fakeLLM(t, 200, `<html>interstitial</html>`)
+	e := verifyEnv(t, 0)
+	resp, _ := e.do(t, "PUT", "/v1/settings/prices", map[string]any{
+		"base_url": ts.URL, "model": "m", "input_cents_per_1m": 100, "output_cents_per_1m": 500,
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, _ = e.do(t, "POST", "/v1/settings/endpoint/verify", map[string]any{
+		"preset": "custom", "base_url": ts.URL, "run_model": "m", "value": "sk-x",
+	})
+	require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	var n, cents int
+	err := e.pool.QueryRow(context.Background(),
+		`SELECT COUNT(*), COALESCE(MAX(cost_cents),0) FROM spend_entry WHERE tenant_id=$1`,
+		e.tenant.ID).Scan(&n, &cents)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, 1, cents)
+}
+
+func TestEndpointVerifyNilMeterFailsClosed(t *testing.T) {
+	ts := fakeLLM(t, 200, `{"usage":{"prompt_tokens":5,"completion_tokens":1}}`)
+	e := newEnv(t, func(d *httpapi.Deps) { d.LLMVerify = &llmverify.Client{} }) // no Meter
+	resp, _ := e.do(t, "POST", "/v1/settings/endpoint/verify", map[string]any{
+		"preset": "custom", "base_url": ts.URL, "run_model": "m", "value": "sk-x",
+	})
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }

@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/gambtho/tomte/server/internal/endpoint"
@@ -64,7 +66,9 @@ func (d Deps) verifyEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if d.LLMVerify == nil {
+	// The budget gate is load-bearing here; a wiring hole must fail
+	// closed, not skip the check.
+	if d.LLMVerify == nil || d.Meter == nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "verification unavailable"})
 		return
 	}
@@ -73,38 +77,69 @@ func (d Deps) verifyEndpoint(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+
+	// Price the call like a run would be priced (same gate helper). From
+	// here to the ledger write, nothing may skip recording a BILLED call:
+	// the upstream already executed it, so a pricing error degrades to an
+	// unpriced (zero-cent, flagged) entry rather than an unrecorded one.
+	cost, unpriced := 0, false
+	inCents, outCents, priceMiss, perr := d.resolvePrices(r, claims.TenantID, &e)
+	switch {
+	case perr != nil:
+		slog.Error("llmverify: price resolution failed; recording verify at zero",
+			"tenant", claims.TenantID, "base_url", e.BaseURL, "model", e.RunModel,
+			"input_tokens", res.Usage.InputTokens, "output_tokens", res.Usage.OutputTokens, "err", perr)
+		unpriced = true
+	case priceMiss != nil:
+		// The price form hasn't been offered yet at first run; honest
+		// token counts at zero cents, flagged so "0" never reads as free.
+		unpriced = true
+	default:
+		cost = costCentsFor(inCents, outCents, res.Usage.InputTokens, res.Usage.OutputTokens)
+		if !e.ZeroCost && cost == 0 {
+			// The ledger rounds up: a 1-token verify on a priced endpoint
+			// is sub-cent, and flooring it to free would let repeated
+			// verifies spend real money without ever advancing the budget.
+			cost = 1
+		}
+	}
+
+	if res.Billed {
+		// Disconnect-immune: the provider call already happened, so a
+		// client that gave up must not leave the spend unrecorded.
+		if rerr := d.Store.RecordSpend(context.WithoutCancel(r.Context()), claims.TenantID,
+			"endpoint_verify", cost, res.Usage.InputTokens, res.Usage.OutputTokens,
+			e.BaseURL, e.RunModel); rerr != nil {
+			slog.Error("llmverify: spend record failed",
+				"tenant", claims.TenantID, "base_url", e.BaseURL, "model", e.RunModel,
+				"cost_cents", cost, "input_tokens", res.Usage.InputTokens,
+				"output_tokens", res.Usage.OutputTokens, "err", rerr)
+			if res.OK {
+				// A metered success must be recorded; failing open would
+				// be an unrecorded spend.
+				writeErr(w, rerr)
+				return
+			}
+		}
+	}
+
 	if !res.OK {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error": "verify_failed", "message": res.Message,
 		})
 		return
 	}
-
-	// Price the call like a run would be priced: zero-cost endpoints and
-	// bundled/user-entered rows via the same gate helper. An unpriced
-	// model records honest token counts at zero cents — the price form
-	// hasn't been offered yet at first run.
-	inCents, outCents, priceMiss, err := d.resolvePrices(r, claims.TenantID, &e)
-	if err != nil {
-		writeErr(w, err)
-		return
+	out := map[string]any{"ok": true, "cost_cents": cost, "recorded": true}
+	if unpriced {
+		out["unpriced"] = true
 	}
-	cost := 0
-	if priceMiss == nil {
-		cost = costCentsFor(inCents, outCents, res.Usage.InputTokens, res.Usage.OutputTokens)
-	}
-	if err := d.Store.RecordSpend(r.Context(), claims.TenantID, "endpoint_verify",
-		cost, res.Usage.InputTokens, res.Usage.OutputTokens, e.BaseURL, e.RunModel); err != nil {
-		// A metered call must be recorded; failing open here would be an
-		// unrecorded spend.
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cost_cents": cost, "recorded": true})
+	writeJSON(w, http.StatusOK, out)
 }
 
-// costCentsFor floors once on the combined numerator, like llm.CostCents.
+// costCentsFor rounds UP on the combined numerator — the ledger's safe
+// direction (llm.CostCents floors for runs; a verify must never record a
+// paid call as free).
 func costCentsFor(inCentsPer1M, outCentsPer1M, inTokens, outTokens int) int {
 	numerator := int64(inTokens)*int64(inCentsPer1M) + int64(outTokens)*int64(outCentsPer1M)
-	return int(numerator / 1_000_000)
+	return int((numerator + 999_999) / 1_000_000)
 }

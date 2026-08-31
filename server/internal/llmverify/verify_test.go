@@ -153,3 +153,43 @@ func TestVerifyMissingUsageStillOK(t *testing.T) {
 	require.Zero(t, res.Usage.InputTokens)
 	require.Zero(t, res.Usage.OutputTokens)
 }
+
+func TestVerifyRejects200WithErrorEnvelope(t *testing.T) {
+	// OpenRouter-class gateways answer HTTP 200 with an error body for a
+	// bad key. A parsed error field must reject, whatever the status.
+	u := &upstream{status: 200,
+		body: `{"error":{"message":"No auth credentials found","code":401}}`}
+	ts := newUpstream(t, u)
+	c := &Client{}
+	res, err := c.Verify(context.Background(), customEndpoint(t, ts.URL), "sk-bad")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+	require.Contains(t, res.Message, "No auth credentials found")
+}
+
+func TestVerifyBilledFlag(t *testing.T) {
+	// Any 2xx billed the provider — including one we fail closed on.
+	u := &upstream{status: 200, body: `<html>x</html>`}
+	ts := newUpstream(t, u)
+	c := &Client{}
+	res, err := c.Verify(context.Background(), customEndpoint(t, ts.URL), "sk-x")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+	require.True(t, res.Billed)
+
+	u2 := &upstream{status: 401, body: `{}`}
+	ts2 := newUpstream(t, u2)
+	res, err = (&Client{}).Verify(context.Background(), customEndpoint(t, ts2.URL), "sk-x")
+	require.NoError(t, err)
+	require.False(t, res.Billed)
+}
+
+func TestVerifyNon2xxCarriesUpstreamDetail(t *testing.T) {
+	u := &upstream{status: 400,
+		body: `{"error":{"message":"max_tokens is not supported; use max_completion_tokens"}}`}
+	ts := newUpstream(t, u)
+	res, err := (&Client{}).Verify(context.Background(), customEndpoint(t, ts.URL), "sk-x")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+	require.Contains(t, res.Message, "max_completion_tokens")
+}
