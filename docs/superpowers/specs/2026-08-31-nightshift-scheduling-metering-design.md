@@ -198,9 +198,14 @@ cost_cents IS NOT NULL` — month membership by **`finished_at`** (cost exists
 ## The orphaned-run reaper
 
 A 5-minute ticker sweeps
-`status IN ('pending','running') AND created_at < now() - deadline` and
-finalizes each through the normal `FinalizeRun` path as `failed` /
-`error_kind: "orphaned"` — which also clears the token hash, so a zombie
+`status IN ('pending','running') AND COALESCE(dispatched_at, created_at) < now() - deadline`
+and finalizes each through the normal `FinalizeRun` path as `failed` /
+`error_kind: "orphaned"`. Keying the deadline off the latest **dispatch
+episode** (falling back to creation for never-dispatched rows) is deliberate:
+a redispatched run carries a freshly signed token, so its reap window must
+track the redispatch, and the escalation design's future `awaiting_input`
+status (which resumes runs days after creation) depends on exactly this
+keying — building it now avoids a retrofit (escalation-spec amendment 2) — which also clears the token hash, so a zombie
 harness waking later is locked out of both the proxy and the internal API.
 This covers all three orphaning modes from the Plan 2 branch review: server
 restart killing in-flight Local goroutines, a failed context fetch that never

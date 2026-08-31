@@ -1959,6 +1959,7 @@ git commit -m "feat(server): scheduler tick — deterministic due computation, c
 **Interfaces:**
 
 - Consumes: `store.ListStuckRuns`, `store.FinalizeRun`.
+- **Also modifies** (escalation-spec amendment 2, folded in pre-merge): `store.ListStuckRuns`'s WHERE becomes `status IN ('pending', 'running') AND COALESCE(dispatched_at, created_at) < $1` — the deadline keys off the latest **dispatch episode**, falling back to creation for never-dispatched rows. Update the method's doc comment accordingly ("the cutoff compares against the latest dispatch episode — a redispatched run's reap window tracks its freshest token; never-dispatched rows key off creation, per the merged escalation design's amendment 2"). Rationale: a redispatched run carries a freshly signed token, and the escalation design's `awaiting_input` resume path depends on exactly this keying — cheaper now than a retrofit.
 - Produces:
 
 ```go
@@ -2013,6 +2014,19 @@ func TestReaperSweepsStuckRuns(t *testing.T) {
 	// A younger run is untouched (admission now free after the reap).
 	young := uuid.New()
 	_, err = s.CreateRun(ctx, tn.ID, wf.ID, young, 1, "young-hash", "manual", nil)
+	require.NoError(t, err)
+	require.Equal(t, 0, r.Sweep(ctx))
+	got, err = s.GetRun(ctx, tn.ID, young)
+	require.NoError(t, err)
+	require.Equal(t, "pending", got.Status)
+
+	// Escalation-spec amendment 2: an old created_at with a FRESH dispatch
+	// episode must NOT be reaped — the deadline tracks the latest dispatch.
+	// (Reuse `young`: age its creation, stamp a recent dispatch.)
+	_, err = pool.Exec(ctx,
+		`UPDATE run SET created_at = now() - interval '3 days',
+		        dispatched_at = now() - interval '10 minutes'
+		 WHERE id = $1`, young)
 	require.NoError(t, err)
 	require.Equal(t, 0, r.Sweep(ctx))
 	got, err = s.GetRun(ctx, tn.ID, young)
