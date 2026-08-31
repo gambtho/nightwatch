@@ -52,11 +52,13 @@ What a `Compute` implementation must actually provide:
   state directory makes overlap a data race), but it will never be asked to
   under a healthy control plane.
 
-One change to the existing seam wiring ships with Plan 5 (everything else
-this spec adds is new code beside it): the engine's hardcoded
-`TemplateRef{Name: "harness-v1"}` becomes
-configuration (`NIGHTSHIFT_HARNESS_TEMPLATE`), because the template names a
-deployed harness release, not a constant — see the template mapping below.
+Two small changes to the existing engine ship with Plan 5 (everything else
+this spec adds is new code beside it): the hardcoded
+`TemplateRef{Name: "harness-v1"}` becomes configuration
+(`NIGHTSHIFT_HARNESS_TEMPLATE`), because the template names a deployed
+harness release, not a constant — see the template mapping below — and
+`dispatch` clears the workflow's `actor_suspended_at` stamp (one new
+column; see the suspender loop).
 
 ## Harness containerization
 
@@ -71,24 +73,34 @@ harness once    Jobs mode: execute one run from env, exit
 **`harness serve`** listens on `:8081`:
 
 - `POST /invoke` — body `{"run_id": "...", "run_token": "..."}` (the wire form
-  of `compute.InvokeRequest`). Replies **202 after durably accepting** the
-  episode, then executes it asynchronously — the response is the
+  of `compute.InvokeRequest`). Replies **202 after accepting** the episode
+  into its queue, then executes it asynchronously — the response is the
   acknowledgment the invoker retries against, which is what makes the
   cold-boot lost-request window (spike C4) closable by retry.
-- **Dedupe by RunID:** a journal of accepted RunIDs lives in the actor's
-  state directory (it therefore survives suspend/resume, which snapshot both
-  RAM and the writable layer). A duplicate `POST /invoke` — engine retry,
-  `Redispatch`, router-level replay — returns 202 and runs nothing.
 - **Serial execution:** one episode at a time, matching `local.go`'s guard.
 - `GET /readyz` — 200 once the server accepts invokes. Declaring `readyz` in
   the template lets Substrate skip its 20 s golden-snapshot warmup wait
   (spike C2).
-- **Invoke authenticity is checked by the control plane, not the harness.**
-  The harness holds no verification key; it simply uses the presented run
-  token. A forged or stale invoke fails the very first call —
-  `GET /internal/runs/{id}/context` — because the internal API checks
-  signature, stored hash, and run/path binding. The harness discards the
-  episode (journaling the RunID) and stays idle.
+- **Dedupe by RunID needs no journal — the run-token lifecycle already
+  provides it.** Every episode begins with
+  `GET /internal/runs/{id}/context`, which the internal API authorizes
+  against the run's stored token hash and active status, and finalization
+  atomically clears that hash. So a duplicate `POST /invoke` — engine retry,
+  `Redispatch`, router-level replay — queues behind the serial executor, and
+  by the time it executes the original episode has finalized: its context
+  fetch gets 401/403 and the episode is discarded without side effects. The
+  three cases fall out correctly: a duplicate of a **completed** run is
+  rejected by the cleared hash; a duplicate of a run whose episode **crashed
+  before finalizing** re-executes — the at-least-once behavior the engine
+  wants (a persisted journal, considered and rejected, would wrongly
+  suppress exactly this case and permanently strand the run until the
+  reaper); an episode that hits a **transient context-fetch failure** simply
+  ends without journaling anything, so the invoker's retry re-runs it.
+- **A forged invoke is inert.** The harness holds no verification key; it
+  simply uses the presented run token, and a forged or stale token fails the
+  same first call — the internal API checks signature, stored hash, and
+  run/path binding. Nothing is recorded, nothing is poisoned; the harness
+  discards the episode and stays idle.
 
 **`harness once`** reads `NIGHTSHIFT_RUN_ID` / `NIGHTSHIFT_RUN_TOKEN` from the
 environment, executes the episode, exits 0 if the run record was delivered
@@ -134,8 +146,8 @@ references the name.
 actor is a process (RAM + writable layer) built from its template's image;
 Substrate has no state-export API, so moving a workflow's actor to a new
 harness release means deleting the actor and creating it from the new
-template. With today's tool-less harness nothing durable is lost (the RunID
-journal is the only state), but once actor memory is a product feature this
+template. With today's tool-less harness nothing durable is lost (the harness
+keeps no cross-run state at all), but once actor memory is a product feature this
 becomes a real migration cost. The upgrade procedure — for each workflow with
 no active run: `Destroy` then `EnsureActor` against the new template — is an
 operational job, deliberately not automatic. A durable-memory layer that
@@ -152,7 +164,7 @@ Invoke:      POST http://<router-svc>/invoke with Host: wf-<id>.t-<tenant>
              actor (idempotent, singleflight upstream) and tunnels us to
              the harness. Retry on 5xx/timeout/connection-reset with
              backoff until 202 or a dispatch deadline (~2 min); the
-             harness's RunID journal makes retries safe, and router 503s
+             token-lifecycle dedupe makes retries safe, and router 503s
              are parking-lot backpressure, retryable by upstream design.
 Suspend:     Control.SuspendActor. Durable (snapshot to object storage,
              node-free). PauseActor (node-local, resume pinned) is a cheap
@@ -181,13 +193,24 @@ time, and nothing upstream was verified to suspend idle actors for us; the
 control plane owns it. A **suspender loop** joins the scheduler and reaper in
 the engine's family of ticking loops:
 
-- Each tick (default 60 s): list workflows whose latest run finalized more
-  than an idle threshold ago (default 60 s) and which have **no active run**
-  (the admission index makes this a cheap indexed check), and whose actor was
-  invoked since the last suspend; call `Compute.Suspend`.
+- **"Needs suspending" is DB state, not loop memory.** The workflow row
+  gains `actor_suspended_at timestamptz` (migration numbered whenever the
+  implementation plan reaches it): the engine's `dispatch` clears it on
+  every invoke, the suspender sets it after a successful `Suspend`. Each
+  tick (default 60 s) the query is: workflows with `actor_suspended_at IS
+NULL`, **no active run** (the admission index makes this a cheap check),
+  and latest run finalized more than an idle threshold ago (default 60 s) —
+  call `Compute.Suspend`, then stamp the column. Because the state lives in
+  the DB and both transitions are idempotent, the loop is safe across
+  control-plane restarts and replicas: a crash between suspend and stamp
+  costs one redundant Suspend call next tick, never a missed suspension or
+  a per-tick spam of the upstream API.
 - Suspending an already-suspended actor is a no-op upstream; racing a fresh
   fire is benign — the router's resume-on-request undoes a suspend that lands
-  just before an invoke, at the cost of one resume.
+  just before an invoke, at the cost of one resume. The stamp/clear race in
+  our own DB resolves the same way: a fire that lands mid-tick clears the
+  column, and the worst case is one unnecessary Suspend immediately undone
+  by the invoke's resume.
 - On `Local` and `KubeJobs`, `Suspend` is a no-op, so the loop is inert
   off-Substrate.
 
@@ -224,9 +247,17 @@ recorded as an open item, not silently ignored.
 - **First fire after actor creation** cold-boots (seconds, not the 257 ms
   resume); the 202-ack-with-retry protocol absorbs it. Golden-memory resume
   is microvm-only; on the v1 gVisor pool a fresh actor cold-boots — accepted.
-- **Substrate control-plane outage**: `EnsureActor`/`Invoke` fail → runs
-  finalize `dispatch_failed`; scheduled occurrences are not lost (rows exist,
-  `dispatchPending` retries next tick until the run is reaped). Sustained
+- **Substrate control-plane outage — occurrences fail fast, honestly.** When
+  `EnsureActor`/`Invoke` exhaust the invoke retry window (~2 min), the engine
+  finalizes the run `dispatch_failed` — and that is terminal: finalization
+  clears the token hash, `dispatchPending` selects only pending undispatched
+  rows, and the `run_workflow_firetime_unique` index means that _occurrence_
+  can never be re-fired. So an outage produces one visible `dispatch_failed`
+  run record per missed occurrence, and the next occurrence tries afresh.
+  This is deliberate: it matches the engine's shipped semantics
+  (`failDispatch` finalizes immediately), keeps failures visible instead of
+  silently deferred, and is exactly the signal Plan 4's alerting consumes.
+  Only transient blips inside the retry window are absorbed. Sustained
   outage is the moment the Jobs backend exists for — a deployment-config
   flip, not a data migration, because no Nightshift state lives in Substrate.
 
@@ -254,7 +285,7 @@ Mechanics:
   labels `nightshift.io/tenant|workflow|run` for log correlation.
   **Job-name idempotency:** a duplicate invoke hits `AlreadyExists`, which is
   treated as success — the Kubernetes API enforces the RunID dedupe the
-  harness journal provides on Substrate. (Residual: a `Redispatch` after a
+  token lifecycle provides on Substrate. (Residual: a `Redispatch` after a
   double `MarkRunDispatched` failure mints a token the existing Job never
   received; the run strands until the reaper — the same documented residual
   the engine already carries.)
@@ -284,17 +315,39 @@ compatibility masquerade leaks the rest. So every egress policy below is
 Default-deny egress (`policyTypes: [Egress]`, empty allow beyond the listed)
 applied per component:
 
-| Pods                             | Allowed egress                                                                                             | Why                                                                                                                                                                             |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Substrate **workers** (per-pool) | kube-dns; Substrate control plane + atelet/atunnel peers; in-cluster object store; `atenet-egress` gateway | Everything a worker needs is in-cluster by construction (that is what the in-cluster object store buys). Actor traffic rides the same allowances but terminates at the gateway. |
-| **`atenet-egress` gateway**      | kube-dns; **the Nightshift proxy Service only**                                                            | The choke point. All actor-originated traffic converges here; its only onward hop is our proxy. No internet.                                                                    |
-| **Jobs runner namespace**        | kube-dns; **the Nightshift proxy Service only**                                                            | The same guarantee with one fewer hop.                                                                                                                                          |
-| **Nightshift proxy**             | kube-dns; Postgres; **internet `:443`**                                                                    | The only pod in the system allowed outbound internet.                                                                                                                           |
-| **Control plane**                | kube-dns; Postgres; Substrate control-plane gRPC; router Service                                           | Fires runs and drives suspend; no internet.                                                                                                                                     |
+| Pods                                        | Allowed egress                                                                                                                                   | Why                                                                                                                                                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Substrate **workers** (per-pool)            | kube-dns; atunnel peers (worker↔worker mTLS); `atenet-egress` gateway; **only what atelet demonstrably needs, if atelet runs in the worker pod** | The tightest set the layout allows — see the masquerade caveat below. Everything a worker needs is in-cluster by construction (that is what the in-cluster object store buys).                                                                                                   |
+| **atelet / node agents** (if separate pods) | kube-dns; Substrate control plane; in-cluster object store                                                                                       | The spike: only atelet touches object storage. Allowances follow the component that needs them — every flow moved off the worker allowlist is a flow a masquerading actor cannot ride. Whether substrate's pod layout permits this split is a **verify-at-implementation** item. |
+| **`atenet-egress` gateway**                 | kube-dns; **the Nightshift proxy Service only**                                                                                                  | The choke point. All tunneled actor traffic converges here; its only onward hop is our proxy. No internet.                                                                                                                                                                       |
+| **Jobs runner namespace**                   | kube-dns; **the Nightshift proxy Service only**                                                                                                  | The same guarantee with one fewer hop.                                                                                                                                                                                                                                           |
+| **Nightshift proxy**                        | kube-dns; Postgres; **control-plane Service**; **internet `:443`**                                                                               | The only pod in the system allowed outbound internet. The control-plane allowance is load-bearing: `/proxy/internal/...` is a reverse proxy to `Config.InternalBase` — without it, every harness context fetch, event, and finalize would fail.                                  |
+| **Control plane**                           | kube-dns; Postgres; Substrate control-plane gRPC; router Service                                                                                 | Fires runs and drives suspend; no internet.                                                                                                                                                                                                                                      |
+
+**The masquerade caveat — what this topology does and does not guarantee.**
+The compatibility masquerade means non-tunneled actor traffic leaves the
+worker pod as worker traffic, and NetworkPolicy cannot tell them apart. Two
+consequences, stated plainly:
+
+- **Guaranteed against a fully hostile actor:** no internet egress, no
+  direct path to an LLM provider, no credential exposure — because nothing
+  on any actor-reachable allowlist has internet access except the proxy,
+  which authenticates and permit-checks every request.
+- **Not guaranteed by policy alone:** an actor can masquerade to whatever
+  remains on its own worker's allowlist. That is why the worker row above is
+  minimized and the atelet split matters: each in-cluster service left
+  actor-reachable (worst case: the Substrate control plane's gRPC, the
+  object store's S3 API) is defended by that service's own authentication,
+  not by the network — and the spike notes upstream's authn is early. The
+  residual shrinks to zero when upstream lands its masquerade restriction
+  (their own TODO) or `EgressPolicy` datapath enforcement; until then the
+  conformance test pins the _actual_ reachable set so it can only shrink
+  deliberately, never grow silently.
 
 The harness cooperates but is never trusted: its base URLs point at the
 proxy, and run records travel `{proxy}/proxy/internal/...` — but the
-guarantee is the policy set, which holds against a fully hostile actor.
+guarantee above is the policy set's, and it holds against a fully hostile
+actor.
 
 **In-cluster hop security, stated plainly:** actor→gateway is mTLS
 (upstream's atunnel); gateway→proxy and Job→proxy are plaintext in-cluster
@@ -317,9 +370,13 @@ spike's verified ~6-minute bring-up) asserts:
 1. Direct internet (`https://example.com`) — **fails**.
 2. Direct provider (`https://api.anthropic.com`) — **fails** (a permit
    holder still can't skip the proxy).
-3. Direct in-cluster targets that are not the proxy — Postgres, the
-   Substrate control plane, the object store, the control-plane service —
-   **all fail**.
+3. Direct in-cluster targets off the worker allowlist — Postgres, the
+   Nightshift control-plane Service — **fail**. Targets that remain on the
+   worker allowlist (masquerade caveat: worst case the Substrate control
+   plane and the object store, best case neither if the atelet split holds)
+   are **pinned**: the test records exactly which are reachable and fails
+   on any growth, so the residual set shrinks deliberately and never widens
+   silently.
 4. `{proxy}/proxy/llm/{provider}` with a valid run token and permit —
    **succeeds** (fake upstream); with a non-permitted provider — **403**.
 5. `{proxy}/proxy/internal/runs/{id}/events` with the run token —
@@ -407,11 +464,18 @@ nightshift-runners   Jobs-backend namespace (empty on Substrate deployments)
   suspend/destroy idempotency on NotFound. `KubeJobs` against the fake
   clientset — Job shape, `AlreadyExists`-is-success, Destroy label
   selection.
-- **Harness server:** duplicate `POST /invoke` runs one episode; journal
-  survives restart (state-dir remount); serial execution under concurrent
-  invokes; forged-token invoke journals and idles; `readyz`.
+- **Harness server:** a duplicate `POST /invoke` of a finalized run queues,
+  gets 401/403 on its context fetch, and produces no second episode (the
+  token-lifecycle dedupe, tested against a fake internal API); a duplicate
+  of a crashed-before-finalize run **re-executes**; serial execution under
+  concurrent invokes; a forged-token invoke is discarded with no recorded
+  state; a transient context-fetch failure leaves the run re-invokable;
+  `readyz`.
 - **Suspender loop:** fake Compute records suspend calls — idle workflow
-  suspended once, active-run workflow skipped, no-op backends inert.
+  suspended once and `actor_suspended_at` stamped, active-run workflow
+  skipped, already-stamped workflow skipped, dispatch clears the stamp, a
+  crash between suspend and stamp yields one redundant (harmless) suspend,
+  no-op backends inert.
 - **e2e (kind, CI):** on each backend — fire a workflow through the real
   sandbox path with a fake LLM upstream behind the proxy; assert the run
   record; then the conformance suite above, plus (Substrate) resume-with-
@@ -461,6 +525,11 @@ autoscaling; managed object storage; billing for compute.
 
 ## Open questions
 
+- **Does Substrate's pod layout permit the atelet split?** The worker-row
+  minimization (masquerade caveat) assumes control-plane and object-store
+  egress can move to atelet's pods. If atelet runs inside the worker pod,
+  those flows stay actor-reachable and the pinned conformance set is the
+  fallback control. Verify at implementation, against the pinned commit.
 - **Snapshot GC beyond lifecycle rules** — keyed to actor deletion; needs a
   small design when actor memory becomes a product surface.
 - **Re-pin cadence in practice** — monthly is the spike's estimate; the
