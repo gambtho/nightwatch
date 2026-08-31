@@ -18,17 +18,17 @@ export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmod
 
 go run ./cmd/tomte migrate
 
-export TOMTE_PUBLIC_BASE_URL=http://localhost:8080
 export TOMTE_RUNNER_KEY=$(openssl rand -base64 32)
 export TOMTE_VAULT_KEY=$(openssl rand -base64 32)
 go run ./cmd/tomte serve
 ```
 
-`TOMTE_PUBLIC_BASE_URL` is the app's canonical origin (scheme + host,
-nothing else). It must be HTTPS — plain `http` is accepted for
-`localhost`/`127.0.0.1`/`::1` only — because it defines the trusted
-`Origin` for CSRF checks and anchors redirects. Host and proxy headers
-are never used for any of those.
+The app's origin is derived automatically from the bound listener (the
+loopback origin); `TOMTE_PUBLIC_BASE_URL` is an optional override for
+dev topologies like Vite-as-origin (scheme + host, nothing else; HTTPS
+required except loopback hosts). It defines the trusted `Origin` for
+CSRF checks, the session cookie's attributes, and the Host allowlist —
+Host and proxy headers are never used to derive any of those.
 
 There is no login surface: one install is one user. The app shell mints
 the session at launch, and "open in browser" exchanges a single-use
