@@ -196,6 +196,8 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 			}
 			retryReq, rerr := http.NewRequestWithContext(ctx, compiled.Method, target, bodyReader(compiled.Body))
 			if rerr != nil {
+				slog.Error("proxy: connector retry build", "connector", connector, "op", op, "err", rerr)
+				h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "request"})
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -232,13 +234,19 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", loc)
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
-	h.emit(r, id, "proxy.request", map[string]any{
+	_, copyErr := io.Copy(w, resp.Body)
+	payload := map[string]any{
 		"connector":   connector,
 		"op":          op,
 		"status":      resp.StatusCode,
 		"duration_ms": time.Since(start).Milliseconds(),
-	})
+	}
+	// Nothing can be re-sent once headers are out, but the audit record
+	// must not claim a delivery that broke mid-body.
+	if copyErr != nil {
+		payload["truncated"] = true
+	}
+	h.emit(r, id, "proxy.request", payload)
 }
 
 // bodyReader returns a fresh reader per attempt (the 401 retry re-sends

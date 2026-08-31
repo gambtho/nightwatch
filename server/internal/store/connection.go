@@ -106,9 +106,30 @@ func (s *Store) DeleteConnection(ctx context.Context, tenantID uuid.UUID, provid
 
 // UpsertConnectionBundle writes an oauth-kind credential with its
 // non-secret metadata. A rewrite (re-consent on the shared connection)
-// bumps the epoch and resets status, like every bundle write.
+// bumps the epoch and resets status, like every bundle write — and it
+// takes the same advisory lock refresh holds, so a re-consent landing
+// mid-refresh cannot be silently overwritten by the refresh's UPDATE
+// (the refresh re-reads under the lock and sees the fresh bundle).
 func (s *Store) UpsertConnectionBundle(ctx context.Context, tenantID uuid.UUID, name, provider string, up BundleUpdate) (Connection, error) {
-	return scanConnection(s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Connection{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var id uuid.UUID
+	err = tx.QueryRow(ctx,
+		`SELECT id FROM connection WHERE tenant_id = $1 AND provider = $2 AND name = $3`,
+		tenantID, provider, name).Scan(&id)
+	if err == nil {
+		if _, lerr := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(`+connLockKey+`)`, id); lerr != nil {
+			return Connection{}, lerr
+		}
+	}
+	// A first-time insert has no id to lock; the unique key still
+	// serializes two concurrent first consents (one becomes the update
+	// arm). ON CONFLICT keeps both paths in one statement.
+	conn, err := scanConnection(tx.QueryRow(ctx,
 		`INSERT INTO connection
 		   (tenant_id, name, kind, provider, dek_wrapped, ciphertext, nonce, kek_version, metadata)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -124,6 +145,10 @@ func (s *Store) UpsertConnectionBundle(ctx context.Context, tenantID uuid.UUID, 
 		   updated_at = now()
 		 RETURNING `+connectionCols,
 		tenantID, name, up.Kind, provider, up.DEKWrapped, up.Ciphertext, up.Nonce, up.KEKVersion, up.Metadata))
+	if err != nil {
+		return Connection{}, err
+	}
+	return conn, tx.Commit(ctx)
 }
 
 // BundleUpdate is a new sealed credential for a connection: fresh

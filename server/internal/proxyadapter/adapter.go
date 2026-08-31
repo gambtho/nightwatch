@@ -93,7 +93,8 @@ type credentials struct {
 }
 
 // refreshSkew: a token expiring within this window is refreshed before
-// use, so it cannot expire mid-upstream-call.
+// use. A longer upstream call can still outlive a token injected just
+// outside the skew — the connector 401 retry is the backstop there.
 const refreshSkew = 60 * time.Second
 
 func (c *credentials) Credential(ctx context.Context, tenantID uuid.UUID, name, provider string) (proxy.Secret, error) {
@@ -165,6 +166,10 @@ func (c *credentials) needsRefresh(b oauth.Bundle) bool {
 func (c *credentials) refresh(ctx context.Context, tenantID uuid.UUID, provider, name string) (proxy.Secret, error) {
 	key := tenantID.String() + "/" + provider + "/" + name
 	v, err, _ := c.refreshes.Do(key, func() (any, error) {
+		// The flight serves every waiter, so it must not die with the
+		// first caller's context; detach it and bound it ourselves.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		var out proxy.Secret
 		final, err := c.store.WithConnectionLock(ctx, tenantID, provider, name,
 			func(cur store.Connection) (*store.BundleUpdate, error) {

@@ -76,14 +76,22 @@ func (d Deps) oauthStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Union with what the shared connection already holds (incremental
-	// auth: re-consent must never shrink an existing grant).
-	if existing, err := d.Store.GetConnection(r.Context(), claims.TenantID, con.Auth.Provider, "default"); err == nil {
+	// auth: re-consent must never shrink an existing grant). Only a
+	// definite not-found skips the union — a transient DB failure must
+	// not silently narrow the consent.
+	existing, err := d.Store.GetConnection(r.Context(), claims.TenantID, con.Auth.Provider, "default")
+	switch {
+	case err == nil:
 		var meta oauth.Metadata
 		if len(existing.Metadata) > 0 && json.Unmarshal(existing.Metadata, &meta) == nil {
 			for _, sc := range meta.Scopes {
 				scopes[sc] = true
 			}
 		}
+	case errors.Is(err, store.ErrNotFound):
+	default:
+		writeErr(w, err)
+		return
 	}
 	requested := make([]string, 0, len(scopes))
 	for sc := range scopes {
@@ -190,10 +198,11 @@ func (d Deps) appRedirect(returnTo, outcome string) string {
 	return u.String()
 }
 
-// revokeOAuth is best-effort provider-side revocation before a delete:
-// decrypt the bundle (a control-plane decrypt, the revocation exception
-// to the proxy-only rule) and tell the provider. Failure is logged and
-// the row deleted regardless — nothing outlives the database check.
+// revokeOAuth is best-effort provider-side revocation, run after the
+// row is already deleted: decrypt the departed bundle (a control-plane
+// decrypt, the revocation exception to the proxy-only rule) and tell
+// the provider. Failure is only logged — the database check, not the
+// provider, is what nothing outlives.
 func (d Deps) revokeOAuth(r *http.Request, conn store.Connection) {
 	if d.OAuth == nil || conn.Kind != "oauth" {
 		return
