@@ -17,7 +17,7 @@ import (
 
 	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
-	"github.com/gambtho/nightwatch/server/internal/mail"
+	"github.com/gambtho/nightwatch/server/internal/mail/mailtest"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/testpg"
 	"github.com/gambtho/nightwatch/server/internal/token"
@@ -33,7 +33,7 @@ type env struct {
 	user    store.User
 	compute *fakeCompute
 	vault   *vault.Master
-	mailer  *mail.Recorder
+	mailer  *mailtest.Recorder
 	baseURL *url.URL
 }
 
@@ -41,9 +41,9 @@ type env struct {
 // its opaque token — the DB-backed replacement for signing claims.
 func mintSessionCookie(t *testing.T, s *store.Store, tenantID, userID uuid.UUID) *http.Cookie {
 	t.Helper()
-	value, tokenHash, err := httpapi.NewSessionToken()
+	value, tokenHash, err := httpapi.NewOpaqueToken()
 	require.NoError(t, err)
-	_, err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
+	err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
 	require.NoError(t, err)
 	return httpapi.SessionCookie(value)
 }
@@ -74,7 +74,7 @@ func newEnv(t *testing.T) *env {
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: fc}
 
 	base := &url.URL{Scheme: "https", Host: "app.nightshift.test"}
-	mailer := &mail.Recorder{}
+	mailer := &mailtest.Recorder{}
 	mux := http.NewServeMux()
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer})
 	ts := httptest.NewServer(mux)

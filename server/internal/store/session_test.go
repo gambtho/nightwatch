@@ -28,7 +28,7 @@ func TestSessionUserJoinsCurrentRole(t *testing.T) {
 	_, s, tn, u := newUser(t)
 	ctx := context.Background()
 
-	_, err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
 	require.NoError(t, err)
 
 	userID, tenantID, role, err := s.SessionUser(ctx, hash(1))
@@ -48,7 +48,7 @@ func TestSessionGoneWhenUserDeleted(t *testing.T) {
 	pool, s, tn, u := newUser(t)
 	ctx := context.Background()
 
-	_, err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `DELETE FROM app_user WHERE id = $1`, u.ID)
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestSessionCompositeFKRejectsCrossTenantPair(t *testing.T) {
 
 	other, err := s.CreateTenant(ctx, "bloom", testKEK)
 	require.NoError(t, err)
-	_, err = s.CreateSession(ctx, hash(1), other.ID, u.ID)
+	err = s.CreateSession(ctx, hash(1), other.ID, u.ID)
 	require.Error(t, err, "user-A/tenant-B session must be a database error")
 }
 
@@ -72,7 +72,7 @@ func TestSessionIdleAndAbsoluteExpiry(t *testing.T) {
 	ctx := context.Background()
 
 	// Idle: last seen just over 7 days ago inside the absolute cap.
-	_, err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
 		`UPDATE session SET last_seen_at = now() - interval '8 days' WHERE token_hash = $1`, hash(1))
@@ -81,7 +81,7 @@ func TestSessionIdleAndAbsoluteExpiry(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound, "idle timeout")
 
 	// Absolute: recently seen but past the 30-day cap.
-	_, err = s.CreateSession(ctx, hash(2), tn.ID, u.ID)
+	err = s.CreateSession(ctx, hash(2), tn.ID, u.ID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
 		`UPDATE session SET expires_at = now() - interval '1 minute' WHERE token_hash = $1`, hash(2))
@@ -90,11 +90,29 @@ func TestSessionIdleAndAbsoluteExpiry(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrNotFound, "absolute cap")
 }
 
+func TestExpiredSessionIsNotResurrectedByLookup(t *testing.T) {
+	pool, s, tn, u := newUser(t)
+	ctx := context.Background()
+
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		`UPDATE session SET last_seen_at = now() - interval '8 days' WHERE token_hash = $1`, hash(1))
+	require.NoError(t, err)
+
+	// The rejected lookup must not refresh last_seen_at: a second lookup
+	// stays rejected, forever.
+	_, _, _, err = s.SessionUser(ctx, hash(1))
+	require.ErrorIs(t, err, store.ErrNotFound)
+	_, _, _, err = s.SessionUser(ctx, hash(1))
+	require.ErrorIs(t, err, store.ErrNotFound, "an idle-expired session must stay expired")
+}
+
 func TestSessionTouchThrottled(t *testing.T) {
 	pool, s, tn, u := newUser(t)
 	ctx := context.Background()
 
-	_, err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
 	require.NoError(t, err)
 
 	// A fresh session (last_seen_at = now) is not touched again.
@@ -120,9 +138,9 @@ func TestDeleteSessionAndLogoutEverywhere(t *testing.T) {
 	_, s, tn, u := newUser(t)
 	ctx := context.Background()
 
-	_, err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
+	err := s.CreateSession(ctx, hash(1), tn.ID, u.ID)
 	require.NoError(t, err)
-	_, err = s.CreateSession(ctx, hash(2), tn.ID, u.ID)
+	err = s.CreateSession(ctx, hash(2), tn.ID, u.ID)
 	require.NoError(t, err)
 
 	require.NoError(t, s.DeleteSession(ctx, hash(1)))

@@ -84,6 +84,24 @@ func TestMagicLinkStoresOnlyRelativeNext(t *testing.T) {
 	require.Equal(t, e.baseURL.String()+"/", target)
 }
 
+func TestMagicLinkMalformedJSONIs400(t *testing.T) {
+	e := newEnv(t)
+	// Anti-enumeration covers unknown emails, not syntactically broken
+	// requests — a client serialization bug deserves a diagnosable 400.
+	resp, _ := requestMagicLink(t, e, `{"email": truncated`)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	require.Empty(t, e.mailer.Messages())
+}
+
+func TestMagicLinkRejectsControlCharacterNext(t *testing.T) {
+	e := newEnv(t)
+	// A next carrying CR/LF must not be stored: it would otherwise reach
+	// the Location header at verify time (header injection).
+	requestMagicLink(t, e, `{"email":"pat@acme.test","next":"/x\r\nSet-Cookie: evil=1"}`)
+	target := postVerify(t, e, lastMagicToken(t, e))
+	require.Equal(t, e.baseURL.String()+"/", target)
+}
+
 // postVerify submits the consuming POST and returns the redirect target.
 func postVerify(t *testing.T, e *env, token string) string {
 	t.Helper()

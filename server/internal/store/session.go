@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,18 +14,9 @@ const (
 	sessionAbsoluteCap = "30 days"
 )
 
-type Session struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	TenantID   uuid.UUID
-	CreatedAt  time.Time
-	LastSeenAt time.Time
-	ExpiresAt  time.Time
-}
-
 // CreateSession inserts a session row for an existing user. The composite
 // FK makes a cross-tenant (tenantID, userID) pair a database error.
-func (s *Store) CreateSession(ctx context.Context, tokenHash []byte, tenantID, userID uuid.UUID) (Session, error) {
+func (s *Store) CreateSession(ctx context.Context, tokenHash []byte, tenantID, userID uuid.UUID) error {
 	return createSession(ctx, s.pool, tokenHash, tenantID, userID)
 }
 
@@ -34,14 +24,19 @@ func (s *Store) CreateSession(ctx context.Context, tokenHash []byte, tenantID, u
 // user's CURRENT role — role is never persisted on the session row; the
 // join reads it from app_user so a role change takes effect on the next
 // request, and a session whose user row is gone matches nothing → 401.
-// The CTE touches last_seen_at at most once per hour (the touch is not
+// The CTE touches last_seen_at at most once per hour, and only for a
+// session still inside both expiry windows — a rejected lookup must not
+// refresh (and thereby resurrect) an expired session. The touch is not
 // visible to the SELECT's snapshot, which is fine: the pre-touch value
-// still satisfies the idle window whenever the touch fired).
+// still satisfies the idle window whenever the touch fired.
 func (s *Store) SessionUser(ctx context.Context, tokenHash []byte) (userID, tenantID uuid.UUID, role string, err error) {
 	err = s.pool.QueryRow(ctx, `
 		WITH touched AS (
 		    UPDATE session SET last_seen_at = now()
-		    WHERE token_hash = $1 AND last_seen_at < now() - interval '1 hour'
+		    WHERE token_hash = $1
+		      AND last_seen_at < now() - interval '1 hour'
+		      AND last_seen_at > now() - interval '`+sessionIdleWindow+`'
+		      AND expires_at > now()
 		)
 		SELECT se.user_id, se.tenant_id, u.role
 		FROM session se
@@ -69,13 +64,10 @@ func (s *Store) DeleteUserSessions(ctx context.Context, tenantID, userID uuid.UU
 	return err
 }
 
-func createSession(ctx context.Context, q querier, tokenHash []byte, tenantID, userID uuid.UUID) (Session, error) {
-	var sess Session
-	err := q.QueryRow(ctx,
+func createSession(ctx context.Context, q querier, tokenHash []byte, tenantID, userID uuid.UUID) error {
+	_, err := q.Exec(ctx,
 		`INSERT INTO session (token_hash, tenant_id, user_id, expires_at)
-		 VALUES ($1, $2, $3, now() + interval '`+sessionAbsoluteCap+`')
-		 RETURNING id, user_id, tenant_id, created_at, last_seen_at, expires_at`,
-		tokenHash, tenantID, userID,
-	).Scan(&sess.ID, &sess.UserID, &sess.TenantID, &sess.CreatedAt, &sess.LastSeenAt, &sess.ExpiresAt)
-	return sess, err
+		 VALUES ($1, $2, $3, now() + interval '`+sessionAbsoluteCap+`')`,
+		tokenHash, tenantID, userID)
+	return err
 }
