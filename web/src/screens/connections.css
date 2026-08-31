@@ -1,0 +1,85 @@
+/* Connections manager. Kept in its own file so this surface never
+   contends with screens.css across parallel branches. */
+
+.conn-intro {
+  max-width: 560px;
+}
+
+.conn-section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.conn-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 16px;
+  width: 100%;
+  max-width: 620px;
+}
+
+.conn-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.conn-head .btn,
+.conn-head .btn-quiet {
+  margin-left: auto;
+}
+
+.conn-name {
+  font-weight: 600;
+}
+
+.conn-desc {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+}
+
+.conn-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.conn-confirm {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.conn-confirm p {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+
+.conn-capture {
+  margin-top: 12px;
+}
+
+.conn-field {
+  display: block;
+  width: 100%;
+}
+
+.conn-field input {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}

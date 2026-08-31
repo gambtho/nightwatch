@@ -21,6 +21,11 @@ export default function Build() {
         it can run.
       </p>
       <p className="dim">
+        The tools Tomte can reach live in <Link to="/connections">connections</Link>.
+        Connect something once — Slack, say — and every job you describe here finds it
+        ready.
+      </p>
+      <p className="dim">
         Building or demoing? There's a <Link to="/setup">developer setup</Link> form that
         writes the version-1 document by hand — it's the scaffolding, not the product.
       </p>

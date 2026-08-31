@@ -5,6 +5,7 @@ import Home from "./screens/Home";
 import WorkflowDetail from "./screens/WorkflowDetail";
 import Approve from "./screens/Approve";
 import Build from "./screens/Build";
+import Connections from "./screens/Connections";
 import Setup from "./screens/Setup";
 import "./App.css";
 
@@ -82,6 +83,14 @@ export default function App() {
           element={
             <RequireSession>
               <Build />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/connections"
+          element={
+            <RequireSession>
+              <Connections />
             </RequireSession>
           }
         />
