@@ -29,9 +29,10 @@ type catalogConnectorJSON struct {
 	Description  string `json:"description"`
 	AuthProvider string `json:"auth_provider"`
 	// Connected reports whether the tenant holds any credential in the
-	// connector's namespace. Richer status (needs_reauth) arrives with
-	// the vault OAuth work.
+	// connector's namespace; Status is that credential's health ("ok" |
+	// "needs_reauth"), empty when not connected.
 	Connected bool            `json:"connected"`
+	Status    string          `json:"status,omitempty"`
 	Ops       []catalogOpJSON `json:"ops"`
 }
 
@@ -46,9 +47,14 @@ func (d Deps) getCatalog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	connected := map[string]bool{}
+	// The "default" connection is the shared-connection convention; it
+	// wins when a tenant somehow holds several credentials in one
+	// namespace.
+	status := map[string]string{}
 	for _, c := range conns {
-		connected[c.Provider] = true
+		if _, seen := status[c.Provider]; !seen || c.Name == "default" {
+			status[c.Provider] = c.Status
+		}
 	}
 
 	out := []catalogConnectorJSON{}
@@ -56,7 +62,8 @@ func (d Deps) getCatalog(w http.ResponseWriter, r *http.Request) {
 		cj := catalogConnectorJSON{
 			ID: con.ID, Name: con.Name, Description: con.Description,
 			AuthProvider: con.Auth.Provider,
-			Connected:    connected[con.Auth.Provider],
+			Connected:    status[con.Auth.Provider] != "",
+			Status:       status[con.Auth.Provider],
 		}
 		for _, op := range con.Ops {
 			oj := catalogOpJSON{

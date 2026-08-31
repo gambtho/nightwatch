@@ -145,11 +145,7 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	var reqBody io.Reader
-	if compiled.Body != nil {
-		reqBody = bytes.NewReader(compiled.Body)
-	}
-	upReq, err := http.NewRequestWithContext(ctx, compiled.Method, target, reqBody)
+	upReq, err := http.NewRequestWithContext(ctx, compiled.Method, target, bodyReader(compiled.Body))
 	if err != nil {
 		slog.Error("proxy: connector request build", "connector", connector, "op", op, "err", err)
 		h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "request"})
@@ -173,6 +169,57 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}
+
+	// An upstream 401 means the injected credential was rejected. Demote
+	// the connection via the secret's epoch-CAS hook; when the CAS
+	// misses, the token we used was already superseded by a refresh, so
+	// re-resolve once and retry — the one place a stale token gets a
+	// second chance against the current bundle.
+	if resp.StatusCode == http.StatusUnauthorized && secret.MarkBroken != nil {
+		applied, merr := secret.MarkBroken(ctx)
+		switch {
+		case merr != nil:
+			slog.Error("proxy: connector mark broken", "connector", connector, "op", op, "err", merr)
+		case applied:
+			h.emit(r, id, "connection.broken", map[string]any{
+				"connector": connector, "op": op, "provider": con.Auth.Provider,
+				"connection": entry.Connection,
+			})
+		default: // CAS miss: a newer credential exists — retry once with it.
+			_ = resp.Body.Close()
+			fresh, cerr := h.d.Credentials.Credential(ctx, id.TenantID, entry.Connection, con.Auth.Provider)
+			if cerr != nil {
+				slog.Error("proxy: connector credential re-resolution", "connector", connector, "op", op, "err", cerr)
+				h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "credential"})
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			retryReq, rerr := http.NewRequestWithContext(ctx, compiled.Method, target, bodyReader(compiled.Body))
+			if rerr != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			retryReq.Header = upReq.Header.Clone()
+			retryReq.Header.Set("Authorization", "Bearer "+fresh.Value)
+			resp, err = connectorClient.Do(retryReq)
+			if err != nil {
+				slog.Error("proxy: connector upstream retry", "connector", connector, "op", op, "err", err)
+				h.emit(r, id, "proxy.error", map[string]any{"connector": connector, "op": op, "stage": "upstream"})
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
+			if resp.StatusCode == http.StatusUnauthorized && fresh.MarkBroken != nil {
+				if applied, merr := fresh.MarkBroken(ctx); merr != nil {
+					slog.Error("proxy: connector mark broken", "connector", connector, "op", op, "err", merr)
+				} else if applied {
+					h.emit(r, id, "connection.broken", map[string]any{
+						"connector": connector, "op": op, "provider": con.Auth.Provider,
+						"connection": entry.Connection,
+					})
+				}
+			}
+		}
+	}
 	defer resp.Body.Close()
 
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
@@ -192,6 +239,15 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 		"status":      resp.StatusCode,
 		"duration_ms": time.Since(start).Milliseconds(),
 	})
+}
+
+// bodyReader returns a fresh reader per attempt (the 401 retry re-sends
+// the compiled body), or nil for body-less bindings.
+func bodyReader(b []byte) io.Reader {
+	if b == nil {
+		return nil
+	}
+	return bytes.NewReader(b)
 }
 
 func rewriteUpstream(compiledURL, base string) (string, error) {

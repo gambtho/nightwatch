@@ -17,7 +17,15 @@ import (
 
 type RunIdentity struct{ TenantID, RunID uuid.UUID }
 
-type Secret struct{ Value string }
+// Secret is an injectable credential. MarkBroken, when set (oauth-kind
+// connections), demotes the backing credential to needs_reauth after an
+// upstream 401 — epoch-CAS inside, so a 401 earned by a stale token
+// cannot demote a connection already refreshed to a newer one; it
+// reports whether the demotion applied.
+type Secret struct {
+	Value      string
+	MarkBroken func(ctx context.Context) (bool, error)
+}
 
 // HookRequest identifies the request the Hook is asked to admit.
 // Provider is set on LLM routes; Connector/Op on connector routes — the
