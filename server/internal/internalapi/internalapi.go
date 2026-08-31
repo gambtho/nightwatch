@@ -144,7 +144,7 @@ func (d Deps) finalize(w http.ResponseWriter, r *http.Request, claims token.RunC
 		Status: body.Status, ErrorKind: body.ErrorKind, ErrorMsg: body.ErrorMsg,
 		Output: body.Output, TokensIn: body.TokensIn, TokensOut: body.TokensOut,
 		CostCents: body.CostCents,
-	})
+	}, 0)
 	if err != nil {
 		d.fail(w, err)
 		return
