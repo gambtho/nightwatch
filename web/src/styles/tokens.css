@@ -1,0 +1,135 @@
+/* Nightshift design tokens — a deliberate night: deep blue-charcoal ground,
+   one warm moonlight ivory reserved for the wordmark, screen titles, and the
+   reassurance line. The read/write/limit trio is semantic and load-bearing
+   (green = read, amber = write, dashed red = the boundary); nothing else may
+   use those hues. Dark is the committed look, not a theme. */
+
+:root {
+  --night: #0e1220;
+  --surface: #151b2c;
+  --surface-2: #1c2338;
+  --line: #2a3147;
+  --text: #e9ecf5;
+  --dim: #949eb8;
+  --moon: #f0e7d1;
+  --accent: #7c89f5;
+  --accent-dim: rgb(124 137 245 / 0.14);
+  --read: #3fa966;
+  --read-bg: rgb(63 169 102 / 0.12);
+  --write: #d98e2b;
+  --write-bg: rgb(217 142 43 / 0.12);
+  --limit: #d64545;
+  --danger: #e06c6c;
+  --ok: #6fbf8b;
+  --radius: 10px;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Roboto", sans-serif;
+  --font-display: "Fraunces", "Georgia", "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  color: var(--moon);
+  letter-spacing: 0.01em;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.label {
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.dim {
+  color: var(--dim);
+}
+
+.btn {
+  display: inline-block;
+  background: var(--accent);
+  color: #0d1020;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover {
+  filter: brightness(1.1);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.btn-quiet {
+  background: transparent;
+  color: var(--dim);
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
+.btn-quiet:hover {
+  color: var(--text);
+}
+
+.error-note {
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
