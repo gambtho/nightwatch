@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -129,8 +130,33 @@ func (s *Store) MarkRunRunning(ctx context.Context, tenantID, id uuid.UUID) erro
 	return nil
 }
 
+// FinalizeRun sets the terminal status, clears the token hash (revocation),
+// and — when the finalized cost exceeds the approved per-run cap — records
+// the spend.exceeded event in the SAME transaction: the event insert happens
+// while the run is still non-terminal (satisfying the immutability guard),
+// and a finalize that loses the terminal-transition race rolls the event
+// back with it.
 func (s *Store) FinalizeRun(ctx context.Context, tenantID, id uuid.UUID, fin RunFinal, perRunCapCents int) (Run, error) {
-	return scanRun(s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Run{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if perRunCapCents > 0 && fin.CostCents > perRunCapCents {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO run_event (run_id, tenant_id, type, payload)
+			 SELECT $1, $2, 'spend.exceeded', $3
+			 WHERE EXISTS (SELECT 1 FROM run WHERE id = $1 AND tenant_id = $2
+			               AND status IN ('pending', 'running'))`,
+			id, tenantID,
+			[]byte(fmt.Sprintf(`{"cost_cents":%d,"per_run_cap_cents":%d}`, fin.CostCents, perRunCapCents)),
+		); err != nil {
+			return Run{}, err
+		}
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx,
 		`UPDATE run SET status = $3, finished_at = now(),
 		        tokens_in = $4, tokens_out = $5, cost_cents = $6,
 		        error_kind = NULLIF($7, ''), error_msg = NULLIF($8, ''),
@@ -141,6 +167,10 @@ func (s *Store) FinalizeRun(ctx context.Context, tenantID, id uuid.UUID, fin Run
 		 RETURNING `+runCols,
 		id, tenantID, fin.Status, fin.TokensIn, fin.TokensOut, fin.CostCents,
 		fin.ErrorKind, fin.ErrorMsg, fin.Output))
+	if err != nil {
+		return Run{}, err
+	}
+	return run, tx.Commit(ctx)
 }
 
 func (s *Store) MarkRunDispatched(ctx context.Context, tenantID, id uuid.UUID) error {

@@ -22,6 +22,8 @@ type runJSON struct {
 	WorkflowID uuid.UUID  `json:"workflow_id"`
 	Version    int        `json:"version"`
 	Status     string     `json:"status"`
+	FireReason string     `json:"fire_reason"`
+	FireTime   *time.Time `json:"fire_time,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	TokensIn   *int       `json:"tokens_in,omitempty"`
@@ -36,6 +38,7 @@ type runJSON struct {
 func toRunJSON(r store.Run) runJSON {
 	return runJSON{
 		ID: r.ID, WorkflowID: r.WorkflowID, Version: r.Version, Status: r.Status,
+		FireReason: r.FireReason, FireTime: r.FireTime,
 		StartedAt: r.StartedAt, FinishedAt: r.FinishedAt,
 		TokensIn: r.TokensIn, TokensOut: r.TokensOut, CostCents: r.CostCents,
 		ErrorKind: r.ErrorKind, ErrorMsg: r.ErrorMsg, Output: r.Output,

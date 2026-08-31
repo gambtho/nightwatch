@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/permit"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/token"
 )
@@ -140,11 +141,22 @@ func (d Deps) finalize(w http.ResponseWriter, r *http.Request, claims token.RunC
 		http.Error(w, "bad status", http.StatusBadRequest)
 		return
 	}
+	perRunCap := 0
+	if run, err := d.Store.GetRun(r.Context(), claims.TenantID, claims.RunID); err == nil {
+		if version, err := d.Store.GetVersion(r.Context(), claims.TenantID, run.WorkflowID, run.Version); err == nil {
+			if p, err := permit.Parse(version.Doc.Permit); err == nil && p.Spend != nil {
+				perRunCap = p.Spend.PerRunCents
+			}
+		}
+	}
+	// Cap resolution is best-effort: permits were validated at creation, so
+	// a parse failure here means corrupt data — finalization must still
+	// succeed (with no overrun event) rather than strand the run.
 	_, err := d.Store.FinalizeRun(r.Context(), claims.TenantID, claims.RunID, store.RunFinal{
 		Status: body.Status, ErrorKind: body.ErrorKind, ErrorMsg: body.ErrorMsg,
 		Output: body.Output, TokensIn: body.TokensIn, TokensOut: body.TokensOut,
 		CostCents: body.CostCents,
-	}, 0)
+	}, perRunCap)
 	if err != nil {
 		d.fail(w, err)
 		return
