@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/permit"
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
@@ -69,6 +70,12 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 	}
 	if _, err := permit.Parse(body.Permit); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
+		return body, false
+	}
+	if !llm.Priced(body.Steps.Provider, body.Steps.Model) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "no pricing for " + body.Steps.Provider + "/" + body.Steps.Model + " — spend caps require a priced model",
+		})
 		return body, false
 	}
 	if body.Rubric == nil {

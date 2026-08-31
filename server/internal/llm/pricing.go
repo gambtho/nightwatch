@@ -9,6 +9,8 @@ type pricePer1M struct{ in, out int }
 // Unknown (provider, model) combinations return 0 rather than erroring —
 // a run must not fail because we haven't catalogued a new model. Operators
 // can PR new rows; stale rows are harmless (they just under/over-report).
+// Workflow validation makes unknown (provider, model) pairs unreachable for
+// approved workflows, so CostCents returning 0 for an unknown model is safe.
 var priceTable = map[string]map[string]pricePer1M{
 	"openai": {
 		"gpt-4o-mini": {in: 15, out: 60},
@@ -27,6 +29,7 @@ var priceTable = map[string]map[string]pricePer1M{
 	},
 	"anthropic": {
 		"claude-haiku-4-5":  {in: 100, out: 500},
+		"claude-sonnet-5":   {in: 300, out: 1500},
 		"claude-sonnet-4-5": {in: 300, out: 1500},
 		"claude-opus-4-6":   {in: 1500, out: 7500},
 	},
@@ -51,4 +54,13 @@ func CostCents(provider, model string, u Usage) int {
 	// overflow at token counts in the hundreds of millions.
 	numerator := int64(u.InputTokens)*int64(p.in) + int64(u.OutputTokens)*int64(p.out)
 	return int(numerator / 1_000_000)
+}
+
+// Priced reports whether a (provider, model) pair has a price row. The
+// workflow API fails closed on unpriced pairs at create/approve time, which
+// is what makes spend caps meaningful — CostCents returning 0 for an
+// unknown model must be unreachable for approved workflows, not a loophole.
+func Priced(provider, model string) bool {
+	_, ok := priceTable[provider][model]
+	return ok
 }
