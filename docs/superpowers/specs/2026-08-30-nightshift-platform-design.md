@@ -14,54 +14,67 @@ one product. Greenfield, harvesting packages from CronFoundry.
 
 ## Decisions already taken
 
-| Decision | Why |
-|---|---|
-| **Hosted, multi-tenant, operated by us** | Answers the UX spec's deferred "whose machines". Non-technical users cannot self-host. |
-| **Agent Substrate for compute** | Own the unit economics. 30× multiplexing of idle scheduled agents is the whole business case. |
-| **Not Managed Agents** | CMA and Substrate are alternatives, not layers — both host compute. CMA would give ten governance primitives free but makes us Anthropic-only and hands Anthropic our margins. |
-| **Greenfield, not a CronFoundry retrofit** | CronFoundry is multi-tenant in its schema and single-tenant in every layer above it: 25 non-test `GetFirstOrganization` call sites, and `SessionClaims{Login, Role, Exp}` carries no tenant at all. Each of those sites is currently an authorization no-op that would have to become a real authz decision. Zero users means no reason to preserve any of it. |
-| **One repo with the UX** | One product, one spec tree. Splitting later is bounded; merging later is not. |
-| **OSS boundary undecided** | So the UI↔server API is designed as a public contract: versioned, documented, no leaked internals. Costs discipline, forecloses nothing. |
-| **Harness: harvest CronFoundry's runner initially** | Provider-neutrality is *why* we chose Substrate; the harness must not undo it. CronFoundry's `ToolCapableProvider` loop already spans four providers. Behind an interface, so a Claude Agent SDK actor image stays an option. |
+| Decision                                            | Why                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hosted, multi-tenant, operated by us**            | Answers the UX spec's deferred "whose machines". Non-technical users cannot self-host.                                                                                                                                                                                                                                                                         |
+| **Agent Substrate for compute**                     | Own the unit economics. 30× multiplexing of idle scheduled agents is the whole business case.                                                                                                                                                                                                                                                                  |
+| **Not Managed Agents**                              | CMA and Substrate are alternatives, not layers — both host compute. CMA would give ten governance primitives free but makes us Anthropic-only and hands Anthropic our margins.                                                                                                                                                                                 |
+| **Greenfield, not a CronFoundry retrofit**          | CronFoundry is multi-tenant in its schema and single-tenant in every layer above it: 25 non-test `GetFirstOrganization` call sites, and `SessionClaims{Login, Role, Exp}` carries no tenant at all. Each of those sites is currently an authorization no-op that would have to become a real authz decision. Zero users means no reason to preserve any of it. |
+| **One repo with the UX**                            | One product, one spec tree. Splitting later is bounded; merging later is not.                                                                                                                                                                                                                                                                                  |
+| **OSS boundary undecided**                          | So the UI↔server API is designed as a public contract: versioned, documented, no leaked internals. Costs discipline, forecloses nothing.                                                                                                                                                                                                                       |
+| **Harness: harvest CronFoundry's runner initially** | Provider-neutrality is _why_ we chose Substrate; the harness must not undo it. CronFoundry's `ToolCapableProvider` loop already spans four providers. Behind an interface, so a Claude Agent SDK actor image stays an option.                                                                                                                                  |
 
 ## Constraints from Substrate
 
-> **Verification status.** Read on 2026-08-30 from the project's `README.md`,
-> `docs/architecture.md`, and `docs/threat-model.md` via fetched summaries — not from
-> source, and not from a running cluster. Everything below marked *(inferred)* needs
-> confirming against code before it is built on. The project states it is pre-1.0,
+> **Verification status.** Originally read on 2026-08-30 from the project's `README.md`,
+> `docs/architecture.md`, and `docs/threat-model.md` via fetched summaries. Since
+> verified against source at commit `69828945` and a live kind bring-up — see
+> [`../../research/2026-08-30-substrate-verification.md`](../../research/2026-08-30-substrate-verification.md);
+> the corrections it flagged are applied below. The project states it is pre-1.0,
 > "not ready for production use, and the APIs are almost guaranteed to change."
 
 **Confirmed:**
 
-- Control plane is a gRPC API on `ate-api-server`: CreateActor, ResumeActor,
-  SuspendActor, DeleteActor. **No exec or attach.**
+- Control plane is a gRPC API on `ate-api-server`: a full CRUD surface (32 RPCs across
+  actors, templates, atespaces, workers, snapshots, and egress policies), plus an
+  `ActorIdentity` service minting per-actor JWTs and mTLS certificates. **No exec or
+  attach. No watch/streaming** — anything we want to observe, we poll or push.
 - An **ActorTemplate** is a Kubernetes CRD — "an immutable definition of an
   actor-version… container image, configuration, and environment required to generate a
   'golden' snapshot." CreateActor references a template.
 - Snapshots capture "the exact RAM state of the process" plus "the files written to the
-  container's writable layer", stored in **Google Cloud Storage**.
+  container's writable layer", stored in **pluggable object storage** (GCS default, S3
+  supported; dev uses an in-cluster S3 store). Nothing upstream ever deletes snapshot
+  objects — snapshot garbage collection is our operational duty.
 - Actors are HTTP-addressable at
   `<actor-name>.<atespace>.actors.resources.substrate.ate.dev`. `atenet-router` (Envoy)
   intercepts, asks the control plane to **resume the actor**, then tunnels to the worker.
-- **`atespace` is not a security boundary** — it is a DNS/logical grouping. Tenant
-  isolation is ours to enforce.
-- The threat model targets "mutually-untrusting multi-tenant workloads", mandates
-  gVisor/microVM ("traditional containers are not a secure sandbox"), default-deny
-  ingress/egress, full state reset between actors sharing a worker, and "credentials are
-  not exposed in sandboxes by default".
+- **`atespace` is the intended per-tenant isolation boundary, not yet enforced by
+  authz** — it scopes actor identity, DNS, and the snapshot grant model, but no
+  per-atespace authorization exists in the API server today, so tenant isolation is
+  still ours to enforce. We adopt **one atespace per Nightshift tenant**.
+- The threat model states — as **design goals, not shipped behavior** — targeting
+  "mutually-untrusting multi-tenant workloads", mandating gVisor/microVM ("traditional
+  containers are not a secure sandbox"), default-deny ingress/egress, full state reset
+  between actors sharing a worker, and "credentials are not exposed in sandboxes by
+  default". The same document opens with "little to no security hardening at this
+  time"; egress default-deny and verified state reset are unshipped upstream.
 - `WorkerPool` CRD defines warm capacity and `spec.sandboxClass` (gVisor or micro-VM).
 
 **Two findings that shape the architecture:**
 
-1. **Egress policy is coarse.** "Egress from actors leverages standard Kubernetes
-   NetworkPolicy at the WorkerPool boundary." NetworkPolicy at pool scope cannot express
-   "workflow A reaches Slack only; workflow B reaches Zendesk only" — not without a
-   WorkerPool per workflow, which destroys the multiplexing we chose Substrate for. The
-   threat model's "selectively allow access to specific actors" reads as a requirement,
-   not a shipped feature.
+1. **Kubernetes-layer egress control does not exist at any scope.** Upstream's
+   WorkerPool NetworkPolicy is ingress-only by pinned contract — egress is deliberately
+   left unmanaged, and an e2e test pins that as the behavior. What does exist is a
+   default-deployed **egress gateway** (`atenet-egress`) that actor traffic is
+   transparently tunneled to over mTLS: it **authenticates** every actor by its minted
+   identity certificate but **authorizes every destination** — no permit semantics. A
+   per-actor `EgressPolicy` API (ordered hostname/CIDR first-match rules, default-deny,
+   credential header injection) landed upstream 2026-08-28, but nothing in the datapath
+   enforces it yet: stored and validated, not enforced.
    **This directly threatens the product's core promise**, since the blast-radius permit
-   is Nightshift's entire differentiator. See [The egress proxy](#the-egress-proxy).
+   is Nightshift's entire differentiator, and nothing upstream enforces a permit today.
+   See [The egress proxy](#the-egress-proxy).
 2. **There is no log or event retrieval API.** The architecture doc calls it an open
    question: "With actors being multiplexed onto and off of workers all the time, it will
    be more difficult to understand what is happening." We cannot pull run output from
@@ -116,8 +129,10 @@ proxy we operate**, and actors get no direct egress at all.
   the proxy substitutes the real token at egress. This satisfies the threat model's
   "credentials are not exposed in sandboxes by default" and matches the pattern CMA's
   vaults implement.
-- WorkerPool NetworkPolicy stays as defence in depth — default-deny, with the proxy the
-  only permitted destination.
+- A default-deny worker egress NetworkPolicy stays as defence in depth — with the proxy
+  the only permitted destination — and it is **ours to build**: upstream's WorkerPool
+  NetworkPolicy is ingress-only by pinned contract, so this belongs in our deployment
+  manifests.
 
 Enforcing in the proxy rather than in the harness is deliberate: the harness shares a
 sandbox with an LLM, so anything it enforces is advisory. The proxy is outside the blast
@@ -163,8 +178,8 @@ now ours. Ordered by how much of the product breaks without it.
 
 1. **Permit enforcement** — the egress proxy above. Without it Nightshift has no product.
 2. **Rubric grading** — an independent grader scoring each run per criterion. The UX spec's
-   entire "silence is good" alerting rests on it: it is what lets an alert name a *specific
-   broken promise* instead of guessing. Expensive, and it was free on CMA.
+   entire "silence is good" alerting rests on it: it is what lets an alert name a _specific
+   broken promise_ instead of guessing. Expensive, and it was free on CMA.
 3. **Spend metering and caps** — per-run and per-tenant, enforced before issuing model
    requests, across providers. CronFoundry's `internal/llm/pricing.go` is a starting point.
 4. **Scheduling** — cron plus IANA timezone, per-tenant fairness and quotas. CronFoundry's
@@ -181,16 +196,16 @@ now ours. Ordered by how much of the product breaks without it.
 
 **Port (clean boundaries, tenant-agnostic):**
 
-| Package | LOC | Note |
-|---|---|---|
-| `internal/publish` | 779 | Multi-destination fan-out with isolated retries. The best thing in the repo. |
-| `internal/llm` | 786 | Four providers plus pricing; underpins metering. |
-| `internal/mcp` | 583 | Tool dispatch for the harvested harness. |
-| `internal/runner` | 535 | The agent loop — initial harness. |
-| `internal/secrets` | 523 | Envelope encryption; rework for per-tenant DEKs. |
-| `internal/redact` | — | Log redaction. Security-relevant and already tested. |
-| `internal/token`, `internal/template` | — | Small and useful. |
-| DB schema shape | — | Org-scoped tables with cascade deletes is the right model. |
+| Package                               | LOC | Note                                                                         |
+| ------------------------------------- | --- | ---------------------------------------------------------------------------- |
+| `internal/publish`                    | 779 | Multi-destination fan-out with isolated retries. The best thing in the repo. |
+| `internal/llm`                        | 786 | Four providers plus pricing; underpins metering.                             |
+| `internal/mcp`                        | 583 | Tool dispatch for the harvested harness.                                     |
+| `internal/runner`                     | 535 | The agent loop — initial harness.                                            |
+| `internal/secrets`                    | 523 | Envelope encryption; rework for per-tenant DEKs.                             |
+| `internal/redact`                     | —   | Log redaction. Security-relevant and already tested.                         |
+| `internal/token`, `internal/template` | —   | Small and useful.                                                            |
+| DB schema shape                       | —   | Org-scoped tables with cascade deletes is the right model.                   |
 
 **Do not port** — these serve the GitOps/self-host workflow we are leaving:
 `githubapp` (748), `bootstrap` (630), `sync` (476), `yamledit` (282), `cloud` (284),
@@ -213,9 +228,17 @@ replaces them.
 
 ## Open questions
 
-- **Does per-actor egress policy land before we need it?** If Substrate ships it, the proxy
-  becomes defence in depth rather than the primary control. Worth tracking upstream.
-- **GCS dependency for snapshots** — a cloud coupling inherited from Substrate. Acceptable?
+- **Tracking task: upstream `EgressPolicy` enforcement.** The per-actor API landed
+  2026-08-28 (unenforced); the gateway, per-actor identity certs, and MITM
+  credential-injection stack are all in place waiting to consume it, so enforcement is
+  plausibly imminent. Convergence plan: **keep our permit compilable to upstream's
+  `EgressPolicy`** (hostname/CIDR first-match plus header injection) and avoid semantics
+  theirs cannot express (e.g. per-path rules) unless the product demands them. If
+  enforcement ships, the proxy becomes defence in depth or migrates to programming
+  `EgressPolicy`.
+- ~~**GCS dependency for snapshots** — a cloud coupling inherited from Substrate.
+  Acceptable?~~ **Dissolved 2026-08-30:** storage is pluggable (GCS or S3); the project
+  itself runs dev on an in-cluster S3 store. Snapshot GC is ours to operate.
 - **Verified state reset.** The threat model flags suspend/resume state cleanup as needing
   testing. Hosting strangers' agents means verifying it ourselves, not taking it on faith.
 - **Fixed cost before customer one.** A k8s fleet with microVM-capable nodes is a standing
