@@ -18,7 +18,11 @@ spec's deferred "credential capture UX" and "pricing … explained to someone wh
 has never bought inference" items, plus its open risk 3 (rubric elicitation).
 **Written against:** the rubric v1 schema in
 [`2026-08-31-nightshift-grading-alerting-design.md`](./2026-08-31-nightshift-grading-alerting-design.md)
-(branch `spec/grading-alerting`, unmerged) — re-verify on merge.
+(branch `spec/grading-alerting`, unmerged) — re-verify on merge — and the
+agent-first scenarios document (external, in-progress, provided 2026-08-31),
+whose closing paragraph — the builder's experience of creating these
+workflows — is precisely this spec's subject; see
+[The builder's four questions](#the-builders-four-questions).
 
 ## What this is
 
@@ -256,6 +260,17 @@ permits: the goal writes to the carrier; the watch only reads bills).
 The user sees the split as the verdict's proposal ("that's two jobs — one
 that ends, one that keeps watch"), shapes both in one conversation, and
 approves each separately on its own diagram.
+
+One bias to guard against: the product's founding example (the weekly
+digest) is standing, but all three scenarios in the agent-first document —
+the bill dispute, the macro estate, the follow-up booking — are goal
+workflows. `workflow.mode` defaults to `standing` at the schema level for
+compatibility; **intake must not inherit that default as a prior.** A
+delegated outcome phrased with no explicit end ("arrange the follow-up my
+care team requested") is still a goal — the end condition is implicit in
+the outcome — and the agent's restatement should surface it ("done when
+the appointment is booked and you have the instructions") rather than
+quietly minting a workflow that never finishes.
 
 ## Artifact elicitation
 
@@ -525,6 +540,34 @@ verdict's honesty posture extends here — one true, specific, checkable
 claim outweighs three broad ones, and the first overclaim discovered
 retroactively poisons every other promise the product made.
 
+## The builder's four questions
+
+The scenarios document closes with the question this spec answers, split
+four ways. Where each answer lives:
+
+- **Do they need to understand engineering?** No, by construction rather
+  than by tone: intake and steps stay in job language, cron and timezones
+  hide behind words-plus-next-three-fires, spend renders as money at the
+  job's rhythm, constraint values arrive by picker, and provider/model
+  choices left the user's hands entirely (decision 9). The only technical
+  act remaining is pasting an API key, and the `key_hint` copy walks it.
+- **How do they feel empowered and successful?** The verdict answers "can
+  I even have this?" in the first thirty seconds; the restatement makes
+  the steps recognizably theirs (prototype test 3); the diagram makes
+  scope something they authored rather than accepted; and the goal-mode
+  payoff screen (objectives spec) is the delegation visibly finishing.
+- **How do they tinker and explore?** A build is cheap and disposable:
+  nothing connects and nothing runs before they choose it, so starting a
+  build to see the verdict _is_ the exploration path, and abandoning one
+  costs nothing. The deeper form — scenario 2's trust journey — is the
+  ladder: rung 1 read-only is "tinkering" institutionalized, with the
+  ceiling visible. What is missing is re-entering a live workflow's build
+  conversation to adjust it; that is scoped out below, and it is the
+  gap most worth closing next.
+- **How are they confident it won't expose their secrets?** The
+  [three checkable claims](#will-this-expose-my-secrets), each placed at
+  its concrete moment.
+
 ## What this needs from the frontend
 
 The frontend lane's checklist. Surfaces 1 and 2 of the prototype rebuilt
@@ -620,13 +663,26 @@ flows must exist); item 1 does not and should land first.
 
 ## Open questions
 
-- **The agent-first scenarios document** was to be provided and was not
-  available when this was written; the design is built against the three
-  delegation specs' extensive quotations of it (billing dispute, CNC
-  estate, clinical follow-up). Verify against the full document — in
-  particular scenario 3's clinical framing, which may carry
-  sensitive-domain constraints (PHI-adjacent copy, escalation defaults)
-  none of the quoted material surfaces.
+- **A user-supplied document estate has no artifact shape.** Scenario 2's
+  290 macro files are neither a connector nor an egress destination, so
+  today's permit cannot express "these files I handed you and nothing
+  else". Recorded as a known ceiling, not scope here — but the verdict
+  must not misclassify it: hand-me-the-files jobs are `partial`, named as
+  such, not `unreachable_system` (there is no system to reach). A future
+  "materials" input would slot beside `connections` in the permit without
+  disturbing this spec's elicitation model.
+- **Multi-party journeys exceed one-owner tenancy.** Scenario 3 has a
+  patient, a care team, and an insurer; identity is one owner per tenant
+  and multi-user governance is deferred everywhere. The build resource
+  carries `created_by` from day one and nothing in this design assumes
+  builder = approver structurally (submit and approve are separate
+  endpoints), so the deferral stays cheap — but the clinical scenario's
+  escalation routing ("returns exceptions to the right person") is not
+  buildable until governance lands.
+- **Sensitive domains.** Scenario 3 is PHI-adjacent. Nothing here designs
+  domain-specific handling (retention, copy, escalation defaults for
+  clinical content); if healthcare becomes a real vertical it needs its
+  own pass, not a footnote.
 - **Verdict latency.** A grounded verdict is one large model call; if it
   takes eight seconds, the first thing a new user experiences is a
   spinner. Streaming the `can` block as it generates is the likely answer;
