@@ -193,3 +193,34 @@ func TestVerifyWithoutGuideIsAnAuthoringError(t *testing.T) {
 	_, err = c.Verify(context.Background(), con, "anything")
 	require.Error(t, err)
 }
+
+func TestVerifyFailsClosedOnNonJSON200(t *testing.T) {
+	// A TLS-intercepting proxy or WAF interstitial returns HTTP 200 with
+	// an HTML page. That must never verify a token.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>sign in</html>"))
+	}))
+	t.Cleanup(ts.Close)
+	c := &Client{Upstreams: map[string]string{"fake": ts.URL}}
+	res, err := c.Verify(context.Background(), fakeConnector(t), "xf-good")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+}
+
+func TestVerifyFailsClosedOnEmpty200(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(ts.Close)
+	c := &Client{Upstreams: map[string]string{"fake": ts.URL}}
+	res, err := c.Verify(context.Background(), fakeConnector(t), "xf-good")
+	require.NoError(t, err)
+	require.False(t, res.OK)
+}
+
+func TestVerify401ReadsAsRejectionNotTransient(t *testing.T) {
+	u := &upstream{status: 401, body: map[string]any{"error": "token_revoked"}}
+	res := verifyAgainst(t, u, "xf-revoked")
+	require.False(t, res.OK)
+	require.Contains(t, res.Message, "token")
+	require.NotContains(t, res.Message, "Try again in a moment")
+}

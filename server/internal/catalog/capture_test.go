@@ -119,3 +119,37 @@ func TestEmbeddedSlackCaptureGuide(t *testing.T) {
 		require.NotContains(t, s, "pre-filled")
 	}
 }
+
+func TestCaptureVerifyOpMustTakeNoRequiredArgs(t *testing.T) {
+	// Verify compiles the op with {}; a verify op requiring args is an
+	// authoring mistake that must fail at load, not 500 at paste time.
+	_, err := ParseDefs(captureDef(t,
+		`"args_schema": {"type":"object","additionalProperties":false},
+	      "binding": {"method":"POST","host":"fake.example.com","path":"/api/auth.test"}`,
+		`"args_schema": {"type":"object","properties":{"team":{"type":"string"}},"required":["team"],"additionalProperties":false},
+	      "binding": {"method":"POST","host":"fake.example.com","path":"/api/auth.test","query":{"team":"team"}}`))
+	require.ErrorContains(t, err, "verify_op")
+}
+
+func TestCaptureStepsMustBeNonEmpty(t *testing.T) {
+	_, err := ParseDefs(captureDef(t,
+		`"steps": ["Click Create.", "Copy the token and paste it below."],`,
+		`"steps": ["Click Create.", ""],`))
+	require.ErrorContains(t, err, "steps")
+}
+
+func TestCaptureStartURLMustBeHTTPS(t *testing.T) {
+	_, err := ParseDefs(captureDef(t,
+		`"start_url": "https://fake.example.com/apps",`,
+		`"start_url": "javascript:alert(1)",`))
+	require.ErrorContains(t, err, "start_url")
+}
+
+// One capture card per credential namespace: connectors share a provider
+// so one pasted token covers them all — two cards for one token is an
+// authoring ambiguity, caught at load.
+func TestOneCaptureGuidePerProvider(t *testing.T) {
+	second := captureDef(t, `"id": "fake"`, `"id": "fake-two"`)
+	_, err := ParseDefs(captureDef(t), second)
+	require.ErrorContains(t, err, "capture")
+}

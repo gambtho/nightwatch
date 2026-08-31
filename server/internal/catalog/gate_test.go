@@ -96,3 +96,15 @@ func TestEmbeddedBaselineInLockstep(t *testing.T) {
 	_, err := Load()
 	require.NoError(t, err)
 }
+
+func TestBaselineSeesCaptureDrift(t *testing.T) {
+	// The capture guide is part of the reviewed catalog surface: editing
+	// it (copy, or worse, repointing verify_op) must demand a baseline
+	// update like any other def edit.
+	base, err := ParseDefs(captureDef(t))
+	require.NoError(t, err)
+	edited, err := ParseDefs(captureDef(t, `"secret_prefix": "xf-"`, `"secret_prefix": "xg-"`))
+	require.NoError(t, err)
+	err = CheckAgainstBaseline(base, edited)
+	require.ErrorContains(t, err, "drifted")
+}

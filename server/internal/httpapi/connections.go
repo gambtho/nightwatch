@@ -36,7 +36,8 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		Value    string `json:"value"`
 		// Kind defaults to llm_api_key (the pre-connector contract);
-		// api_key is a pasted connector token, verified before storing.
+		// api_key is a pasted connector token — verified before storing
+		// when the connector declares a capture verify_op.
 		Kind string `json:"kind"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -73,11 +74,18 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Silently flipping an existing credential's kind would repurpose its
-	// secret. Replacing it is a delete + re-paste, never this PUT.
-	if existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name); gerr == nil && existing.Kind != body.Kind {
+	// secret. Replacing it is a delete + re-paste, never this PUT — and a
+	// store error must not read as "no existing row", or the upsert below
+	// flips the kind the guard exists to protect.
+	existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name)
+	switch {
+	case gerr == nil && existing.Kind != body.Kind:
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "connection exists with kind " + existing.Kind + " — delete it first",
 		})
+		return
+	case gerr != nil && !errors.Is(gerr, store.ErrNotFound):
+		writeErr(w, gerr)
 		return
 	}
 
@@ -139,11 +147,11 @@ func (d Deps) connectorForProvider(provider string) *catalog.Connector {
 		if con.Auth.Provider != provider {
 			continue
 		}
-		if found == nil || (con.Auth.Capture != nil && con.Auth.Capture.VerifyOp != "") {
-			found = con
+		if con.Auth.Capture != nil && con.Auth.Capture.VerifyOp != "" {
+			return con
 		}
-		if found.Auth.Capture != nil && found.Auth.Capture.VerifyOp != "" {
-			break
+		if found == nil {
+			found = con
 		}
 	}
 	return found

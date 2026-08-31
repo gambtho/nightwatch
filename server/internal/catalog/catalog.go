@@ -166,6 +166,19 @@ func ParseDefs(defs ...[]byte) (*Catalog, error) {
 		cat.order = append(cat.order, c.ID)
 	}
 	sort.Strings(cat.order)
+	// Connectors sharing a provider share one pasted token; two capture
+	// cards for one token is an authoring ambiguity.
+	captureBy := map[string]string{}
+	for _, id := range cat.order {
+		con := cat.connectors[id]
+		if con.Auth.Capture == nil {
+			continue
+		}
+		if prev, dup := captureBy[con.Auth.Provider]; dup {
+			return nil, fmt.Errorf("catalog: connectors %q and %q both declare a capture guide for provider %q — at most one per provider", prev, id, con.Auth.Provider)
+		}
+		captureBy[con.Auth.Provider] = id
+	}
 	return cat, nil
 }
 
@@ -212,23 +225,38 @@ func validateConnector(c *Connector) error {
 	// Capture is validated before the ops so a dangling verify_op reports
 	// as the authoring mistake it is, not as a scope error on the op that
 	// lost its exemption.
-	if cap := c.Auth.Capture; cap != nil {
-		if len(cap.Steps) == 0 {
+	if guide := c.Auth.Capture; guide != nil {
+		if len(guide.Steps) == 0 {
 			return fmt.Errorf("capture: at least one steps entry required")
 		}
-		if cap.VerifyOp != "" {
+		for i, s := range guide.Steps {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("capture: steps[%d] is blank", i)
+			}
+		}
+		if guide.StartURL != "" && !strings.HasPrefix(guide.StartURL, "https://") {
+			return fmt.Errorf("capture: start_url must be https")
+		}
+		if guide.VerifyOp != "" {
 			var vop *Op
 			for _, op := range c.Ops {
-				if op.Name == cap.VerifyOp {
+				if op.Name == guide.VerifyOp {
 					vop = op
 					break
 				}
 			}
 			if vop == nil {
-				return fmt.Errorf("capture: verify_op %q not an op of this connector", cap.VerifyOp)
+				return fmt.Errorf("capture: verify_op %q not an op of this connector", guide.VerifyOp)
 			}
 			if vop.Effect != EffectRead {
-				return fmt.Errorf("capture: verify_op %q must be a read op", cap.VerifyOp)
+				return fmt.Errorf("capture: verify_op %q must be a read op", guide.VerifyOp)
+			}
+			// Verify invokes the op with {}; requiring args would turn an
+			// authoring mistake into a 500 at paste time, so it fails here.
+			if sch, err := ParseSchema(vop.ArgsSchema); err == nil {
+				if _, verr := sch.Validate([]byte("{}")); verr != nil {
+					return fmt.Errorf("capture: verify_op %q must take no required args: %v", guide.VerifyOp, verr)
+				}
 			}
 		}
 	}

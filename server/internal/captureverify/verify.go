@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -36,19 +37,15 @@ const (
 
 // Client makes verify calls. The zero value is ready to use.
 type Client struct {
-	// HTTPClient overrides the default (explicit transport, proxy
-	// selection disabled, redirects refused, 10s timeout). Tests only.
-	HTTPClient *http.Client
 	// Upstreams overrides the upstream scheme+host per connector id —
 	// tests point catalog hosts at a local fake, mirroring the proxy's
-	// ConnectorUpstreams.
+	// ConnectorUpstreams. The transport posture itself (proxy selection
+	// disabled, redirects refused, timeout) is deliberately not
+	// swappable.
 	Upstreams map[string]string
 }
 
 func (c *Client) httpClient() *http.Client {
-	if c.HTTPClient != nil {
-		return c.HTTPClient
-	}
 	return &http.Client{
 		Timeout: requestTimeout,
 		// Proxy selection disabled: HTTP(S)_PROXY must not route a
@@ -65,26 +62,26 @@ func (c *Client) httpClient() *http.Client {
 // uncompilable binding); everything the user can act on comes back in
 // Result.
 func (c *Client) Verify(ctx context.Context, con *catalog.Connector, secret string) (Result, error) {
-	cap := con.Auth.Capture
-	if cap == nil || cap.VerifyOp == "" {
+	guide := con.Auth.Capture
+	if guide == nil || guide.VerifyOp == "" {
 		return Result{}, fmt.Errorf("captureverify: connector %q declares no verify op", con.ID)
 	}
-	op, ok := con.Op(cap.VerifyOp)
+	op, ok := con.Op(guide.VerifyOp)
 	if !ok {
-		return Result{}, fmt.Errorf("captureverify: verify op %q missing", cap.VerifyOp)
+		return Result{}, fmt.Errorf("captureverify: verify op %q missing", guide.VerifyOp)
 	}
 
 	// The instant wrong-string-paste check, server-side too — no
 	// credential-bearing call for a value that cannot be the token.
-	if cap.SecretPrefix != "" && !strings.HasPrefix(secret, cap.SecretPrefix) {
+	if guide.SecretPrefix != "" && !strings.HasPrefix(secret, guide.SecretPrefix) {
 		return Result{Message: fmt.Sprintf(
 			"That doesn't look like the right value — the token starts with %s. Copy it again and re-paste.",
-			cap.SecretPrefix)}, nil
+			guide.SecretPrefix)}, nil
 	}
 
 	args, err := op.Schema().Validate([]byte("{}"))
 	if err != nil {
-		return Result{}, fmt.Errorf("captureverify: verify op %q takes args: %w", cap.VerifyOp, err)
+		return Result{}, fmt.Errorf("captureverify: verify op %q takes args: %w", guide.VerifyOp, err)
 	}
 	compiled, err := catalog.Compile(op, args)
 	if err != nil {
@@ -116,28 +113,49 @@ func (c *Client) Verify(ctx context.Context, con *catalog.Connector, secret stri
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
+		// The operator-facing distinction the user message can't carry:
+		// "our egress is broken" is not "the token is wrong".
+		slog.Warn("captureverify: upstream unreachable", "connector", con.ID, "err", err)
 		return Result{Message: fmt.Sprintf("Couldn't reach %s to check the token. Check your connection and try again.", con.Name)}, nil
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Result{Message: fmt.Sprintf("%s returned an error (HTTP %d) while checking the token. Try again in a moment.", con.Name, resp.StatusCode)}, nil
-	}
-
-	// Slack-style Web API envelope: HTTP 200 with ok:false means the
-	// token was rejected. A body without a boolean ok field is judged by
-	// status alone.
+	// Slack-style Web API envelope; also parsed on error statuses, where
+	// the body's error code is the only actionable detail.
 	var envelope struct {
 		OK    *bool  `json:"ok"`
 		Error string `json:"error"`
 	}
-	if err := json.Unmarshal(raw, &envelope); err == nil && envelope.OK != nil && !*envelope.OK {
+	parseErr := json.Unmarshal(raw, &envelope)
+
+	rejected := func() Result {
 		msg := fmt.Sprintf("%s didn't accept this token. Copy it again and re-paste — a character may be missing.", con.Name)
-		if envelope.Error != "" {
+		if parseErr == nil && envelope.Error != "" {
 			msg += fmt.Sprintf(" (%s)", envelope.Error)
 		}
-		return Result{Message: msg}, nil
+		return Result{Message: msg}
+	}
+
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// An auth-status rejection is a re-paste, never a retry.
+		return rejected(), nil
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return Result{Message: fmt.Sprintf("%s returned an error (HTTP %d) while checking the token. Try again in a moment.", con.Name, resp.StatusCode)}, nil
+	}
+
+	// Fail closed on a 2xx we cannot read: a truncated body, or a WAF /
+	// TLS-intercepting-proxy interstitial serving HTML with a 200, must
+	// never verify a token. A parseable JSON body without a boolean ok
+	// field is a plain non-envelope API and passes on status.
+	if readErr != nil || parseErr != nil {
+		slog.Warn("captureverify: unreadable 2xx verify response",
+			"connector", con.ID, "status", resp.StatusCode, "read_err", readErr, "parse_err", parseErr)
+		return Result{Message: fmt.Sprintf("%s sent an unexpected response while checking the token. Try again in a moment.", con.Name)}, nil
+	}
+	if envelope.OK != nil && !*envelope.OK {
+		return rejected(), nil
 	}
 
 	return Result{OK: true, MissingScopes: missingScopes(con, resp.Header.Get("x-oauth-scopes"))}, nil
