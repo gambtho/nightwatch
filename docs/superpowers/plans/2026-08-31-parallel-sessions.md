@@ -501,6 +501,19 @@ five never take it. Each prompt is self-contained.
 >    Tomte's steps/permit shape without a rewrite. The running agent
 >    consumes this file mounted via ConfigMap — behavior comes from the
 >    YAML, never hardcoded in the image.
+>    **Format decision (coordinator-surveyed, 2026-08-31): net-new schema
+>    in the Kubernetes resource envelope** — `apiVersion: tomte.dev/v1alpha1`,
+>    `kind: Agent`, `metadata:`, `spec:` — NOT a CRD at K1 (the CLI reads
+>    it; nothing is registered with the API server), but envelope-shaped so
+>    CRD-hood later is a registration step, not a schema rewrite. Existing
+>    formats were surveyed and not adopted: kagent's CRDs are the closest
+>    prior art (borrow its noun-shape where natural) but bring a
+>    controller + their Python engine as the runtime, which would route
+>    the Tomte transition through someone else's loop; K8s SIG-apps
+>    agent-sandbox is a runtime-isolation CRD to watch, not a topology
+>    format; Docker Compose's `models:` vocabulary is worth echoing but
+>    targets the Docker runtime. Our `spec:` keeps our own nouns — the
+>    governance slots are the differentiator no existing format carries.
 > 2. **A simple CLI** (new top-level dir; propose the name — Go, matching
 >    the repo): `init` scaffolds an `agent.yaml` from the template;
 >    deploy/run applies it to the cluster the user's kubeconfig points at
