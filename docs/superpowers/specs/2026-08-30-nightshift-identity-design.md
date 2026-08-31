@@ -81,7 +81,12 @@ Spec only. No implementation plan exists yet; this feeds one.
 - Normalize (trim, lowercase). Respond **202 with an identical body whether or not
   the email is known** — no account enumeration.
 - Generate a 256-bit random token. Store only its SHA-256 hash in `login_token`
-  with `email`, `created_at`, `expires_at` (15 minutes), `consumed_at NULL`.
+  with `email`, `next_path`, `created_at`, `expires_at` (15 minutes),
+  `consumed_at NULL`. `next_path` is the optional post-login destination captured
+  **at request time** (e.g. the page a logged-out user was trying to reach),
+  normalized and stored only if it is a relative path; anything else stores NULL.
+  Verification later reads the stored value — no redirect target is ever
+  accepted from the verify request itself.
 - Send one email: "Sign in to Nightshift" with a link to
   `GET /auth/verify?token=...`.
 - Rate limit: per email address and per source IP (small fixed budgets, e.g. 3
@@ -108,8 +113,9 @@ the user ever clicks. Standard mitigation, adopted here:
      token + session row commit together;
    - sets the session cookie;
    - redirects: first login → the build conversation (the UX spec's entry point);
-     returning login → wherever the link's `next` pointed — accepted only as a
-     relative path resolved against the public base URL, never an absolute URL.
+     returning login → the token's stored `next_path` joined to the public base
+     URL (falling back to the app root when NULL). The verify request carries
+     only the token; a `next` submitted alongside it is ignored.
 
 **This is one store operation, not a handler-side composition.** Today's
 `store.CreateTenant` begins and commits its own transaction and `UpsertUser` runs
@@ -138,19 +144,32 @@ mint a cross-tenant credential.
 - Lifetime: **7-day idle timeout, 30-day absolute cap.** `last_seen_at` is touched
   at most once per hour to avoid a write per request. Expiry checks read
   `last_seen_at + 7d` and `created_at + 30d`, whichever is sooner.
-- `RequireSession` becomes: read cookie → hash → single indexed lookup → populate
-  the same `SessionClaims{UserID, TenantID, Role}` context value. **Handlers and
-  `ClaimsFrom` are untouched**; only issuance and verification change.
+- `RequireSession` becomes: read cookie → hash → one indexed query that **joins
+  `session` to `app_user` on `(tenant_id, user_id)`** and returns the user's
+  current role → populate the same `SessionClaims{UserID, TenantID, Role}`
+  context value. Role is never persisted on the session row — it is read from
+  `app_user` at request time, so a future role change takes effect on the next
+  request. The composite FK carries `ON DELETE CASCADE`, so a deleted user's
+  sessions vanish with the row; a lookup that finds no joined user (however it
+  happens) is a plain 401. **Handlers and `ClaimsFrom` are untouched**; only
+  issuance and verification change.
 - `POST /v1/auth/logout` deletes the row and clears the cookie.
   "Log out everywhere" (delete all rows for the user) ships with the settings
   surface, but the store method exists from day one — it is also the
   support-revocation lever.
 - `GET /v1/me` returns the current user + tenant — the UI's bootstrap call.
 
-**CSRF.** `SameSite=Lax` blocks cross-site POSTs from forms and scripts in modern
-browsers; as defence in depth every mutating `/v1` endpoint also rejects requests
-whose `Origin` header is present and does not exactly match the configured public
-origin (below). No token dance — the API is same-origin `fetch` only.
+**CSRF.** `SameSite=Lax` does not block a cross-site POST from arriving — it
+withholds the session cookie from it, so the request fails authentication rather
+than delivery. As defence in depth, every mutating `/v1` endpoint also applies an
+explicit Origin policy with three cases, each of which gets test coverage:
+
+- `Origin` absent → allowed (the session cookie is still required; this is the
+  non-browser-client and same-origin-navigation case);
+- `Origin` exactly equal to the configured public origin (below) → allowed;
+- `Origin` present and anything else → 403, before the handler runs.
+
+No token dance — the API is same-origin `fetch` only.
 
 **The canonical public origin is configuration, not inference.** The server today
 knows only its listen address and derives an internal base URL from it
@@ -168,6 +187,11 @@ The command survives for local development but changes in two ways:
 - **Output**: it inserts a session row and prints the cookie value, rather than
   signing claims. It stops needing `NIGHTSHIFT_SESSION_KEY` (which no longer
   exists) and keeps needing `DATABASE_URL` and `NIGHTSHIFT_VAULT_KEY`.
+  Retiring the key ripples through the wiring: `httpapi.Deps.SessionKey` is
+  replaced by the session-store dependency, `RegisterRoutes`/`RequireSession`
+  take it instead of a key, and test fixtures (`session_test.go`,
+  `workflows_test.go`) authenticate by minting session rows rather than signing
+  claims. That is enumeration for the implementation plan, not extra design.
 - **Reuse semantics**: today every default invocation mints a _new_ tenant while
   reusing `dev@example.test` (`server/cmd/nightshift/main.go`), which the global
   unique email index would reject on the second run. The command changes to
@@ -180,14 +204,21 @@ The command survives for local development but changes in two ways:
 - `login_token` table as above, with an index on `token_hash` and a sweep job (or
   opportunistic delete) for expired rows.
 - `session` table as above.
+- **One canonical email representation.** Emails are stored already normalized —
+  `lower(btrim(email))` — and every boundary that accepts one (magic-link
+  request, `UpsertUser`, `dev-session`) applies the same normalization before it
+  touches the store, so lookup, conflict target, and index all agree.
 - `CREATE UNIQUE INDEX ON app_user (lower(email))` — the v1 one-tenant-per-email
-  constraint. `UpsertUser`'s `(tenant_id, email)` conflict target still works;
-  the new index only forbids the same email appearing under a second tenant.
+  constraint, expressed on `lower(email)` as belt-and-braces even though stored
+  values are already lowercase. `UpsertUser`'s `(tenant_id, email)` conflict
+  target still works; the new index only forbids the same email appearing under
+  a second tenant. The migration **backfills
+  `UPDATE app_user SET email = lower(btrim(email))` before creating the index**.
   **Migration note:** the current schema validly permits cross-tenant duplicates,
-  and repeated default `dev-session` runs create them, so this migration can fail
-  on existing development databases. No production data exists; the migration
-  ships as a plain index creation and a dev database that trips it is recreated
-  (`nightshift migrate` against a fresh DB) rather than deduplicated in place.
+  and repeated default `dev-session` runs create them, so index creation can
+  still fail on existing development databases after the backfill. No production
+  data exists; there is no in-place dedup — a dev database that trips it is
+  recreated (`nightshift migrate` against a fresh DB).
 - No change to `tenant`, `tenant_kek`, or `app_user` columns.
 
 ## What "one person builds and approves" means for roles
@@ -235,9 +266,15 @@ account, several memberships" model changes login resolution and nothing else.
   idle/absolute expiry boundaries; log-out-everywhere.
 - Handler tests: enumeration resistance (known vs unknown email produce
   byte-identical responses), rate-budget behaviour, interstitial consumes nothing
-  on GET, cookie attributes, Origin rejection on mutating routes.
+  on GET; the Set-Cookie contract (`__Host-ns_session` with `Secure`, `HttpOnly`,
+  `SameSite=Lax`, `Path=/`); all three Origin cases on mutating routes (absent →
+  allowed, exact match → allowed, mismatch → 403); stored `next_path` honoured
+  and a verify-time `next` ignored; `ClaimsFrom(ctx).Role` reaching a handler
+  through the session→`app_user` join.
 - One end-to-end test: fresh email → link → verify → tenant + KEK + owner exist →
-  `/v1/me` answers → logout → 401.
+  `/v1/me` answers → logout → 401. It runs against a TLS test server with an
+  `http.CookieJar` client, so the cookie is proven to round-trip under its real
+  attributes rather than being attached by hand.
 
 ## Open questions
 
