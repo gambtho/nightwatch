@@ -188,6 +188,33 @@ Plan 3 merged (2026-08-31):
   point; nothing user-facing exists without it.
 - **The user-research read-out** feeding UX changes back into the prototype.
 
+## Open design items, recorded not resolved
+
+Raised by a Codex review of the corrected platform spec (docs lane, PR #15).
+Design work, not bookkeeping — none applied. Relayed to the Plan 5 session
+2026-08-31.
+
+- **Upstream `EgressPolicy` cannot subsume our proxy.** The connectors design
+  enforces per-operation and per-path rules — application layer. Upstream's
+  `EgressPolicy` is network layer. Convergence can therefore only ever replace
+  the network-layer floor beneath the proxy, never the proxy itself. This
+  narrows the roadmap's long-standing "does the proxy have an expiry date"
+  question: it does not, it has a shrinking lower half. Any convergence note
+  in the platform spec should say so rather than implying full convergence.
+- **State retention across permit narrowing** — what happens to actor state
+  accumulated under a wider permit when the permit narrows. Plan 5 scope.
+- **Retry and idempotency for cold-boot request loss** — what the control
+  plane does when an invoke is lost to a cold boot or a request the router
+  sheds under pool saturation, and how that stays idempotent against Plan 3's
+  one-active-run admission index and `run_workflow_firetime_unique`. Plan 5
+  scope.
+
+## Follow-ups
+
+- **Linkify the Plan 5 compute spec references** in the platform spec once
+  PR #12 merges. The docs lane cited it by filename plus "PR #12, unmerged"
+  because the file is not yet in-tree (the escalation-spec precedent).
+
 ## Known ceilings, recorded not scheduled
 
 Surfaced 2026-08-31 by reading the agent-first scenarios document against the
