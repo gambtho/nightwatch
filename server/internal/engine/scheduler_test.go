@@ -84,6 +84,52 @@ func TestTickSkipsWhenCapped(t *testing.T) {
 	require.Empty(t, runs)
 }
 
+// TestTickDoesNotWedgeOnImpossibleCron guards against a scheduler that
+// busy-loops forever on a stored schedule whose cron is syntactically
+// valid but never occurs (e.g. Feb 30). schedule.Parse now rejects such
+// crons at the API boundary, but a row can still reach the store below
+// that validation (e.g. data written before the guard existed, or
+// through a path that skips it) — the store layer itself does not
+// re-validate. mostRecentDue must stay defensive regardless of how the
+// row got there. Tick is run with a timeout guard so a regression fails
+// the test instead of hanging the suite.
+func TestTickDoesNotWedgeOnImpossibleCron(t *testing.T) {
+	s, eng, _, tn, _ := setup(t)
+	ctx := context.Background()
+	user, err := s.UpsertUser(ctx, tn.ID, "wedge@acme.test")
+	require.NoError(t, err)
+	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "wedge", store.VersionDoc{
+		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 10},
+		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
+		Rubric: []byte(`{}`),
+		// Bypasses schedule.Parse's validation (only enforced at the HTTP
+		// layer, in decodeDoc) to reach the store with an impossible cron,
+		// the way a pre-guard row or any other store-level write could.
+		Schedule: json.RawMessage(`{"cron":"0 0 30 2 *","tz":"UTC"}`),
+	})
+	require.NoError(t, err)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	require.NoError(t, err)
+
+	now := time.Date(2026, 9, 7, 9, 0, 30, 0, time.UTC)
+	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
+
+	done := make(chan struct{})
+	go func() {
+		sched.Tick(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Tick did not return: scheduler wedged on an impossible-cron schedule")
+	}
+
+	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Empty(t, runs) // never due, so nothing fires
+}
+
 func TestTickRedispatchesCrashedCreates(t *testing.T) {
 	s, eng, fc, tn, wf := scheduledSetup(t)
 	ctx := context.Background()

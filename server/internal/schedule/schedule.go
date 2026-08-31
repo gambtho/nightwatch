@@ -53,6 +53,14 @@ func Parse(raw []byte) (*Schedule, error) {
 	}
 	s.spec = spec
 	s.loc = loc
+	// A syntactically valid cron can still describe a date that never
+	// occurs (e.g. Feb 30, Apr 31). robfig/cron parses those fine but
+	// Next returns the zero time forever, which would wedge the
+	// scheduler's due-occurrence walk. Reject at parse time — fail
+	// closed, same as the rest of this package's validation.
+	if s.Next(time.Now()).IsZero() {
+		return nil, fmt.Errorf("schedule: cron: no occurrence is ever due")
+	}
 	return &s, nil
 }
 
