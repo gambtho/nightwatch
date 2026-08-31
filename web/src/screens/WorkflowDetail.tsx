@@ -7,6 +7,7 @@ import { dollars, timeAgo } from "../lib/format";
 import { parseSteps } from "../lib/steps";
 import { describeSchedule, nextRunLabel } from "../lib/schedule";
 import { summarizeVersions } from "../lib/versions";
+import { useCatalog } from "../lib/useCatalog";
 import { useSession } from "../session";
 import "./screens.css";
 
@@ -100,6 +101,7 @@ export default function WorkflowDetail() {
 
 function WorkflowDetailInner({ id }: { id: string }) {
   const { expire } = useSession();
+  const catalog = useCatalog();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -216,7 +218,7 @@ function WorkflowDetailInner({ id }: { id: string }) {
       {approved && (
         <section className="wf-section">
           <div className="label">What it can reach (as approved)</div>
-          <PermitDiagram permit={approved.permit} />
+          <PermitDiagram permit={approved.permit} catalog={catalog} />
         </section>
       )}
 

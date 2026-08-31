@@ -80,6 +80,10 @@ export default function Home() {
         <Link className="btn" to="/build">
           Hand something over
         </Link>
+        <p className="dim home-dev-link">
+          <Link to="/setup">Developer setup</Link> — write the version-1 document by hand
+          (for development and demos).
+        </p>
       </div>
     );
   }
@@ -100,6 +104,9 @@ export default function Home() {
       <Link className="btn btn-secondary" to="/build">
         + Something else you want taken care of
       </Link>
+      <p className="dim home-dev-link">
+        <Link to="/setup">Developer setup</Link>
+      </p>
     </div>
   );
 }

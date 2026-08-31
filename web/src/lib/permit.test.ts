@@ -44,6 +44,54 @@ describe("parsePermit", () => {
     expect(view.providers).toEqual(["anthropic"]);
     expect(view.spendPerRunCents).toBeUndefined();
   });
+
+  it("reads connector op grants and their resource lists", () => {
+    const view = parsePermit({
+      v: 1,
+      llm: { providers: ["anthropic"] },
+      connections: {
+        "google-calendar": {
+          kind: "http",
+          ops: ["list_events", "create_event"],
+          resources: { create_event: { calendar_id: ["primary"] } },
+        },
+      },
+    });
+    expect(view.grants).toEqual([
+      {
+        connector: "google-calendar",
+        ops: [
+          { name: "list_events", resources: {} },
+          { name: "create_event", resources: { calendar_id: ["primary"] } },
+        ],
+      },
+    ]);
+  });
+
+  it("leaves grants empty for a permit without connections", () => {
+    expect(parsePermit({ v: 1 }).grants).toEqual([]);
+    expect(parsePermit({ v: 1, connections: {} }).grants).toEqual([]);
+  });
+
+  it("keeps unparseable connections entries visible as unreadable", () => {
+    const view = parsePermit({
+      v: 1,
+      connections: {
+        "not-an-object": 7,
+        "bad-ops": { kind: "http", ops: "everything" },
+        "mixed-ops": { kind: "http", ops: ["list_events", 42] },
+      },
+    });
+    expect(view.grants).toEqual([
+      { connector: "not-an-object", ops: [], unreadable: true },
+      { connector: "bad-ops", ops: [], unreadable: true },
+      {
+        connector: "mixed-ops",
+        ops: [{ name: "list_events", resources: {} }],
+        unreadable: true,
+      },
+    ]);
+  });
 });
 
 describe("labels", () => {
@@ -58,11 +106,12 @@ describe("labels", () => {
         providers: [],
         connection: "default",
         spendPerRunCents: 150,
+        grants: [],
         recognized: true,
       }),
     ).toBe("max $1.50 / run");
-    expect(spendLabel({ providers: [], connection: "default", recognized: true })).toBe(
-      "monthly cap only",
-    );
+    expect(
+      spendLabel({ providers: [], connection: "default", grants: [], recognized: true }),
+    ).toBe("monthly cap only");
   });
 });

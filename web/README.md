@@ -13,10 +13,20 @@ Built against today's merged API:
   claimed as the first-login landing (`httpapi.firstLoginPath`) but is an
   honest placeholder.
 - **Approve (surface 3)** — the blast-radius diagram, driven only by the
-  permit v1 document. Permit v1 governs LLM egress + spend, so the read/write
-  columns truthfully show "nothing yet"; they fill in when connectors land.
+  permit v1 document: LLM egress, spend, and (since connectors phase 1) the
+  permit's connector op grants, rendered in the read/write columns by catalog
+  effect. A permit with no grants still shows "nothing yet", truthfully.
 - **The quiet home (surface 4)** — workflow list with last run, cost,
   schedule-in-words, client-computed next fire, run history, and run events.
+- **Developer setup (`/setup`)** — a hand-written form for the version-1
+  document ({name, steps, permit, schedule}), validated client-side against
+  the documented rules, handing the created draft to the approve gate. This
+  is a developer/demo path only — the UX design names "developers who would
+  rather write the YAML" as an explicit non-user — and the build conversation
+  replaces it. Never demo it as the intended experience. Its permit half is
+  wired to `GET /v1/catalog`: connector op grants with approved resource
+  lists for constrained fields, and the blast-radius diagram's read/write
+  columns render those grants by catalog effect.
 
 **Blocked on the server's build resource** (`POST /v1/builds`, connectors):
 intake, the build conversation, connection cards, structural pickers, rubric

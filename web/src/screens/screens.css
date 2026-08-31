@@ -239,3 +239,174 @@
 .build {
   max-width: 520px;
 }
+
+/* Home — developer path, deliberately quiet */
+
+.home-dev-link {
+  font-size: 0.8rem;
+  margin-top: 18px;
+}
+
+/* Developer setup */
+
+.setup {
+  max-width: 680px;
+}
+
+.setup-form {
+  margin-top: 8px;
+}
+
+.setup-section {
+  margin-top: 26px;
+}
+
+.setup-section > .label {
+  margin-bottom: 8px;
+}
+
+.setup-form input,
+.setup-form textarea {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.setup-form input::placeholder,
+.setup-form textarea::placeholder {
+  color: var(--dim);
+}
+
+.setup-step {
+  margin-bottom: 12px;
+}
+
+.setup-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 0.8rem;
+}
+
+.setup-step-id {
+  max-width: 260px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.setup-check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.9rem;
+}
+
+.setup-check input[type="checkbox"] {
+  width: auto;
+}
+
+.setup-schedule,
+.setup-permit-row {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.setup-schedule label,
+.setup-permit-row label {
+  flex: 1;
+}
+
+.setup-schedule .label,
+.setup-permit-row .label,
+.setup-resource .label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.setup-connector {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+
+.setup-connector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setup-connector-name {
+  font-weight: 600;
+}
+
+.setup-connector-desc {
+  font-size: 0.82rem;
+  margin: 4px 0 2px;
+}
+
+.setup-op {
+  margin-top: 4px;
+  font-size: 0.88rem;
+}
+
+.setup-effect {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 8px;
+}
+
+.setup-effect-read {
+  color: var(--read);
+  background: var(--read-bg);
+}
+
+.setup-effect-write {
+  color: var(--write);
+  background: var(--write-bg);
+}
+
+.setup-resource {
+  display: block;
+  margin: 6px 0 4px 26px;
+}
+
+.setup-errors {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+}
+
+.setup-errors li {
+  margin-top: 4px;
+}
+
+.setup-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.setup-foot {
+  font-size: 0.82rem;
+}
+
+@media (max-width: 560px) {
+  .setup-schedule,
+  .setup-permit-row {
+    flex-direction: column;
+  }
+}

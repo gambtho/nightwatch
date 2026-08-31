@@ -85,6 +85,26 @@
   margin-top: 6px;
 }
 
+.permit-item {
+  font-size: 0.82rem;
+  margin-top: 6px;
+}
+
+.permit-item-name {
+  font-weight: 500;
+}
+
+.permit-item-warn {
+  color: var(--danger);
+  font-size: 0.75rem;
+}
+
+.permit-item-only {
+  color: var(--dim);
+  font-size: 0.75rem;
+  margin-left: 10px;
+}
+
 .permit-denied {
   list-style: none;
   display: flex;
