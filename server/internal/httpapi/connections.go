@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/store"
 )
 
@@ -34,6 +35,10 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Provider string `json:"provider"`
 		Value    string `json:"value"`
+		// Kind defaults to llm_api_key (the pre-connector contract);
+		// api_key is a pasted connector token — verified before storing
+		// when the connector declares a capture verify_op.
+		Kind string `json:"kind"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		var maxErr *http.MaxBytesError
@@ -48,15 +53,65 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and value required"})
 		return
 	}
-	// A PUT stores llm_api_key material; silently flipping an existing
-	// connector credential's kind would repurpose its secret. Replacing a
-	// connector credential is a delete + re-paste, never this PUT.
-	if existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name); gerr == nil && existing.Kind != "llm_api_key" {
+	if body.Kind == "" {
+		body.Kind = "llm_api_key"
+	}
+	if body.Kind != "llm_api_key" && body.Kind != "api_key" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be llm_api_key or api_key"})
+		return
+	}
+
+	// An api_key is a connector credential: its provider must be a
+	// catalog namespace (fail-closed sequencing — mcp:{uuid} namespaces
+	// arrive with MCP registration, where the row they qualify exists).
+	var connector *catalog.Connector
+	if body.Kind == "api_key" {
+		connector = d.connectorForProvider(body.Provider)
+		if connector == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown connector provider " + body.Provider})
+			return
+		}
+	}
+
+	// Silently flipping an existing credential's kind would repurpose its
+	// secret. Replacing it is a delete + re-paste, never this PUT — and a
+	// store error must not read as "no existing row", or the upsert below
+	// flips the kind the guard exists to protect.
+	existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name)
+	switch {
+	case gerr == nil && existing.Kind != body.Kind:
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "connection exists with kind " + existing.Kind + " — delete it first",
 		})
 		return
+	case gerr != nil && !errors.Is(gerr, store.ErrNotFound):
+		writeErr(w, gerr)
+		return
 	}
+
+	// Verify-then-store: when the connector declares a verify op, the
+	// pasted value is checked live before anything persists — a re-paste
+	// re-verifies every time. Missing scopes warn; they never fail.
+	var missingScopes []string
+	if connector != nil && connector.Auth.Capture != nil && connector.Auth.Capture.VerifyOp != "" {
+		if d.CaptureVerify == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "verification unavailable"})
+			return
+		}
+		res, err := d.CaptureVerify.Verify(r.Context(), connector, body.Value)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if !res.OK {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error": "verify_failed", "message": res.Message,
+			})
+			return
+		}
+		missingScopes = res.MissingScopes
+	}
+
 	wrappedKEK, kekVersion, err := d.Store.TenantKEK(r.Context(), claims.TenantID)
 	if err != nil {
 		writeErr(w, err)
@@ -67,13 +122,39 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	c, err := d.Store.UpsertConnection(r.Context(), claims.TenantID, name, "llm_api_key",
+	c, err := d.Store.UpsertConnection(r.Context(), claims.TenantID, name, body.Kind,
 		body.Provider, dek, ct, nonce, kekVersion)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connection": toConnectionJSON(c)})
+	out := map[string]any{"connection": toConnectionJSON(c)}
+	if len(missingScopes) > 0 {
+		out["missing_scopes"] = missingScopes
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// connectorForProvider finds the catalog connector owning a credential
+// namespace. Connectors may share one (one pasted token covers them all);
+// one that declares a verify op wins so a paste is always checked.
+func (d Deps) connectorForProvider(provider string) *catalog.Connector {
+	if d.Catalog == nil {
+		return nil
+	}
+	var found *catalog.Connector
+	for _, con := range d.Catalog.Connectors() {
+		if con.Auth.Provider != provider {
+			continue
+		}
+		if con.Auth.Capture != nil && con.Auth.Capture.VerifyOp != "" {
+			return con
+		}
+		if found == nil {
+			found = con
+		}
+	}
+	return found
 }
 
 func (d Deps) listConnections(w http.ResponseWriter, r *http.Request) {

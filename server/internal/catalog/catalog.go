@@ -55,6 +55,28 @@ type Connector struct {
 // share one, so one pasted token can cover them all.
 type Auth struct {
 	Provider string `json:"provider"`
+	// Capture is the structured guided-capture card for pasting this
+	// connector's token — copy is data, not code, so the frontend renders
+	// whatever the catalog ships.
+	Capture *Capture `json:"capture,omitempty"`
+}
+
+// Capture is the guided token-capture card: where to start, what to do,
+// what shape the pasted secret has, and which op proves the paste works.
+type Capture struct {
+	StartURL   string `json:"start_url,omitempty"`
+	StartLabel string `json:"start_label,omitempty"`
+	// Steps are the user-facing instructions, in order.
+	Steps []string `json:"steps"`
+	// SecretPrefix catches a wrong-string paste instantly, before any
+	// upstream call.
+	SecretPrefix string `json:"secret_prefix,omitempty"`
+	Placeholder  string `json:"placeholder,omitempty"`
+	// VerifyOp names a read op of this connector invoked with the pasted
+	// token, session-authed, before it is stored. It is the one op
+	// allowed to declare no scopes — verifying a token must not itself
+	// require one.
+	VerifyOp string `json:"verify_op,omitempty"`
 }
 
 // Op is the atomic unit of enforcement, approval copy, and tool
@@ -144,6 +166,19 @@ func ParseDefs(defs ...[]byte) (*Catalog, error) {
 		cat.order = append(cat.order, c.ID)
 	}
 	sort.Strings(cat.order)
+	// Connectors sharing a provider share one pasted token; two capture
+	// cards for one token is an authoring ambiguity.
+	captureBy := map[string]string{}
+	for _, id := range cat.order {
+		con := cat.connectors[id]
+		if con.Auth.Capture == nil {
+			continue
+		}
+		if prev, dup := captureBy[con.Auth.Provider]; dup {
+			return nil, fmt.Errorf("catalog: connectors %q and %q both declare a capture guide for provider %q — at most one per provider", prev, id, con.Auth.Provider)
+		}
+		captureBy[con.Auth.Provider] = id
+	}
 	return cat, nil
 }
 
@@ -187,6 +222,44 @@ func validateConnector(c *Connector) error {
 	if len(c.Ops) == 0 {
 		return fmt.Errorf("at least one op required")
 	}
+	// Capture is validated before the ops so a dangling verify_op reports
+	// as the authoring mistake it is, not as a scope error on the op that
+	// lost its exemption.
+	if guide := c.Auth.Capture; guide != nil {
+		if len(guide.Steps) == 0 {
+			return fmt.Errorf("capture: at least one steps entry required")
+		}
+		for i, s := range guide.Steps {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("capture: steps[%d] is blank", i)
+			}
+		}
+		if guide.StartURL != "" && !strings.HasPrefix(guide.StartURL, "https://") {
+			return fmt.Errorf("capture: start_url must be https")
+		}
+		if guide.VerifyOp != "" {
+			var vop *Op
+			for _, op := range c.Ops {
+				if op.Name == guide.VerifyOp {
+					vop = op
+					break
+				}
+			}
+			if vop == nil {
+				return fmt.Errorf("capture: verify_op %q not an op of this connector", guide.VerifyOp)
+			}
+			if vop.Effect != EffectRead {
+				return fmt.Errorf("capture: verify_op %q must be a read op", guide.VerifyOp)
+			}
+			// Verify invokes the op with {}; requiring args would turn an
+			// authoring mistake into a 500 at paste time, so it fails here.
+			if sch, err := ParseSchema(vop.ArgsSchema); err == nil {
+				if _, verr := sch.Validate([]byte("{}")); verr != nil {
+					return fmt.Errorf("capture: verify_op %q must take no required args: %v", guide.VerifyOp, verr)
+				}
+			}
+		}
+	}
 	c.ops = make(map[string]*Op, len(c.Ops))
 	for _, op := range c.Ops {
 		if err := validateOp(c, op); err != nil {
@@ -210,7 +283,10 @@ func validateOp(c *Connector, op *Op) error {
 	if op.Effect != EffectRead && op.Effect != EffectWrite {
 		return fmt.Errorf("effect must be read or write")
 	}
-	if len(op.Scopes) == 0 {
+	// Every op declares its reach in scopes — except the declared verify
+	// op, whose whole job is checking a token without requiring one.
+	isVerifyOp := c.Auth.Capture != nil && c.Auth.Capture.VerifyOp == op.Name
+	if len(op.Scopes) == 0 && !isVerifyOp {
 		return fmt.Errorf("at least one scope required")
 	}
 	schema, err := ParseSchema(op.ArgsSchema)
@@ -322,6 +398,12 @@ func (c *Catalog) Connectors() []*Connector {
 		out = append(out, c.connectors[id])
 	}
 	return out
+}
+
+// Op returns one of the connector's operations by name.
+func (c *Connector) Op(name string) (*Op, bool) {
+	op, ok := c.ops[name]
+	return op, ok
 }
 
 // Op returns an operation by connector id and op name.

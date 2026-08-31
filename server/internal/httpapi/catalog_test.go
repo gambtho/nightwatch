@@ -149,3 +149,15 @@ func TestApproveRejectsPermitWithoutPlatformProvider(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	require.Contains(t, out["error"], "platform run provider")
 }
+
+func TestCatalogServesCaptureGuide(t *testing.T) {
+	e := newSlackEnv(t, &fakeSlack{ok: true})
+	resp, out := e.do(t, "GET", "/v1/catalog", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	slack := out["connectors"].([]any)[0].(map[string]any)
+	capture := slack["capture"].(map[string]any)
+	require.Equal(t, "https://api.slack.com/apps?new_app=1", capture["start_url"])
+	require.Equal(t, "xoxb-", capture["secret_prefix"])
+	require.Equal(t, "auth_test", capture["verify_op"])
+	require.NotEmpty(t, capture["steps"])
+}

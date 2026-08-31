@@ -166,6 +166,13 @@ func equalDefs(a, b *Catalog) bool {
 func fingerprint(c *Connector) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%s|%s|%s|%s|%v|", c.ID, c.Name, c.Description, c.Auth.Provider, c.Hosts)
+	// The capture guide is reviewed catalog surface too: a copy edit or a
+	// repointed verify_op must demand a baseline update like any def edit.
+	if c.Auth.Capture != nil {
+		fmt.Fprintf(&sb, "%+v|", *c.Auth.Capture)
+	} else {
+		sb.WriteString("nocapture|")
+	}
 	for _, op := range c.Ops {
 		fmt.Fprintf(&sb, "%s|%s|%s|%v|%s|%+v|%+v|", op.Name, op.Description, op.Effect,
 			op.Scopes, canonicalJSON(op.ArgsSchema), op.Binding, op.Constraints)
