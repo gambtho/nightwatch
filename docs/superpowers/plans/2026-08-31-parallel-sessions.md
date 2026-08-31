@@ -214,6 +214,21 @@ five never take it. Each prompt is self-contained.
 >    test. Approval records the endpoint identity; switching endpoints is a
 >    recorded governance event that re-runs the pricing gate
 >    ("Endpoint agnosticism").
+>    **Preset amendment (user decision, 2026-08-31, supersedes the spec's
+>    three-preset list): GitHub Models and Azure AI Foundry are first-class
+>    presets**, five in all plus "another service" and "on this computer".
+>    Two wrinkles your plan must resolve against current vendor docs, not
+>    assumption: (a) GitHub Models is a fixed base URL
+>    (`https://models.github.ai/inference`, OpenAI-compatible, auth = GitHub
+>    PAT with `models:read`), but its quota is subscription-included rather
+>    than per-token — decide how it meets the pricing gate (user-entered
+>    price vs a stated-quota treatment) and record the decision; (b) Azure
+>    AI Foundry has no fixed base URL (per-resource endpoints) and its auth
+>    is nonstandard — `api-key` header and `api-version` query on the
+>    classic Azure OpenAI path vs Bearer on the newer Foundry Models API —
+>    so the preset contributes validation + capture guidance, and the
+>    proxy's header-injection and path-allowlist contracts need explicit
+>    Azure handling, verified against Azure's current docs.
 > 6. Pricing-gate rework: bundled table as today; user-entered prices stored
 >    per (endpoint canonical base URL, model); local-$0 by explicit preset
 >    classification, never loopback inference; `max_tokens` derivation falls
@@ -305,9 +320,13 @@ five never take it. Each prompt is self-contained.
 > Build, prototyping on fake data behind a thin interface wherever the API
 > lands later (P1: endpoint record, price form, budget; P2: capture guide,
 > connection states):
-> 1. First-run flow: the endpoint chooser (Anthropic / OpenAI / OpenRouter
->    presets, "another service", "on this computer"), the guided key-capture
->    card with the disclosed metered verify call, the budget screen.
+> 1. First-run flow: the endpoint chooser — five presets (Anthropic /
+>    OpenAI / OpenRouter / GitHub Models / Azure AI Foundry — the last two
+>    added by user decision 2026-08-31), plus "another service" and "on
+>    this computer" — the guided key-capture card with the disclosed
+>    metered verify call, the budget screen. GitHub Models' card guides a
+>    PAT with `models:read`; Azure AI Foundry's card also collects the
+>    per-resource endpoint URL.
 > 2. Settings: endpoint switch as an explicit confirmation naming affected
 >    workflows ("your 3 workflows will now run against …"), budget edit,
 >    autostart toggle.
@@ -343,7 +362,8 @@ five never take it. Each prompt is self-contained.
 >
 > The demo walks the pivot's happy path as one continuous story:
 > 1. First run: choose where your AI runs (Anthropic / OpenAI / OpenRouter /
->    "another service" / "on this computer"), paste a key via the guided
+>    GitHub Models / Azure AI Foundry / "another service" / "on this
+>    computer"), paste a key via the guided
 >    capture card, see the disclosed test-call verify succeed, set the
 >    monthly budget ("how much Tomte may spend from your key per month").
 > 2. Build conversation: describe a job in plain words (reuse the
@@ -454,6 +474,22 @@ From the user, routed to the pivot-spec session the same day:
   build-conversation spec's successor gains — not designed yet. The
   build-conversation frontend items 5–6 become entry points into the
   connections manager; item 5's OAuth framing is dead regardless.
+
+## Cross-cutting decision: five endpoint presets (2026-08-31)
+
+**GitHub Models and Azure AI Foundry join Anthropic, OpenAI, and OpenRouter
+as first-class endpoint presets** (user decision, 2026-08-31). This amends
+the pivot spec's "Endpoint agnosticism" preset list; the spec file is not
+rewritten — this board entry is the record. Verified basis: GitHub Models
+(`https://models.github.ai/inference`) is an official OpenAI-compatible
+chat/completions endpoint authed by a GitHub PAT (`models:read`), with
+entitlements tied to Copilot plans. Azure AI Foundry is per-resource
+endpoints with nonstandard auth (`api-key` header + `api-version` query on
+the classic path). The P1 prompt carries the two implementation wrinkles
+(pricing-gate fit for subscription quota; Azure auth/path handling in the
+proxy). Leadership copy names them "GitHub Models (included with GitHub
+Copilot plans)" — do not claim `api.githubcopilot.com` support; it is
+undocumented for third parties and needs token exchange.
 
 ## Rule: no pre-stacked PR bases
 
