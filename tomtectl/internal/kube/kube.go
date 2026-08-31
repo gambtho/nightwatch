@@ -127,9 +127,12 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 func (c *Client) ApplySecret(ctx context.Context, s *corev1.Secret) error {
 	agent := s.Labels[manifest.AgentLabel]
 	secrets := c.cs.CoreV1().Secrets(c.Namespace)
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.OnError(retry.DefaultRetry, retryable, func() error {
 		existing, err := secrets.Get(ctx, s.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
+			// A concurrent first write can land between Get and
+			// Create; AlreadyExists is retried so the loop refetches
+			// and takes the update path instead of failing the race.
 			_, err = secrets.Create(ctx, s, metav1.CreateOptions{})
 			return err
 		}
@@ -150,16 +153,26 @@ func (c *Client) ApplySecret(ctx context.Context, s *corev1.Secret) error {
 	return nil
 }
 
-// SecretExists reports whether the named Secret exists in the
-// namespace — `up`'s pre-flight, so a skipped `set-key` is a clear
-// error now rather than a CreateContainerConfigError later.
+// retryable widens RetryOnConflict's predicate with AlreadyExists —
+// both mean "another writer got there first; refetch and reconcile".
+func retryable(err error) bool {
+	return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err)
+}
+
+// SecretExists reports whether the named Secret exists and carries a
+// non-empty api_key — `up`'s pre-flight, so a skipped `set-key` (or a
+// hand-made Secret with the wrong key name) is a clear error now
+// rather than a CreateContainerConfigError or an empty env later.
 func (c *Client) SecretExists(ctx context.Context, name string) (bool, error) {
-	_, err := c.cs.CoreV1().Secrets(c.Namespace).Get(ctx, name, metav1.GetOptions{})
+	s, err := c.cs.CoreV1().Secrets(c.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if len(s.Data[manifest.SecretKey]) == 0 {
+		return false, fmt.Errorf("secret %q exists but has no %q entry — re-run `tomtectl set-key` to store the key", name, manifest.SecretKey)
 	}
 	return true, nil
 }

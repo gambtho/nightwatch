@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gambtho/tomte/tomtectl/internal/manifest"
@@ -27,7 +28,9 @@ func main() {
 		log.Fatal(http.ListenAndServe(":8080", runtime.StubHandler(key)))
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGTERM is how Kubernetes stops a pod; without it the container
+	// ignores the grace period and waits for the SIGKILL.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client := runtime.NewHTTPClient(5 * time.Minute)
 	err := runtime.Loop(ctx, "/tomte/agent.yaml", os.Getenv(manifest.APIKeyEnv), os.Stdout, client)

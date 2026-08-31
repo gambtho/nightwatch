@@ -44,10 +44,13 @@ documents the real-endpoint path with a pasted key.
 2. **Bare-runtime URL rule, not governance:** `base_url` must be a
    well-formed http(s) URL without userinfo. Plain `http` is allowed
    only when the endpoint is keyless (`local: true`) or the host is
-   loopback or cluster-local (single-label service names, `*.svc`,
-   `*.svc.cluster.local`) — so the in-cluster stub exercises the real
-   Secret path, while a key can never be sent in cleartext to the open
-   internet. Allowlists, path validation, and the proxy stay K3+.
+   loopback / `localhost` or spelled in the cluster-local `.svc` /
+   `.svc.cluster.local` form — a bare single-label service name is
+   rejected, since a resolver search domain could route it off-cluster
+   (review hardening). The in-cluster stub still exercises the real
+   Secret path via its `.svc` name, while a key can never be sent in
+   cleartext to the open internet. Allowlists, path validation, and
+   the proxy stay K3+.
 3. **Key path:** `tomtectl set-key` reads the agent file, requires
    `spec.llm.secretRef`, reads the key from stdin (hidden prompt on a
    TTY via `x/term`; piped input otherwise — never argv, never an env

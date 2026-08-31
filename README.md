@@ -49,17 +49,18 @@ process and an OS user with the proxy. What is guaranteed is that no
 credential ever reaches the harness and no call escapes the audit; OS-level
 process isolation is a named hardening path, not something shipped today.
 
-The K1 agent on Kubernetes deliberately ships **without** this governance —
-no proxy, no permits — and gains it in the K3 transition.
+The agent on Kubernetes deliberately ships **without** this governance
+through K2 — no proxy, no permits — and gains it in the K3 transition.
 
 ## Status
 
 Early development, pre-release. The direction changed twice on 2026-08-31:
 first from a hosted multi-tenant platform to a click-install desktop app
 (the pivot), then to the K8s-first agent track — CLI before UI. Built and
-verified today: the `server/` stack above, and `tomtectl` running the
-hello-world agent on a real cluster. Designed but not built: the K8s
-agent's LLM phase (K2), the connectors and governance transition (K3), and
+verified today: the `server/` stack above, and `tomtectl` running an agent
+on a real cluster — including the K2 LLM phase (a model behind the `llm:`
+block, key in a Secret). Designed but not built: the connectors and
+governance transition (K3), and
 the build conversation. The desktop packaging shell is paused, not dead.
 [docs/README.md](docs/README.md) maps every spec and plan — living vs
 historical — in a five-minute read.
