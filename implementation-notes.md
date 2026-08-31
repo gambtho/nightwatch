@@ -45,6 +45,25 @@ Scope: item 1 of "What this needs from server/" in the build-conversation spec
   Down migration drops `compiled` only — the steps transform is one-way
   (pre-release dev data, per spec's alpha-notice framing).
 
+## Polish round (adversarial review, 4 agents)
+
+Fixed: approval now fails closed on a corrupt permit instead of silently
+compiling the default max_tokens (was loosening the owner's spend cap on
+corrupt data); DB CHECK `approved → compiled` added to 00010 (matching the
+table's DB-enforced-invariant pattern); the harness-shape test decodes into
+the real `harness.Steps` type; several comment/doc inaccuracies corrected.
+
+Reported, deliberately not implemented:
+
+- Approval does not cross-check the platform run provider against the
+  permit's `llm.providers` allowlist — a mismatch surfaces as a proxy
+  denial mid-run rather than a 400 at approval. Whether approval should
+  gate on it is a permit-semantics question for the connectors work
+  (the permit shape changes there), so recorded, not built.
+- `steps.Compile` accepts a zero `Platform{}` without error; its one
+  caller guards (Priced check first). An error return would be safer if
+  a second caller appears.
+
 ## Risks / follow-ups
 
 - Migrated user-facing steps text is the old kickoff verbatim: may be empty

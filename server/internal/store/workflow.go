@@ -32,7 +32,10 @@ type Version struct {
 	Number     int
 	Doc        VersionDoc
 	// Compiled is the server-derived execution form, written inside the
-	// approval transaction; nil for drafts. The public API never returns it.
+	// approval transaction; nil for drafts created after decision 9
+	// (migration 00010 backfilled pre-decision-9 drafts with a
+	// compiler_v 0 copy, which approval overwrites). The public API never
+	// returns it.
 	Compiled   json.RawMessage
 	Status     string
 	ApprovedBy *uuid.UUID

@@ -69,9 +69,9 @@ func Priced(provider, model string) bool {
 	return ok
 }
 
-// Token bounds for the compiled max_tokens. The floor keeps any positive
-// spend cap usable; the ceiling keeps a generous cap from compiling a
-// max_tokens larger than the smallest output limit among catalogued models.
+// Token bounds for the compiled max_tokens: the default when no spend cap
+// was approved, and a ceiling so a generous cap cannot compile a
+// max_tokens beyond what the catalogued models' output limits accept.
 const (
 	defaultBudgetTokens = 4096
 	maxBudgetTokens     = 8192

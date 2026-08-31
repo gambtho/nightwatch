@@ -118,8 +118,8 @@ Rules:
 
 // Compile assembles the execution form from the approved artifacts —
 // deterministic template assembly, zero model calls. The user's step text
-// and the rubric are embedded verbatim: what runs is byte-identical to
-// what was approved, auditable by diff.
+// is embedded byte-identical to what was approved (auditable by diff);
+// the rubric is embedded verbatim in compact JSON form.
 func Compile(doc Doc, rubric json.RawMessage, p Platform) Compiled {
 	var b strings.Builder
 	b.WriteString(preamble)
@@ -151,9 +151,9 @@ func compactRubric(rubric json.RawMessage) string {
 	}
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, trimmed); err != nil {
-		// Rubrics are opaque but validated JSON at the store boundary; a
-		// compact failure means corrupt data — embed as-is rather than drop
-		// the promises silently.
+		// Rubrics arrive through the API's JSON decode, so they are valid
+		// JSON by construction; if compaction still fails, embed as-is
+		// rather than drop the promises silently.
 		return string(trimmed)
 	}
 	return buf.String()

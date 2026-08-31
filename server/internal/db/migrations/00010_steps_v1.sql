@@ -17,7 +17,14 @@ SET compiled = steps || '{"compiler_v": 0}'::jsonb,
             'id', 'job',
             'text', coalesce(steps ->> 'kickoff', ''))));
 
+-- Approved implies compiled — enforced by the database, not by
+-- application discipline (the pattern 00003 set for this table). Safe
+-- against existing data: the backfill above populated every row.
+ALTER TABLE workflow_version ADD CONSTRAINT workflow_version_approved_compiled
+    CHECK (status <> 'approved' OR compiled IS NOT NULL);
+
 -- +goose Down
+ALTER TABLE workflow_version DROP CONSTRAINT workflow_version_approved_compiled;
 -- The steps transform is one-way (the old execution form survives only in
 -- compiled); down just drops the derived column.
 ALTER TABLE workflow_version DROP COLUMN compiled;

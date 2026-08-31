@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/gambtho/nightwatch/server/internal/harness"
 	"github.com/gambtho/nightwatch/server/internal/steps"
 )
 
@@ -118,10 +119,14 @@ func TestCompiledRoundTripsAsHarnessSteps(t *testing.T) {
 	c := steps.Compile(doc, nil, steps.Platform{Provider: "anthropic", Model: "m", MaxTokens: 7})
 	raw, err := json.Marshal(c)
 	require.NoError(t, err)
-	// The harness contract's field names must not change shape.
-	var wire map[string]any
-	require.NoError(t, json.Unmarshal(raw, &wire))
-	for _, k := range []string{"system_prompt", "kickoff", "provider", "model", "max_tokens", "compiler_v"} {
-		require.Contains(t, wire, k)
-	}
+	// The compiled document must decode into the real harness Steps type
+	// with every execution field intact — a field rename on either side
+	// would silently zero a value on the run path.
+	var hs harness.Steps
+	require.NoError(t, json.Unmarshal(raw, &hs))
+	require.Equal(t, c.SystemPrompt, hs.SystemPrompt)
+	require.Equal(t, c.Kickoff, hs.Kickoff)
+	require.Equal(t, "anthropic", hs.Provider)
+	require.Equal(t, "m", hs.Model)
+	require.Equal(t, 7, hs.MaxTokens)
 }

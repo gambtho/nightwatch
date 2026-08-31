@@ -209,8 +209,15 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Fail closed on a corrupt permit: silently treating it as "no spend
+	// cap" would compile a larger max_tokens than the owner approved.
+	p, err := permit.Parse(cur.Doc.Permit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
+		return
+	}
 	perRunCents := 0
-	if p, err := permit.Parse(cur.Doc.Permit); err == nil && p.Spend != nil {
+	if p.Spend != nil {
 		perRunCents = p.Spend.PerRunCents
 	}
 	compiled, err := json.Marshal(steps.Compile(doc, cur.Doc.Rubric, steps.Platform{

@@ -34,8 +34,8 @@ type Deps struct {
 	RunModel    string
 }
 
-// Platform run-model defaults: the cheapest priced first-party pair, used
-// when the env leaves the choice to us. Per-tenant override is a
+// Platform run-model defaults, used when the env leaves the choice to us:
+// the cheapest priced Anthropic pair. Per-tenant override is a
 // designed-for seam, not built.
 const (
 	DefaultRunProvider = "anthropic"
