@@ -40,9 +40,10 @@ it extends the existing `server/cmd/nightshift` binary
 ### Serialized `server/` queue
 
 1. ~~**Plan 3**~~ (merged, PR #10) →
-2. **Identity implementation** — IN FLIGHT, owns `server/` now. Small and
-   invasive: replaces the session mechanism across httpapi and every test
-   helper; retires `NIGHTSHIFT_SESSION_KEY`. →
+2. ~~**Identity implementation**~~ — complete, PR #17 open. Replaced the
+   session mechanism across httpapi and every test helper; retired
+   `NIGHTSHIFT_SESSION_KEY`. **`server/` frees on merge; the next owner is
+   unassigned.** →
 3. **Connectors** (plan + implementation — collides with `permit.Parse`, the
    proxy, and the harness, and wants identity's session changes settled; four
    downstream specs depend on its operation vocabulary) →
@@ -209,6 +210,37 @@ Plan 3 merged (2026-08-31):
 - **Frontend and CLI specs** — unwritten. The frontend is the product's entry
   point; nothing user-facing exists without it.
 - **The user-research read-out** feeding UX changes back into the prototype.
+
+## Delta sheet: what the identity implementation changes (for connectors, Plan 4, Plan 5)
+
+From the identity session, written with its PR (branch `feat/identity`);
+verify against the tree after it merges:
+
+- **Sessions are DB-backed and opaque.** `httpapi.Deps` is now
+  `{Store, Engine, Vault, PublicBaseURL *url.URL, Mailer mail.Sender}` —
+  `SessionKey` is gone and `NIGHTSHIFT_SESSION_KEY` no longer exists.
+  Tests authenticate by minting a session row:
+  `httpapi.NewSessionToken()` → `store.CreateSession` →
+  `httpapi.SessionCookie(value)` (see `httpapi_test.mintSessionCookie` and
+  the e2e `mintSession` helpers). `SessionClaims` keeps its shape; `Role`
+  is read from `app_user` at request time via the session join.
+- **Every new mutating `/v1` route must be wrapped in the Origin
+  middleware** — follow the `mut(auth(...))` pattern in
+  `httpapi.RegisterRoutes`. Connectors' op-invocation gateway endpoints
+  fall under this.
+- **New env for serve:** `NIGHTSHIFT_PUBLIC_BASE_URL` (required; HTTPS
+  except localhost) and optional `NIGHTSHIFT_POSTMARK_TOKEN` +
+  `NIGHTSHIFT_MAIL_FROM` (unset → magic links go to the log).
+- **`internal/mail` exists** with `Sender`, a Postmark implementation, a
+  log fallback, and a test `Recorder` — Plan 4's alert delivery should
+  reuse it rather than growing a second email path.
+- **Migration `00009_identity.sql` is taken**; the next free number is
+  `00010`. Emails are globally unique across tenants
+  (`lower(email)` index) and stored normalized — any future boundary
+  accepting an email must apply `store.NormalizeEmail`.
+- **`/build` is the first-login redirect target** (constant
+  `httpapi.firstLoginPath`); the SPA has no routing yet and must claim
+  that route when it grows one.
 
 ## Open design items, recorded not resolved
 
