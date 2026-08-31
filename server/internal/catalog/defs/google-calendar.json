@@ -1,0 +1,80 @@
+{
+  "id": "google-calendar",
+  "name": "Google Calendar",
+  "description": "Read events from your calendars, and create events on calendars you approve.",
+  "auth": { "provider": "google" },
+  "hosts": ["www.googleapis.com"],
+  "ops": [
+    {
+      "name": "list_events",
+      "description": "List upcoming events on one calendar.",
+      "effect": "read",
+      "scopes": ["https://www.googleapis.com/auth/calendar.readonly"],
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar ID; use \"primary\" for the main calendar."
+          },
+          "time_min": {
+            "type": "string",
+            "description": "Earliest event time to include, RFC 3339."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum number of events to return."
+          }
+        },
+        "required": ["calendar_id"],
+        "additionalProperties": false
+      },
+      "binding": {
+        "method": "GET",
+        "host": "www.googleapis.com",
+        "path": "/calendar/v3/calendars/{calendar_id}/events",
+        "query": { "timeMin": "time_min", "maxResults": "max_results" }
+      }
+    },
+    {
+      "name": "create_event",
+      "description": "Create an event on a calendar you have approved.",
+      "effect": "write",
+      "scopes": ["https://www.googleapis.com/auth/calendar.events"],
+      "args_schema": {
+        "type": "object",
+        "properties": {
+          "calendar_id": {
+            "type": "string",
+            "description": "Calendar ID to create the event on. Must be one of the approved calendars."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Event title."
+          },
+          "start_time": {
+            "type": "string",
+            "description": "Event start, RFC 3339."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "Event end, RFC 3339."
+          }
+        },
+        "required": ["calendar_id", "summary", "start_time", "end_time"],
+        "additionalProperties": false
+      },
+      "binding": {
+        "method": "POST",
+        "host": "www.googleapis.com",
+        "path": "/calendar/v3/calendars/{calendar_id}/events",
+        "body": {
+          "summary": "summary",
+          "start.dateTime": "start_time",
+          "end.dateTime": "end_time"
+        }
+      },
+      "constraints": [{ "field": "calendar_id" }]
+    }
+  ]
+}

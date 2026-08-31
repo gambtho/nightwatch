@@ -21,6 +21,9 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	h := &handler{d: d}
 	mux.HandleFunc("/proxy/llm/{provider}/{path...}", h.llm)
 	mux.HandleFunc("/proxy/internal/{path...}", h.internal)
+	// Curated op invocation is always POST + JSON args; the compiled
+	// upstream method comes from the catalog binding, not the caller.
+	mux.HandleFunc("POST /proxy/connector/{connector}/{op}", h.connector)
 }
 
 // extractRunToken pulls the run token from the provider-native auth-header

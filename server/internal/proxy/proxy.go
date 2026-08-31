@@ -7,9 +7,11 @@ package proxy
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/permit"
 )
 
@@ -17,9 +19,15 @@ type RunIdentity struct{ TenantID, RunID uuid.UUID }
 
 type Secret struct{ Value string }
 
+// HookRequest identifies the request the Hook is asked to admit.
+// Provider is set on LLM routes; Connector/Op on connector routes — the
+// additive widening that lets Plan 3 price tool calls without reopening
+// the proxy.
 type HookRequest struct {
-	Identity RunIdentity
-	Provider string
+	Identity  RunIdentity
+	Provider  string
+	Connector string
+	Op        string
 }
 
 type AuthSource interface {
@@ -67,6 +75,16 @@ type ProviderRoute struct {
 type Config struct {
 	Providers    map[string]ProviderRoute // DefaultConfig fills the three real providers
 	InternalBase string                   // base URL of the internal API for the pass-through route
+
+	// ConnectorUpstreams overrides the upstream base URL (scheme+host)
+	// per connector id. Production leaves it empty — the catalog
+	// binding's host is authoritative; tests point curated connectors at
+	// fake upstreams with it.
+	ConnectorUpstreams map[string]string
+	// ConnectorTimeout bounds one compiled upstream request end to end;
+	// zero or negative means the 60s default (the harness per-tool
+	// budget).
+	ConnectorTimeout time.Duration
 }
 
 func DefaultConfig() Config {
@@ -88,4 +106,8 @@ type Deps struct {
 	Events      EventSink
 	Hook        Hook
 	Config      Config
+	// Catalog serves the connector routes. Like permit, it is
+	// declarative data with no reach of its own — the proxy stays
+	// standalone-capable. Nil disables the connector routes (404).
+	Catalog *catalog.Catalog
 }

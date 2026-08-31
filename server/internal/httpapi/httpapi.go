@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/nightwatch/server/internal/catalog"
 	"github.com/gambtho/nightwatch/server/internal/engine"
 	"github.com/gambtho/nightwatch/server/internal/mail"
 	"github.com/gambtho/nightwatch/server/internal/store"
@@ -32,6 +33,9 @@ type Deps struct {
 	// defaults below.
 	RunProvider string
 	RunModel    string
+	// Catalog is the validated curated connector catalog. Version writes
+	// check permit connections against it; GET /v1/catalog serves it.
+	Catalog *catalog.Catalog
 }
 
 // Platform run-model defaults, used when the env leaves the choice to us:
@@ -81,6 +85,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 	mux.Handle("GET /v1/workflows/{id}/runs", auth(d.listRuns))
 	mux.Handle("GET /v1/runs/{id}", auth(d.getRun))
 	mux.Handle("GET /v1/runs/{id}/events", auth(d.listRunEvents))
+	mux.Handle("GET /v1/catalog", auth(d.getCatalog))
 	mux.Handle("PUT /v1/connections/{name}", mut(auth(d.putConnection)))
 	mux.Handle("GET /v1/connections", auth(d.listConnections))
 	mux.Handle("DELETE /v1/connections/{name}", mut(auth(d.deleteConnection)))

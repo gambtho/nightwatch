@@ -59,7 +59,10 @@ func toVersionJSON(v store.Version) versionJSON {
 	}
 }
 
-func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
+// decodeDoc validates the version document. The parsed permit is
+// returned so callers can run the catalog checks that need more than
+// structure (validateConnections).
+func decodeDoc(d Deps, w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxDocBytes)
 	var body versionDocJSON
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -74,8 +77,13 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 	if body.Permit == nil {
 		body.Permit = json.RawMessage(permit.Empty)
 	}
-	if _, err := permit.Parse(body.Permit); err != nil {
+	p, err := permit.Parse(body.Permit)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
+		return body, false
+	}
+	if err := validateConnections(d.Catalog, p); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return body, false
 	}
 	if body.Steps == nil {
@@ -100,7 +108,7 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 
 func (d Deps) createWorkflow(w http.ResponseWriter, r *http.Request) {
 	claims := ClaimsFrom(r.Context())
-	body, ok := decodeDoc(w, r)
+	body, ok := decodeDoc(d, w, r)
 	if !ok {
 		return
 	}
@@ -164,7 +172,7 @@ func (d Deps) addVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := decodeDoc(w, r)
+	body, ok := decodeDoc(d, w, r)
 	if !ok {
 		return
 	}
@@ -214,6 +222,16 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 	p, err := permit.Parse(cur.Doc.Permit)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
+		return
+	}
+	// The platform run model must be inside the approved blast radius:
+	// without this a permit omitting the platform provider approves
+	// cleanly and then has every run denied at the proxy — the failure
+	// belongs here, at approval, not at run time.
+	if !p.AllowsProvider(provider) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "permit does not allow platform run provider " + provider + " — llm.providers must include it",
+		})
 		return
 	}
 	perRunCents := 0
