@@ -11,24 +11,24 @@ finishes, or a cross-cutting decision is taken.
 
 ## State of the world
 
-| Thread                           | State                                                               |
-| -------------------------------- | ------------------------------------------------------------------- |
-| Plan 1 — Foundation              | **Merged** (PR #1)                                                  |
-| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                  |
-| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                 |
-| Identity spec                    | **Merged** (PR #6)                                                  |
-| Identity implementation          | **Merged** (PR #17)                                                 |
-| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**          |
-| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                      |
-| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed    |
-| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane             |
-| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                           |
-| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                           |
-| Build-conversation spec          | **Merged** (PR #14) — implementation owed                           |
-| Docs corrections + roadmap       | **Merged** (PR #15)                                                 |
-| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below           |
-| Frontend (`web/`) + CLI          | **Lane OPEN, nothing started** — no `web/` directory exists         |
-| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge |
+| Thread                           | State                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Plan 1 — Foundation              | **Merged** (PR #1)                                                                                                       |
+| Plan 2 — Egress proxy + vault    | **Merged** (PR #5)                                                                                                       |
+| Plan 3 — Scheduling + metering   | **Merged** (PR #10)                                                                                                      |
+| Identity spec                    | **Merged** (PR #6)                                                                                                       |
+| Identity implementation          | **Merged** (PR #17)                                                                                                      |
+| Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
+| Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
+| Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
+| Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
+| Plan 4 spec — grading + alerting | **Merged** (PR #13) — implementation owed                                                                                |
+| Plan 5 spec — Compute            | **Merged** (PR #12) — implementation owed                                                                                |
+| Build-conversation spec          | **Merged** (PR #14) — implementation owed                                                                                |
+| Docs corrections + roadmap       | **Merged** (PR #15)                                                                                                      |
+| Upstream Substrate egress PR     | **Suspended** — see the outward-facing-actions rule below                                                                |
+| Frontend (`web/`) + CLI          | **First slice merged** (PR #21) — `web/` exists; login, approve, quiet home. Rest blocked on connectors. CLI not started |
+| User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                                      |
 
 ## The rule
 
@@ -52,10 +52,12 @@ it extends the existing `server/cmd/nightshift` binary
    it was small, independent of everything else, and the frontend cannot
    consume a `steps` contract that is still the compiled execution form.
    **`server/` has been free and unassigned since it merged.** →
-4. **Connectors** — NEXT IN LINE. Plan and implementation; collides with
-   `permit.Parse`, the proxy, and the harness, and four downstream specs
-   depend on its operation vocabulary. The bigger unlock and the longer
-   occupancy. →
+4. **Connectors** — NEXT IN LINE, and now the critical path for two lanes:
+   the frontend cannot progress past its first slice without the build
+   resource, which depends on this. Plan and implementation; collides with
+   `permit.Parse`, the proxy, and the harness; four downstream specs depend on
+   its operation vocabulary. **Whoever takes it should fix the `serve`
+   deadlock first** (see Blocking defects). →
 5. **Plan 4** — grading + alerting. Creates `workflow.status`
    (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
    re-checks status). Objectives widens the CHECK later. →
@@ -70,7 +72,15 @@ right rather than merely asserted.
 
 ### Parallel-safe lanes, open now
 
-- **Frontend at `web/`** — the product's entry point, not a later phase.
+- **Frontend at `web/`** — first slice merged (PR #21): login over magic-link,
+  the approve blast-radius diagram driven only by the permit document, the
+  quiet home with run history, and `/build` claimed as an honest placeholder
+  rather than a faked build conversation. **The lane is now largely blocked**:
+  10 of the 11 items on the build-conversation spec's frontend checklist need
+  the build resource, which needs connectors. What it built — the permit
+  diagram, steps rendering, schedule wording — are the components those
+  surfaces will drive live.
+- ~~**Frontend, original entry**~~ — the product's entry point, not a later phase.
   **Both blockers are cleared** (identity, PR #17; build-conversation spec,
   PR #14). Nothing stands in front of it, no `web/` directory exists yet, and
   no session is scoped for it.
@@ -99,6 +109,29 @@ costs one message.
 This project tracks its own work in docs, not issues. An external issue
 tracker is only ever the required entry protocol for contributing upstream —
 never our own bookkeeping.
+
+## Blocking defects
+
+- **`nightshift serve` deadlocks at startup on `main`.** Found by the frontend
+  lane, which could not fix it (no `server/` writes), and verified by the
+  coordinating session at `server/cmd/nightshift/main.go:188`:
+
+  ```go
+  slog.SetDefault(slog.New(redact.Handler{Inner: slog.Default().Handler(), ...}))
+  ```
+
+  `slog.SetDefault` also rewires the standard `log` package to write through
+  the slog default, and the handler captured as `Inner` is the original
+  default handler, which itself writes via `log`. The first `slog.Info`
+  re-enters and self-deadlocks on the log mutex, **before the socket binds**.
+  Go's own docs warn against using the default handler as an inner handler.
+  Fix: build the redact handler over an explicit `slog.NewTextHandler` rather
+  than over `slog.Default().Handler()`.
+
+  Consequence: the binary does not start. The frontend lane had to smoke-test
+  against a hand-rolled `httpapi.RegisterRoutes` harness instead. **The next
+  session to take `server/` should fix this first** — it is small and it
+  blocks any demo or manual verification.
 
 ## Cross-cutting decisions
 
