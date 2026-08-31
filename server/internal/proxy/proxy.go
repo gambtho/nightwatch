@@ -17,11 +17,10 @@ import (
 
 type RunIdentity struct{ TenantID, RunID uuid.UUID }
 
-// Secret is an injectable credential. MarkBroken, when set (oauth-kind
+// Secret is an injectable credential. MarkBroken, when set (stored
 // connections), demotes the backing credential to needs_reauth after an
-// upstream 401 — epoch-CAS inside, so a 401 earned by a stale token
-// cannot demote a connection already refreshed to a newer one; it
-// reports whether the demotion applied.
+// upstream 401 — a pasted token revoked at the provider; it reports
+// whether the demotion applied (false when already demoted).
 type Secret struct {
 	Value      string
 	MarkBroken func(ctx context.Context) (bool, error)

@@ -24,12 +24,6 @@
 //	                        tenant)
 //	TOMTE_LISTEN_ADDR  default 127.0.0.1:8080
 //	TOMTE_STATE_DIR    actor state root, default $TMPDIR/tomte-actors
-//	TOMTE_OAUTH_GOOGLE_CLIENT_ID, TOMTE_OAUTH_GOOGLE_CLIENT_SECRET,
-//	TOMTE_OAUTH_SLACK_CLIENT_ID, TOMTE_OAUTH_SLACK_CLIENT_SECRET
-//	                        platform OAuth apps for curated connectors;
-//	                        a provider with no app configured fails the
-//	                        connect flow with a clear error, everything
-//	                        else runs
 //	TOMTE_PLATFORM_ANTHROPIC_KEY, TOMTE_PLATFORM_OPENAI_KEY,
 //	TOMTE_PLATFORM_OPENROUTER_KEY
 //	                        platform model credentials, per provider — injected
@@ -52,7 +46,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -74,7 +67,6 @@ import (
 	"github.com/gambtho/tomte/server/internal/llm"
 	"github.com/gambtho/tomte/server/internal/mail"
 	"github.com/gambtho/tomte/server/internal/meter"
-	"github.com/gambtho/tomte/server/internal/oauth"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/proxyadapter"
 	"github.com/gambtho/tomte/server/internal/redact"
@@ -182,11 +174,6 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	signer := token.New(keyFromEnv("TOMTE_RUNNER_KEY"))
-	// The state-nonce key is derived, not reused raw: signatures made
-	// with it can never validate as run tokens or vice versa.
-	stateKey := sha256.Sum256(append([]byte("tomte-oauth-state:"), keyFromEnv("TOMTE_RUNNER_KEY")...))
-	stateSigner := oauth.NewSigner(stateKey[:], 15*time.Minute)
-	oauthSvc := &oauth.Service{Providers: oauth.Providers(), Clients: oauth.EnvClients(os.Getenv)}
 	master, err := vault.NewMaster(keyFromEnv("TOMTE_VAULT_KEY"))
 	if err != nil {
 		return err
@@ -259,11 +246,11 @@ func serve(ctx context.Context) error {
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
 		RunProvider: os.Getenv("TOMTE_RUN_PROVIDER"),
 		RunModel:    os.Getenv("TOMTE_RUN_MODEL"),
-		Catalog:     cat, OAuth: oauthSvc, StateSigner: stateSigner,
+		Catalog:     cat,
 	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
 
-	adapters := proxyadapter.New(s, signer, master, platform, oauthSvc)
+	adapters := proxyadapter.New(s, signer, master, platform)
 	cfg := proxy.DefaultConfig()
 	cfg.InternalBase = baseURL
 	proxy.RegisterRoutes(mux, proxy.Deps{

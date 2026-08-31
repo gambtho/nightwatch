@@ -55,7 +55,7 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, err)
 
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
-	set := proxyadapter.New(s, signer, master, map[string]string{"anthropic": "platform-key"}, nil)
+	set := proxyadapter.New(s, signer, master, map[string]string{"anthropic": "platform-key"})
 	return &env{pool: pool, store: s, signer: signer, master: master, set: set, tenant: tn, wf: wf}
 }
 

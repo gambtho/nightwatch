@@ -29,7 +29,6 @@ import (
 	"github.com/gambtho/tomte/server/internal/llm"
 	"github.com/gambtho/tomte/server/internal/llm/llmtest"
 	"github.com/gambtho/tomte/server/internal/mail/mailtest"
-	"github.com/gambtho/tomte/server/internal/oauth"
 	"github.com/gambtho/tomte/server/internal/proxy"
 	"github.com/gambtho/tomte/server/internal/proxyadapter"
 	"github.com/gambtho/tomte/server/internal/store"
@@ -298,7 +297,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
 		RunProvider: "openai", RunModel: "gpt-4o-mini"})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
-	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"}, nil)
+	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()
 	route := cfg.Providers["openai"]
 	route.Base = upstream.URL // bare base: the SDK's emitted path arrives verbatim
@@ -504,7 +503,7 @@ func TestEndToEndConnectorToolRun(t *testing.T) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master,
 		RunProvider: "openai", RunModel: "gpt-4o-mini", Catalog: cat})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
-	adapters := proxyadapter.New(s, signer, master, nil, nil)
+	adapters := proxyadapter.New(s, signer, master, nil)
 	cfg := proxy.DefaultConfig()
 	cfg.ConnectorUpstreams = map[string]string{"slack": slackUpstream.URL}
 	ts := httptest.NewServer(mux)
@@ -522,18 +521,15 @@ func TestEndToEndConnectorToolRun(t *testing.T) {
 	require.NoError(t, err)
 	cookie := mintSession(t, s, tn.ID, user.ID)
 
-	// Seed the slack oauth credential straight into the vault: the
-	// connect flow has its own tests; what matters here is that the
-	// credential exists only there.
-	bundleJSON, err := json.Marshal(oauth.Bundle{AccessToken: "xoxb-vault-token"})
-	require.NoError(t, err)
+	// Seed the slack api_key credential straight into the vault (P2 adds
+	// the HTTP capture surface); what matters here is that the credential
+	// exists only there.
 	kek, kekVersion, err := s.TenantKEK(ctx, tn.ID)
 	require.NoError(t, err)
-	dek, ct, nonce, err := master.EncryptSecret(kek, string(bundleJSON))
+	dek, ct, nonce, err := master.EncryptSecret(kek, "xoxb-vault-token")
 	require.NoError(t, err)
-	_, err = s.UpsertConnectionBundle(ctx, tn.ID, "default", "slack", store.BundleUpdate{
-		Kind: "oauth", DEKWrapped: dek, Ciphertext: ct, Nonce: nonce, KEKVersion: kekVersion, Metadata: []byte(`{}`),
-	})
+	_, err = s.UpsertConnection(ctx, tn.ID, "default", "api_key", "slack",
+		dek, ct, nonce, kekVersion)
 	require.NoError(t, err)
 
 	do := newDoHelper(t, ts.URL, cookie)

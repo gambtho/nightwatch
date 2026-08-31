@@ -1,8 +1,15 @@
 -- +goose Up
--- P1 pivot floor (click-install spec). Authored incrementally inside the
--- P1 branch: this revision carries the additive tables; the login_token
--- drop and the connection narrowing land with the commits that delete the
--- code reading them. Unreleased until the P1 PR merges.
+-- P1 pivot floor (click-install spec).
+
+-- OAuth credentials are dead with the pivot; delete rows BEFORE narrowing
+-- the kind check, or the constraint fails on any install that has one.
+-- metadata and epoch existed only for the OAuth machinery; status stays —
+-- a pasted token can still be revoked upstream (needs_reauth).
+DELETE FROM connection WHERE kind = 'oauth';
+ALTER TABLE connection DROP COLUMN metadata, DROP COLUMN epoch;
+ALTER TABLE connection DROP CONSTRAINT connection_kind_check;
+ALTER TABLE connection ADD CONSTRAINT connection_kind_check
+    CHECK (kind IN ('llm_api_key', 'api_key'));
 
 -- System table: single row, no tenant scope — the scheduler's
 -- last-completed-tick, persisted so fire-on-wake also covers
@@ -69,6 +76,11 @@ CREATE TABLE tenant_event (
 );
 
 -- +goose Down
+ALTER TABLE connection DROP CONSTRAINT connection_kind_check;
+ALTER TABLE connection ADD CONSTRAINT connection_kind_check
+    CHECK (kind IN ('llm_api_key', 'oauth', 'api_key'));
+ALTER TABLE connection ADD COLUMN metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE connection ADD COLUMN epoch bigint NOT NULL DEFAULT 1;
 DROP TABLE tenant_event;
 DROP TABLE model_price;
 DROP TABLE llm_endpoint;
