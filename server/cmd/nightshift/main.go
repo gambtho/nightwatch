@@ -24,6 +24,12 @@
 //	                        tenant)
 //	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
 //	NIGHTSHIFT_STATE_DIR    actor state root, default $TMPDIR/nightshift-actors
+//	NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_ID, NIGHTSHIFT_OAUTH_GOOGLE_CLIENT_SECRET,
+//	NIGHTSHIFT_OAUTH_SLACK_CLIENT_ID, NIGHTSHIFT_OAUTH_SLACK_CLIENT_SECRET
+//	                        platform OAuth apps for curated connectors;
+//	                        a provider with no app configured fails the
+//	                        connect flow with a clear error, everything
+//	                        else runs
 //	NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY, NIGHTSHIFT_PLATFORM_OPENAI_KEY,
 //	NIGHTSHIFT_PLATFORM_OPENROUTER_KEY
 //	                        platform model credentials, per provider — injected
@@ -46,6 +52,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -67,6 +74,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/mail"
 	"github.com/gambtho/nightwatch/server/internal/meter"
+	"github.com/gambtho/nightwatch/server/internal/oauth"
 	"github.com/gambtho/nightwatch/server/internal/proxy"
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
 	"github.com/gambtho/nightwatch/server/internal/redact"
@@ -174,6 +182,11 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
+	// The state-nonce key is derived, not reused raw: signatures made
+	// with it can never validate as run tokens or vice versa.
+	stateKey := sha256.Sum256(append([]byte("nightshift-oauth-state:"), keyFromEnv("NIGHTSHIFT_RUNNER_KEY")...))
+	stateSigner := oauth.NewSigner(stateKey[:], 15*time.Minute)
+	oauthSvc := &oauth.Service{Providers: oauth.Providers(), Clients: oauth.EnvClients(os.Getenv)}
 	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
 	if err != nil {
 		return err
@@ -219,14 +232,14 @@ func serve(ctx context.Context) error {
 	})
 	local := compute.NewLocal(stateDir, func(ctx context.Context, req compute.InvokeRequest, stateDir string) {
 		client := harness.NewClient(baseURL, req.RunID, req.RunToken)
-		steps, err := client.Context(ctx)
+		steps, tools, err := client.Context(ctx)
 		if err != nil {
 			slog.Error("harness: fetch context", "run", req.RunID, "err", err)
 			return
 		}
 		if _, err := harness.Run(ctx,
-			harness.Input{Steps: steps, RunToken: req.RunToken},
-			harness.Deps{ProviderFactory: factory, Sink: client}); err != nil {
+			harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken},
+			harness.Deps{ProviderFactory: factory, Sink: client, Tools: client}); err != nil {
 			slog.Error("harness: run failed", "run", req.RunID, "err", err)
 		}
 	})
@@ -246,11 +259,11 @@ func serve(ctx context.Context) error {
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
 		RunProvider: os.Getenv("NIGHTSHIFT_RUN_PROVIDER"),
 		RunModel:    os.Getenv("NIGHTSHIFT_RUN_MODEL"),
-		Catalog:     cat,
+		Catalog:     cat, OAuth: oauthSvc, StateSigner: stateSigner,
 	})
-	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
+	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
 
-	adapters := proxyadapter.New(s, signer, master, platform)
+	adapters := proxyadapter.New(s, signer, master, platform, oauthSvc)
 	cfg := proxy.DefaultConfig()
 	cfg.InternalBase = baseURL
 	proxy.RegisterRoutes(mux, proxy.Deps{

@@ -9,19 +9,27 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
 
-// connectionJSON deliberately has no field that could carry the secret.
+// connectionJSON deliberately has no field that could carry the secret;
+// metadata is the vetted non-secret face (granted scopes).
 type connectionJSON struct {
-	Name       string     `json:"name"`
-	Kind       string     `json:"kind"`
-	Provider   string     `json:"provider"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	Name       string          `json:"name"`
+	Kind       string          `json:"kind"`
+	Provider   string          `json:"provider"`
+	Status     string          `json:"status"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+	LastUsedAt *time.Time      `json:"last_used_at,omitempty"`
 }
 
 func toConnectionJSON(c store.Connection) connectionJSON {
+	var meta json.RawMessage
+	if len(c.Metadata) > 0 && string(c.Metadata) != "{}" {
+		meta = c.Metadata
+	}
 	return connectionJSON{
 		Name: c.Name, Kind: c.Kind, Provider: c.Provider,
+		Status: c.Status, Metadata: meta,
 		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, LastUsedAt: c.LastUsedAt,
 	}
 }
@@ -45,6 +53,16 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Provider == "" || body.Value == "" || name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and value required"})
+		return
+	}
+	// A PUT stores llm_api_key material; silently flipping an existing
+	// oauth connection's kind would destroy its bundle outside the
+	// refresh lock. Rotating an oauth credential is a re-consent (or a
+	// delete + reconnect), never a PUT.
+	if existing, gerr := d.Store.GetConnection(r.Context(), claims.TenantID, body.Provider, name); gerr == nil && existing.Kind != "llm_api_key" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "connection exists with kind " + existing.Kind + " — delete it first or re-connect via oauth",
+		})
 		return
 	}
 	wrappedKEK, kekVersion, err := d.Store.TenantKEK(r.Context(), claims.TenantID)
@@ -88,9 +106,14 @@ func (d Deps) deleteConnection(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider query parameter required"})
 		return
 	}
-	if err := d.Store.DeleteConnection(r.Context(), claims.TenantID, provider, name); err != nil {
+	// Delete under the refresh advisory lock; revoke provider-side
+	// best-effort after the row is gone (in-flight runs lose the
+	// credential on their next request either way).
+	deleted, err := d.Store.DeleteConnectionLocked(r.Context(), claims.TenantID, provider, name)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
+	d.revokeOAuth(r, deleted)
 	w.WriteHeader(http.StatusNoContent)
 }

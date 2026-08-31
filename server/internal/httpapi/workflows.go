@@ -234,6 +234,39 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Approval-time connection re-validation (build-conversation item
+	// 9): every connection the permit names must resolve NOW — a named
+	// BYOK LLM connection and every connector credential (present and
+	// not needs_reauth). "default" LLM resolution may fall back to the
+	// platform key, so only an explicit name is checked there.
+	if p.LLM.Connection != "default" {
+		if _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, provider, p.LLM.Connection); cerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "permit names llm connection " + p.LLM.Connection + " which does not exist for " + provider,
+			})
+			return
+		}
+	}
+	for key, entry := range p.Connections {
+		con, ok := d.Catalog.Connector(key)
+		if !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "permit names unknown connector " + key})
+			return
+		}
+		cconn, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, con.Auth.Provider, entry.Connection)
+		if cerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "connector " + key + " is not connected — connect " + con.Auth.Provider + " before approving",
+			})
+			return
+		}
+		if cconn.Status != "ok" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "connector " + key + "'s " + con.Auth.Provider + " connection needs re-authorization",
+			})
+			return
+		}
+	}
 	perRunCents := 0
 	if p.Spend != nil {
 		perRunCents = p.Spend.PerRunCents

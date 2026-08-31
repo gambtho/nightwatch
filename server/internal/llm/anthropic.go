@@ -119,9 +119,17 @@ func (p *anthropicProvider) ChatTurn(
 			}
 			apiMsgs = append(apiMsgs, anthropic.NewAssistantMessage(blocks...))
 		case RoleTool:
-			apiMsgs = append(apiMsgs, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(m.ToolUseID, m.Content, false),
-			))
+			// Consecutive tool results (parallel dispatch within one
+			// turn) must coalesce into ONE user message: the Messages
+			// API requires user/assistant roles to alternate, and every
+			// tool_use's result must arrive in the immediately following
+			// user turn.
+			block := anthropic.NewToolResultBlock(m.ToolUseID, m.Content, m.IsError)
+			if n := len(apiMsgs); n > 0 && apiMsgs[n-1].Role == anthropic.MessageParamRoleUser && len(apiMsgs[n-1].Content) > 0 && apiMsgs[n-1].Content[0].OfToolResult != nil {
+				apiMsgs[n-1].Content = append(apiMsgs[n-1].Content, block)
+			} else {
+				apiMsgs = append(apiMsgs, anthropic.NewUserMessage(block))
+			}
 		}
 	}
 
