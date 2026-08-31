@@ -88,6 +88,13 @@ func mostRecentDue(sch *schedule.Schedule, now time.Time, window time.Duration) 
 	found := false
 	for {
 		next := sch.Next(cursor)
+		// A schedule that (despite Parse's validation) never occurs
+		// returns the zero time forever, and a schedule wedged on some
+		// other non-advancing cursor would otherwise spin here just as
+		// badly — defend the walk itself, not just its input.
+		if next.IsZero() || !next.After(cursor) {
+			break
+		}
 		if next.After(now) {
 			break
 		}

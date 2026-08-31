@@ -34,10 +34,20 @@ func TestParseRejects(t *testing.T) {
 		"unknown field":    `{"cron":"* * * * *","tz":"UTC","jitter":5}`,
 		"trailing garbage": `{"cron":"* * * * *","tz":"UTC"}x`,
 		"not json":         `nope`,
+		// Syntactically valid but no calendar date ever satisfies these:
+		// robfig/cron parses them fine but Next returns the zero time
+		// forever, which would busy-loop the scheduler. Reject at parse.
+		"impossible day (feb 30)": `{"cron":"0 0 30 2 *","tz":"UTC"}`,
+		"impossible day (apr 31)": `{"cron":"0 0 31 4 *","tz":"UTC"}`,
 	} {
 		_, err := schedule.Parse([]byte(raw))
 		require.Error(t, err, name)
 	}
+}
+
+func TestParseAcceptsNormalCron(t *testing.T) {
+	_, err := schedule.Parse([]byte(`{"cron":"0 9 * * *","tz":"UTC"}`))
+	require.NoError(t, err)
 }
 
 func TestDSTSpringForwardPinned(t *testing.T) {
@@ -52,14 +62,10 @@ func TestDSTSpringForwardPinned(t *testing.T) {
 	after := time.Date(2026, 3, 7, 12, 0, 0, 0, loc)
 	first := s.Next(after)
 	second := s.Next(first)
-	// The 02:30 slot on Mar 8 is skipped (it does not exist); the pinned
-	// expectation is Mar 9 02:30 following Mar 7... after==Mar 7 12:00, so
-	// first is Mar 8's occurrence IF the library maps it, else Mar 9.
-	// Assert the invariants that matter and log the concrete times:
-	require.True(t, first.After(after))
-	require.True(t, second.After(first))
-	require.Equal(t, 30, second.In(loc).Minute())
-	t.Logf("pinned DST behavior: first=%s second=%s", first.In(loc), second.In(loc))
-	// Pin the exact first-occurrence date so upgrades are visible:
+	// The 02:30 slot on Mar 8 does not exist, so the library's first
+	// occurrence after Mar 7 12:00 is Mar 9 02:30, and the next one after
+	// that is Mar 10 02:30. Pin both exact dates so a dependency upgrade
+	// that changes this mapping is visible.
+	require.Equal(t, time.Date(2026, 3, 9, 2, 30, 0, 0, loc).Unix(), first.Unix())
 	require.Equal(t, time.Date(2026, 3, 10, 2, 30, 0, 0, loc).Unix(), second.Unix())
 }
