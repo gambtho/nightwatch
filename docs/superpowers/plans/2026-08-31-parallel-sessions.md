@@ -1,4 +1,4 @@
-# Nightshift — Parallel Session Coordination
+# Tomte — Parallel Session Coordination
 
 **Date:** 2026-08-31
 **Purpose:** the live picture of which work runs in parallel, which work is
@@ -30,6 +30,12 @@ finishes, or a cross-cutting decision is taken.
 | Upstream Substrate egress PR     | **Closed** — the direction change ends the substrate thread                                                |
 | Frontend (`web/`) + CLI          | **`/setup` shipped** (PR #32) — the loop closes. CLI still not started                                     |
 | User research / demo re-skin     | Branch `demo/dev-persona` — a permanent demo variant, not for merge                                        |
+| Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
+| Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
+| `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
+| P1 — Subtraction and floor       | **Next: owns `server/` at launch** — prompt below                                                          |
+| CI / catalog gate                | **Lane opened, pivot-critical** — prompt below                                                             |
+| Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
@@ -93,8 +99,9 @@ pivot spec designs the fix (wake-aware lookback + a persisted
 `scheduler_heartbeat` row) in its roadmap item P1. The board lesson repeats:
 verify the parameters, not just the mechanism.
 
-**The serialized queue is FROZEN pending the pivot spec.** No session takes
-`server/` until the pivot spec merges and the queue is re-derived from it.
+~~**The serialized queue is FROZEN pending the pivot spec.**~~ **Unfrozen
+2026-08-31:** the pivot spec merged (PR #37) and the queue below is re-derived
+from its "Proposed new roadmap" section, adopted as proposed.
 
 ## The rule
 
@@ -107,64 +114,227 @@ directory and a permanent parallel lane. A real CLI does take the lock, since
 it extends the existing `server/cmd/nightshift` binary
 (`migrate` / `serve` / `dev-session`).
 
-### Serialized `server/` queue
+### Serialized `server/` queue — re-derived from the pivot spec (2026-08-31)
 
-**`server/` is FREE and unassigned.** The connectors lane has paused by design,
-not stalled. Highest-value next occupant per the dependency map below: the
-**build-conversation lane** (its `server/` checklist items 2, 3, 6 — the build
-resource, the build agent loop, and the verdict demand signal), because the
-frontend's remaining ten checklist items all wait on the build resource.
+The pre-pivot queue (positions 4–9: connectors → Plan 4 → escalation →
+objectives → graduated permits → Plan 5) is superseded. History: Plans 1–3,
+identity, and steps v1 are merged; connector phases 1, 2, 4 are merged.
 
-1. ~~**Plan 3**~~ (merged, PR #10) →
-2. ~~**Identity implementation**~~ (merged, PR #17) — replaced the session
-   mechanism across httpapi and every test helper; retired
-   `NIGHTSHIFT_SESSION_KEY`. →
-3. ~~**Steps v1 (decision 9)**~~ (merged, PR #19) — the user-facing steps
-   artifact plus the approval-time compiler. Taken ahead of connectors because
-   it was small, independent of everything else, and the frontend cannot
-   consume a `steps` contract that is still the compiled execution form.
-   **`server/` has been free and unassigned since it merged.** →
-4. **Connectors** — paused by design: phases 1, 2, and 4 are merged; phase 3
-   remains on call after the build-conversation lane. Phases 5 then 6 remain
-   deferred. →
-5. **Plan 4** — grading + alerting. Creates `workflow.status`
-   (`active`|`paused`) and delivers **Plan 3 amendment 3** (`engine.Fire`
-   re-checks status). Objectives widens the CHECK later. →
-6. **Escalation** (carries Plan 3 amendment 1) →
-7. **Objectives** (widens `workflow.status`; no longer carries amendment 3) →
-8. **Graduated permits** (hard dependency on Plan 4's grader) →
-9. **Plan 5** — Substrate + K8s-Jobs Compute
+**`server/` is assigned to P1 on launch.** The queue, from the pivot spec's
+"Proposed new roadmap":
 
-Escalation precedes objectives because the objectives spec declares the
-dependency. Plan 5 stays last, and the verification spike confirmed that was
-right rather than merely asserted.
+1. **P1 — Subtraction and floor** (prompt below): remove OAuth
+   (packages, routes, store paths, migration dropping the `oauth` kind +
+   `epoch`, catalog defs) and login/mail; local-session mint + handoff token;
+   wake-aware scheduler window + `scheduler_heartbeat`; endpoint record +
+   custom base URLs + local endpoints; pricing-gate rework (user-entered
+   prices keyed by (endpoint, model), local-$0 by classification); budget
+   rename; `serve()` as a library entry point. Mostly deletion; every later
+   item builds on this floor. →
+2. **P2 — Connectors main road**: Slack token capture + verify (capture guide
+   in catalog, control-plane verify), then old phases 5 → 6 (remote MCP —
+   5 before 6, unchanged), phase 3 (options client) when the build needs it. →
+3. **P3 — Build conversation**: the build resource, agent loop, and its
+   checklist — unchanged as the highest product value, now against the P1
+   endpoint model. →
+4. **P4 — Grading + alerting**: as specced, with OS-notification delivery
+   replacing the Postmark path and the grader-consent copy. Still creates
+   `workflow.status` and delivers Plan 3 amendment 3. →
+5. **P5 — Escalation** (carries Plan 3 amendment 1) →
+6. **P6 — Objectives** (widens `workflow.status`) →
+7. **P7 — Graduated permits** (hard dependency on P4's grader)
+
+Escalation still precedes objectives (the objectives spec declares the
+dependency). Plan 5 (Substrate + K8s Compute) is dead, not queued — the spec
+stays merged as a record.
 
 ### Parallel-safe lanes, open now
 
-- **Frontend at `web/`** — `/setup` shipped (PR #32), alongside login over
-  magic-link, the approve blast-radius diagram driven only by the permit
-  document, the quiet home with run history, and `/build` as an honest
-  placeholder rather than a faked build conversation. **The lane is now
-  largely blocked**: 10 of the 11 items on the build-conversation spec's
-  frontend checklist need the build resource, which needs connectors. What it
-  built — the permit diagram, steps rendering, schedule wording — are the
-  components those surfaces will drive live.
+- **Packaging shell at `app/`** (new top-level dir, prompt below) — tray
+  shell, embedded Postgres, first-run flow, keychain, `go:embed` SPA serving,
+  auto-update skeleton, notifier. Its one `server/` need — `serve()` as a
+  library entry — rides P1; the lane never takes the lock.
+- **CI, repo-global** (prompt below) — the catalog gate as a PR-time check,
+  now pivot-critical: auto-update ships catalog changes to users' machines,
+  so the narrow-only rule is what keeps a silent update compatible with
+  approve-once.
+- **Frontend at `web/`** (prompt below) — un-blocked by the pivot: first-run
+  and settings surfaces, capture cards, the connections manager, and
+  sleeping-machine copy are all P1-or-earlier work, prototyped on fake data
+  where the API lands later. Login-screen *removal* sequences behind P1's
+  local-session merge. The build-conversation checklist items still wait on
+  P3. What it built — the permit diagram, steps rendering, schedule
+  wording — are the components those surfaces will drive live.
 - **Docs, specs, research** — always open.
-- **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
 
-## Pivot spec delivered (PR #37); NAME UNDER REVIEW
+## Ready-to-paste prompts (2026-08-31, post-pivot-merge)
 
-`docs/superpowers/specs/2026-08-31-tomte-pivot-design.md`, branch
-`spec/pivot-click-install`. Carries the Tomte naming, the reusable
+Four sessions can launch in parallel. P1 holds the `server/` lock; the other
+three never take it. Each prompt is self-contained.
+
+### Prompt — P1: subtraction and floor (owns `server/`)
+
+> You own the `server/` lock for P1 of the Tomte pivot. Read, in full, the
+> merged pivot spec `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md`
+> and the coordination board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` before writing
+> anything. Work in a linked worktree on a branch off current `main`.
+>
+> Write a concise implementation plan first (against the current tree, in
+> `docs/superpowers/plans/`), PR the plan to `main`, then implement. P1's
+> scope, from the spec's roadmap item 1 (section names in parentheses):
+>
+> 1. Remove OAuth end-to-end: `server/internal/oauth`, the httpapi oauth
+>    routes, the refresh/epoch/advisory-lock machinery in
+>    `store/connection.go`, a migration dropping the `oauth` credential kind
+>    and `epoch`, and the `google-calendar` catalog definition + baseline
+>    entry — a removal is a narrowing, so the catalog gate accepts it
+>    ("Estate triage" connectors row). The `api_key` half survives untouched.
+> 2. Remove login and mail: magic-link request/verify endpoints and
+>    interstitial, `login_token` + its sweep (migration drop), enumeration
+>    defenses and rate budgets, `internal/mail`, `TOMTE_POSTMARK_TOKEN` /
+>    `TOMTE_MAIL_FROM`. Keep the session core: `session` table,
+>    `RequireSession`, `SessionClaims`, cookie attributes, Origin middleware
+>    ("Identity at its floor").
+> 3. Local-session mint: generalize `dev-session` into a `local-session`
+>    path inside the server library (not a CLI), plus the single-use,
+>    short-TTL `/local/handoff` token exchange for open-in-browser
+>    ("Identity at its floor").
+> 4. Wake-aware scheduler window: persisted single-row `scheduler_heartbeat`,
+>    per-tick lookback `max(window, now − lastTick + interval)`;
+>    `mostRecentDue` unchanged. Test the case that never fires today: an
+>    occurrence hours old at wake ("The sleeping machine").
+> 5. Endpoint record: `{kind: anthropic|openai_compatible, base_url,
+>    connection}`; presets are fixed base URLs; custom base URLs validated
+>    (HTTPS except loopback, no userinfo, path allowlist unchanged); a
+>    `local` endpoint carries no connection and the proxy skips credential
+>    resolution/injection — the spec names that contract as worth its own
+>    test. Approval records the endpoint identity; switching endpoints is a
+>    recorded governance event that re-runs the pricing gate
+>    ("Endpoint agnosticism").
+> 6. Pricing-gate rework: bundled table as today; user-entered prices stored
+>    per (endpoint canonical base URL, model); local-$0 by explicit preset
+>    classification, never loopback inference; `max_tokens` derivation falls
+>    back to a fixed default on local ("The priced-pair gate, reworked").
+> 7. Budget rename: `tenant.monthly_cap_cents` becomes the user's local
+>    budget — same enforcement, new copy ("Vault and metering").
+> 8. `serve()` exposed as a library entry point (the packaging lane consumes
+>    it); `TOMTE_PUBLIC_BASE_URL` becomes the auto-configured loopback origin
+>    rather than a required value; add the `Host` allowlist hardening
+>    ("The shell", "Loopback security posture").
+>
+> Binding rules from the board: PRs target `main`; if you split P1 into
+> several PRs, no pre-stacked bases — each waits for its predecessor to
+> merge. Never rename the derived-key labels `tomte:run-jwt` /
+> `tomte-oauth-state`. Verify the next free migration number in
+> `server/internal/db/migrations/` at branch time (00012 as of this writing).
+> Before each PR: full server suite green including the connector e2e, and a
+> real `tomte serve` boot. When done, report a delta sheet for the consuming
+> lanes: the `serve()` library signature for packaging, and the
+> endpoint/pricing/budget API shapes for the frontend.
+
+### Prompt — CI and the catalog gate (repo-global, parallel)
+
+> You own the CI lane for the Tomte repo — repo-global, pivot-critical, and
+> explicitly not a `server/` occupant. Read the coordination board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` ("Blocking
+> defects" and the pivot-spec section) and the pivot spec's "Auto-update and
+> migration-on-update" section first.
+>
+> Context: the repo has no `.github/` at all (verify), yet two merged
+> security designs assume a CI-enforced catalog narrow-only rule, and the
+> pivot makes it load-bearing — auto-update ships catalog changes to users'
+> machines, so the gate is what keeps a silent update compatible with
+> approve-once. `server/cmd/catalog-gate` exists; inspect its interface
+> rather than assuming it.
+>
+> Deliver GitHub Actions workflows, in a linked worktree, PR to `main`:
+> 1. Server: `go test ./...` (inspect `server/internal/testpg` to see how
+>    tests obtain Postgres and provide it as a service), `go vet`, gofmt
+>    check.
+> 2. Web: install, `tsc`, vitest, build.
+> 3. Catalog gate: run the gate so a PR fails on any catalog **widening**
+>    against its merge base; narrowings pass.
+>
+> You do not hold the `server/` lock: do not modify server code. If the gate
+> tool needs changes to run in CI, report that to the coordinating session
+> instead of editing. Done means the workflows ran green on your own PR —
+> link the runs.
+
+### Prompt — Packaging shell spike + plan (`app/`, parallel)
+
+> You own the packaging lane for Tomte — the click-install desktop shell.
+> Read, in full, the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` — especially
+> "Packaging — the central problem", "First run", "Auto-update", "Where
+> state lives", and the open questions — plus the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md`.
+>
+> Your lane is the new top-level `app/` directory; you never touch
+> `server/`. Your one server need — `serve()` as a library entry point —
+> arrives with P1; until then a subprocess of today's `tomte serve` is fine
+> for spiking.
+>
+> First deliverable is a plan plus a spike, not production code:
+> 1. Evaluate shell frameworks (Wails-class Go-native vs Tauri + Go sidecar)
+>    against the spec's shell contract: tray-resident, window optional,
+>    single instance, embedded webview, autostart, OS notifications, and
+>    supervising a bundled Postgres child. Build the smallest spike that
+>    proves the risky parts on your platform: tray app → init/start embedded
+>    Postgres → run migrations → boot the server → webview at loopback.
+> 2. Recommend a platform ship order given macOS notarization / Windows
+>    signing cost and lead time, and propose update-feed hosting. These are
+>    product calls: put recommendations to the user via the coordinating
+>    session; do not decide unilaterally.
+>
+> PR the plan (with the framework decision and spike findings) to `main`
+> before deepening the implementation.
+
+### Prompt — Frontend pivot surfaces (`web/`, parallel)
+
+> You own the frontend lane for the Tomte pivot. Read the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` — especially
+> "First run", "Credentials without OAuth" (the connections manager), "The
+> sleeping machine", and the build-conversation row of the estate triage —
+> plus the board `docs/superpowers/plans/2026-08-31-parallel-sessions.md`
+> (the `GET /v1/catalog` shape is recorded there). Work in a linked
+> worktree; `web/` never takes the `server/` lock.
+>
+> Build, prototyping on fake data behind a thin interface wherever the API
+> lands later (P1: endpoint record, price form, budget; P2: capture guide,
+> connection states):
+> 1. First-run flow: the endpoint chooser (Anthropic / OpenAI / OpenRouter
+>    presets, "another service", "on this computer"), the guided key-capture
+>    card with the disclosed metered verify call, the budget screen.
+> 2. Settings: endpoint switch as an explicit confirmation naming affected
+>    workflows ("your 3 workflows will now run against …"), budget edit,
+>    autostart toggle.
+> 3. The standalone connections manager: one screen, every catalog connector
+>    and registered MCP server with state (`connected` boolean today;
+>    `ok`/`needs_reauth`/`missing` come with P2), owning capture cards and
+>    disconnect; build conversations link into it.
+> 4. Sleeping-machine copy: home renders `fire_time` as
+>    "scheduled 3:00 AM · ran 7:42 AM, when your computer woke"; the schedule
+>    confirmation carries the always-on guidance in the spec's order.
+>
+> Do NOT remove the login screen yet — its replacement (the shell-minted
+> local session) merges with P1; sequence login retirement behind that merge
+> and coordinate through the board. PRs to `main` per surface; keep them
+> independent.
+
+## Pivot spec MERGED (PR #37); name FINAL
+
+`docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` — merged to `main`
+2026-08-31 with all review fixes. Carries the Tomte naming, the reusable
 connections manager (charter item 4 upgrade), and the I/O palette positioned
 in the build-conversation triage.
 
-**The name is CONFIRMED: Tomte** (user, 2026-08-31, after leadership review;
-trademark counsel still owed). The hold is released: the mechanical rename is
-complete and ready to merge as **PR #38** (verified: server suite green, web
-tsc + 110 tests + build green, real `tomte serve` boot); PR #37's naming is
-final as written. Screening history for the record: Duende died (Duende
+**The name is FINAL: Tomte** (user, 2026-08-31, after leadership review;
+trademark counsel still owed — the one remaining debt on the name). The
+mechanical rename **merged as PR #38** (verified: server suite green, web
+tsc + 110 tests + build green, real `tomte serve` boot).
+Screening history for the record: Duende died (Duende
 Software is IdentityServer's company), Momoy was legally clean but loaded
 (sacred Chumash Datura figure; "ugly/nasty" in Hiligaynon; Momo-adjacent).
 Two rename facts worth memory: the derived-key labels
@@ -268,16 +438,18 @@ permit-granted operations as tools, calls them through the enforcing proxy with
 credentials injected at the boundary, and returns tool-level failures as
 `IsError`.
 
-This does not establish an available end-to-end workflow on `main`: the
-`nightshift serve` startup deadlock remains blocked there until PR #24 merges
-and `main` is reverified.
+The startup deadlock that blocked this on `main` is resolved: PR #24 merged,
+and the rename lane verified a real `tomte serve` boot (fresh Postgres,
+`/v1/me` served) on what is now merged code.
 
 What is still missing is the _product_, not the loop: the build conversation,
 so that a non-technical person can describe a job instead of filling a form.
 
 ## Blocking defects
 
-- **`nightshift serve` deadlocks at startup on `main`.** Found by the frontend
+- ~~**`nightshift serve` deadlocks at startup on `main`.**~~ **Resolved:
+  PR #24 merged; `main` boots** (real `tomte serve` verified by the rename
+  lane). Historical detail kept below for the record. Found by the frontend
   lane, which could not fix it (no `server/` writes), and verified by the
   coordinating session at `server/cmd/nightshift/main.go:188`:
 
@@ -312,13 +484,20 @@ so that a non-technical person can describe a job instead of filling a form.
   edit visible in review — not tamper-proof. Only a PR-time CI diff against
   the merge base closes it.
 
-  **CI setup is unowned and repo-global.** It is a security follow-up, not
-  tooling hygiene, and it needs an owner who is not the connectors lane.
+  **CI setup is now an opened lane with a ready prompt (below), escalated to
+  pivot-critical** by the merged pivot spec: auto-update ships catalog changes
+  to users' machines, so the narrow-only rule is what keeps a silent update
+  compatible with approve-once. It is a security follow-up, not tooling
+  hygiene, and its owner is not the connectors lane.
 
 ## Cross-cutting decisions
 
-- **The product is renamed: Nightshift → Tomte** (user decision, 2026-08-31,
-  provisional pending a real trademark search — "let's try for Tomte").
+- **The product is renamed: Nightshift → Tomte** (user decision, 2026-08-31;
+  confirmed FINAL the same day after leadership review — "lets stick with
+  Tomte". Trademark counsel is still owed but the name is settled; do not
+  relitigate). Post-release freeze note: the derived-key labels
+  `tomte:run-jwt` and `tomte-oauth-state` are cryptographic inputs and must
+  never be renamed after release.
   Why: "Night Shift" is Apple's display feature on every Mac and iPhone — a
   direct collision for a click-install desktop app — and the repo name
   `nightwatch` collides with Nightwatch.js. Knockout screening killed
@@ -374,9 +553,10 @@ so that a non-technical person can describe a job instead of filling a form.
 Recorded so the next session doesn't rediscover them. Each was settled by one
 session and affects others.
 
-- **Postmark is the single transactional email provider** (Plan 4 spec,
-  PR #13). This closes the identity spec's "email provider (shared with
-  Plan 4)" open question; identity builds magic-link delivery against it.
+- ~~**Postmark is the single transactional email provider**~~ (Plan 4 spec,
+  PR #13). **Retired by the pivot** (2026-08-31): nothing transactional
+  remains to send. `internal/mail` is removed in P1; alert delivery moves to
+  OS notifications in P4.
 - **Pause is `workflow.status`, not a parallel boolean** (Plan 4). One
   lifecycle model: `active|paused` now, objectives widens to add
   `completed|abandoned`. `streak_anchor_at` is stamped on resume and on
