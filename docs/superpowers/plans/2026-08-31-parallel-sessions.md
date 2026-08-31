@@ -252,6 +252,26 @@ so that a non-technical person can describe a job instead of filling a form.
 
 ## Cross-cutting decisions
 
+- **The product is renamed: Nightshift → Tomte** (user decision, 2026-08-31,
+  provisional pending a real trademark search — "let's try for Tomte").
+  Why: "Night Shift" is Apple's display feature on every Mac and iPhone — a
+  direct collision for a click-install desktop app — and the repo name
+  `nightwatch` collides with Nightwatch.js. Knockout screening killed
+  Smallhours, Midwatch, Nightjar, Domovoi, Lutin, Duende, and Brownie;
+  Tomte surfaced no software collision (a defunct German band holds the name
+  in music only). The tomte — the Scandinavian household spirit that quietly
+  makes its rounds while the household sleeps, and works under a contract of
+  respect and due payment — is nearly a spec for the product.
+  - New docs and specs use **Tomte**; dated historical specs are not
+    rewritten. The pivot spec is being written under the new name.
+  - The mechanical rename (binary, `NIGHTSHIFT_` → `TOMTE_`, module path,
+    cookie, repo) is **the one exception to the frozen `server/` queue** —
+    it rides now, before the pivot spec merges, so the spec lands unstale.
+  - The GitHub repo rename (`gambtho/nightwatch` → `gambtho/tomte`) is the
+    user's own click — outward-facing, not a session's to take. Old remotes
+    redirect.
+  - Still owed: trademark counsel check and domain/handle availability.
+
 - **Gmail is out of v1; curated connectors are Calendar + Slack** (decided
   2026-08-31; the user delegated the call to the coordinating session).
   Google CASA is months of lead time plus real money and annual renewal, and
