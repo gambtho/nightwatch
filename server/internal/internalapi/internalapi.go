@@ -38,8 +38,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, claims token.RunClaims)
 
-// The harness pushes small JSON records, not data; cap every body. Per-run
-// event and output budgets are the meter's concern.
+// The harness pushes small JSON records, not data; cap every body.
 const maxBodyBytes = 1 << 20
 
 // auth verifies the bearer run-JWT, requires that the token's run is the
