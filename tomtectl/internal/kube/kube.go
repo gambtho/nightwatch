@@ -108,7 +108,9 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 		if existing.Spec.Template.Annotations == nil {
 			existing.Spec.Template.Annotations = map[string]string{}
 		}
-		existing.Spec.Template.Annotations["tomte.dev/restarted-at"] = time.Now().UTC().Format(time.RFC3339)
+		// Nano resolution: two `up`s inside the same second (scripted
+		// set-key && up rotation) must still each roll the pods.
+		existing.Spec.Template.Annotations["tomte.dev/restarted-at"] = time.Now().UTC().Format(time.RFC3339Nano)
 		_, err = deps.Update(ctx, existing, metav1.UpdateOptions{})
 		return err
 	})
@@ -146,6 +148,20 @@ func (c *Client) ApplySecret(ctx context.Context, s *corev1.Secret) error {
 		return fmt.Errorf("applying Secret: %w", err)
 	}
 	return nil
+}
+
+// SecretExists reports whether the named Secret exists in the
+// namespace — `up`'s pre-flight, so a skipped `set-key` is a clear
+// error now rather than a CreateContainerConfigError later.
+func (c *Client) SecretExists(ctx context.Context, name string) (bool, error) {
+	_, err := c.cs.CoreV1().Secrets(c.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Status prints deployment readiness and the agent's pods.

@@ -96,6 +96,15 @@ func run(args []string) error {
 		case "set-key":
 			return setKey(ctx, client, agent)
 		case "up":
+			if ref := agent.Spec.LLM.SecretRef; ref != "" {
+				ok, err := client.SecretExists(ctx, ref)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("secret %q does not exist in namespace %q — run `tomtectl set-key` first", ref, client.Namespace)
+				}
+			}
 			cm, dep := manifest.Objects(agent, raw, image)
 			if err := client.Apply(ctx, cm, dep); err != nil {
 				return err

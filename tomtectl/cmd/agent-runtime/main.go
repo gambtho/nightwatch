@@ -29,7 +29,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := runtime.NewHTTPClient(5 * time.Minute)
 	err := runtime.Loop(ctx, "/tomte/agent.yaml", os.Getenv(manifest.APIKeyEnv), os.Stdout, client)
 	if err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "tomte agent:", err)

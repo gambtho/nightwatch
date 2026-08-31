@@ -28,5 +28,6 @@ spec:
   # secretRef — a loopback URL alone never implies local.
   llm: {}
   # K3 — what the agent may reach. Tomte connectors and their permits
-  # mount here; until then the agent has no reach beyond its own logs.
+  # mount here; until then the agent reaches nothing beyond its logs
+  # and the one llm endpoint named above.
   connectors: []

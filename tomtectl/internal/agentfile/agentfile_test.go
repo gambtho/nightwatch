@@ -132,10 +132,10 @@ func TestParseAcceptsLLM(t *testing.T) {
 			s = strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://127.0.0.1:11434/v1", 1)
 			return strings.Replace(s, "secretRef: hello-key", "local: true", 1)
 		}},
-		{"keyed http to a cluster-local service", func(s string) string {
-			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub:8080/v1", 1)
+		{"keyed http to a short .svc name", func(s string) string {
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub.default.svc:8080/v1", 1)
 		}},
-		{"keyed http to a .svc name", func(s string) string {
+		{"keyed http to a full .svc.cluster.local name", func(s string) string {
 			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub.default.svc.cluster.local:8080/v1", 1)
 		}},
 	}
@@ -175,6 +175,11 @@ func TestParseRejectsBadLLM(t *testing.T) {
 		}, "keyless"},
 		{"keyed plain http to the internet", func(s string) string {
 			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://api.example.com/v1", 1)
+		}, "https"},
+		{"keyed plain http to a bare single-label host", func(s string) string {
+			// A resolver search domain can send a bare name anywhere;
+			// keyed http must spell out the .svc form.
+			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: http://llm-stub:8080/v1", 1)
 		}, "https"},
 		{"userinfo in base_url", func(s string) string {
 			return strings.Replace(s, "base_url: https://api.openai.com/v1", "base_url: https://user:pw@api.openai.com/v1", 1)

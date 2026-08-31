@@ -153,6 +153,56 @@ func TestWakeFailsClosed(t *testing.T) {
 	}
 }
 
+// TestWakeNeverFollowsRedirects: Go's default redirect policy strips
+// Authorization on a cross-host hop but not x-api-key, so the runtime
+// client must refuse redirects outright — a 3xx is a failed wake, and
+// the key never reaches the redirect target.
+func TestWakeNeverFollowsRedirects(t *testing.T) {
+	leaked := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = true
+	}))
+	defer target.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	a := agentDoc(t, `  llm:
+    kind: anthropic
+    base_url: `+srv.URL+`
+    model: test-model
+    secretRef: hello-key
+`)
+	_, err := Wake(context.Background(), a, "sk-ant-test", NewHTTPClient(time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("a redirect must be a failed wake, got %v", err)
+	}
+	if leaked {
+		t.Fatal("the redirect target was contacted — the key could have leaked")
+	}
+}
+
+// TestWakeRefusesKeylessCallForKeyedAgent: a keyed agent must never
+// call out unauthenticated — an endpoint that happens to answer would
+// fake a success. (A ConfigMap edit can add a secretRef to a pod that
+// started without the key env, bypassing Loop's startup check.)
+func TestWakeRefusesKeylessCallForKeyedAgent(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+	a := agentDoc(t, llmBlock("openai_compatible", srv.URL+"/v1"))
+	_, err := Wake(context.Background(), a, "", srv.Client())
+	if err == nil || !strings.Contains(err.Error(), "no API key") {
+		t.Fatalf("want fail-closed error, got %v", err)
+	}
+	if called {
+		t.Fatal("the endpoint must not be contacted without the key")
+	}
+}
+
 func TestStubSpeaksOpenAIAndChecksTheKey(t *testing.T) {
 	srv := httptest.NewServer(StubHandler("sk-stub"))
 	defer srv.Close()

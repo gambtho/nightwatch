@@ -5,8 +5,9 @@
 # llm agent, and assert (a) the model's reply reaches `tomtectl logs`
 # and (b) a wrong key fails closed as a logged `wake failed`.
 #
-# Needs: docker, kind (cluster running; KIND_CLUSTER overrides the
-# name), kubectl. Cleans up its namespace unless E2E_KEEP=1.
+# Needs: Go, docker, kind (cluster running; KIND_CLUSTER overrides the
+# name, KUBE_CONTEXT the kubeconfig context), kubectl. Cleans up its
+# namespace unless E2E_KEEP=1.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,7 +25,9 @@ say() { printf '\n== %s\n' "$*"; }
 wait_for_log() { # wait_for_log <pattern> <tries>
   local pattern=$1 tries=$2 out
   for _ in $(seq 1 "$tries"); do
-    out=$(t logs -f e2e/agent.yaml -n "$NS" 2>/dev/null || true)
+    # stderr stays in $out so a CLI-level failure is diagnosable, not
+    # an empty transcript.
+    out=$(t logs -f e2e/agent.yaml -n "$NS" 2>&1 || true)
     if grep -q "$pattern" <<<"$out"; then
       grep "$pattern" <<<"$out" | head -n2
       return 0

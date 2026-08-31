@@ -28,7 +28,8 @@ spec:
     model: claude-haiku-4-5
     secretRef: hello-key
   # K3 — what the agent may reach. Tomte connectors and their permits
-  # mount here; until then the agent has no reach beyond its own logs.
+  # mount here; until then the agent reaches nothing beyond its logs
+  # and the one llm endpoint named above.
   connectors: []
 ```
 
@@ -94,9 +95,9 @@ to the configured endpoint. Anything but a well-formed positive
 response — an error status, an unreadable body, malformed JSON, an
 empty completion — is logged as `wake failed: …` and never printed as
 a result; the schedule survives it. A keyless local endpoint (Ollama
-and friends) is `local: true` with no `secretRef`. Plain `http` is
-allowed only for loopback or cluster-local hosts — a key never travels
-in cleartext to the open internet.
+and friends) is `local: true` with no `secretRef`. A keyed endpoint
+must use `https` unless its host is loopback or cluster-local — a key
+never travels in cleartext to the open internet.
 
 `e2e/e2e.sh` proves the whole path on a real kind cluster with an
 in-cluster stub endpoint: build, load, `set-key`, `up`, the stub's

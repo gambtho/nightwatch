@@ -24,6 +24,20 @@ import (
 // comfortably, and an endpoint cannot flood the pod's memory.
 const maxBody = 1 << 20
 
+// NewHTTPClient builds the client Wake should be called with. It
+// refuses to follow redirects: a wake call has no legitimate redirect,
+// and Go's default policy strips Authorization on a cross-host hop but
+// not x-api-key — following one could hand the anthropic key to a
+// different host. A 3xx therefore surfaces as a failed wake.
+func NewHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // Loop runs the agent at path forever: wake, act, sleep, re-read the
 // file. Config-level faults (unreadable file, missing key) are fatal —
 // a loud CrashLoopBackOff, never a silent default. Per-wake call
@@ -85,6 +99,13 @@ func wake(ctx context.Context, a *agentfile.Agent, apiKey string, out io.Writer,
 // well-formed positive response is an error.
 func Wake(ctx context.Context, a *agentfile.Agent, apiKey string, client *http.Client) (string, error) {
 	l := a.Spec.LLM
+	// Fail closed here too, not just at startup: a ConfigMap edit can
+	// add a secretRef to a pod that was started without the key env,
+	// and a keyed agent must never call out unauthenticated — an
+	// endpoint that happens to answer would fake a success.
+	if !l.Local && apiKey == "" {
+		return "", fmt.Errorf("spec.llm.secretRef is set but no API key is present — was the Secret created and the agent re-deployed? (`tomtectl set-key`, then `tomtectl up`)")
+	}
 	system := fmt.Sprintf("You are %q, a Tomte agent running on Kubernetes. Each time you wake, perform your steps and reply with the result — concise, plain text.", a.Metadata.Name)
 	var steps strings.Builder
 	for i, s := range a.Spec.Steps {

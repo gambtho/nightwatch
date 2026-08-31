@@ -210,17 +210,16 @@ func (l LLM) validate() error {
 }
 
 // clusterLocalHost reports whether cleartext to host cannot leave the
-// machine or the cluster: loopback addresses, single-label service
-// names, and *.svc / *.svc.cluster.local DNS names.
+// machine or the cluster: loopback addresses and *.svc /
+// *.svc.cluster.local DNS names. A bare single-label name is NOT
+// accepted — outside the cluster a resolver search domain can send it
+// anywhere, so a keyed http URL must spell out the .svc form.
 func clusterLocalHost(host string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
 	if host == "localhost" {
 		return true
-	}
-	if !strings.Contains(host, ".") {
-		return true // a single-label in-cluster Service name
 	}
 	host = strings.TrimSuffix(host, ".")
 	return strings.HasSuffix(host, ".svc") || strings.HasSuffix(host, ".svc.cluster.local")
