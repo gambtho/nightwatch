@@ -36,10 +36,20 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function RequireSession({ children }: { children: React.ReactElement }) {
-  const { session } = useSession();
+  const { session, retry } = useSession();
   const location = useLocation();
   if (session.status === "loading") {
     return <div className="dim boot-note">One moment…</div>;
+  }
+  if (session.status === "unreachable") {
+    return (
+      <div className="boot-note">
+        <p className="error-note">Couldn't reach Nightshift. Your work is untouched.</p>
+        <button className="btn btn-secondary" onClick={retry}>
+          Try again
+        </button>
+      </div>
+    );
   }
   if (session.status === "anonymous") {
     const next = location.pathname + location.search;

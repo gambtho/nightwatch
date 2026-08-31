@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
-import { requestMagicLink } from "../api/client";
+import { ApiError, requestMagicLink } from "../api/client";
 import { useSession } from "../session";
 import "./screens.css";
 
@@ -13,6 +13,7 @@ export default function Login() {
   const [params] = useSearchParams();
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [errorDetail, setErrorDetail] = useState("");
 
   if (session.status === "signed-in") {
     return <Navigate to="/" replace />;
@@ -26,7 +27,14 @@ export default function Login() {
     try {
       await requestMagicLink(email, next);
       setState("sent");
-    } catch {
+    } catch (err) {
+      // Distinguish "the server refused" from "we couldn't reach it" —
+      // neither is a typo in the address, so don't imply one.
+      setErrorDetail(
+        err instanceof ApiError
+          ? `The server couldn't send it (${err.message}).`
+          : "Couldn't reach Nightshift.",
+      );
       setState("error");
     }
   }
@@ -69,7 +77,7 @@ export default function Login() {
           {state === "sending" ? "Sending…" : "Email me a sign-in link"}
         </button>
         {state === "error" && (
-          <p className="error-note">That didn't send. Check the address and try again.</p>
+          <p className="error-note">{errorDetail} Try again in a moment.</p>
         )}
       </form>
     </div>

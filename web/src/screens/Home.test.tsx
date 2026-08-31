@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Home from "./Home";
+import { SessionProvider } from "../session";
 import { mockApi } from "../test/helpers";
 
 afterEach(() => {
@@ -22,6 +23,12 @@ const approvedVersion = {
 describe("Home", () => {
   it("lists workflows with last run, cost, schedule, and the reassurance line", async () => {
     mockApi({
+      "GET /v1/me": {
+        body: {
+          user: { id: "u", email: "e", role: "owner" },
+          tenant: { id: "t", name: "dev" },
+        },
+      },
       "GET /v1/workflows": {
         body: {
           workflows: [
@@ -59,7 +66,9 @@ describe("Home", () => {
 
     render(
       <MemoryRouter>
-        <Home />
+        <SessionProvider>
+          <Home />
+        </SessionProvider>
       </MemoryRouter>,
     );
 
@@ -73,6 +82,12 @@ describe("Home", () => {
 
   it("points a workflow with only a draft at the approval gate", async () => {
     mockApi({
+      "GET /v1/me": {
+        body: {
+          user: { id: "u", email: "e", role: "owner" },
+          tenant: { id: "t", name: "dev" },
+        },
+      },
       "GET /v1/workflows": {
         body: {
           workflows: [
@@ -91,7 +106,9 @@ describe("Home", () => {
 
     render(
       <MemoryRouter>
-        <Home />
+        <SessionProvider>
+          <Home />
+        </SessionProvider>
       </MemoryRouter>,
     );
 
@@ -102,11 +119,21 @@ describe("Home", () => {
   });
 
   it("shows the honest empty state", async () => {
-    mockApi({ "GET /v1/workflows": { body: { workflows: [] } } });
+    mockApi({
+      "GET /v1/me": {
+        body: {
+          user: { id: "u", email: "e", role: "owner" },
+          tenant: { id: "t", name: "dev" },
+        },
+      },
+      "GET /v1/workflows": { body: { workflows: [] } },
+    });
 
     render(
       <MemoryRouter>
-        <Home />
+        <SessionProvider>
+          <Home />
+        </SessionProvider>
       </MemoryRouter>,
     );
 

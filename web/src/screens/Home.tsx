@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getWorkflow, listRuns, listWorkflows } from "../api/client";
+import { getWorkflow, isAuthError, listRuns, listWorkflows } from "../api/client";
+import { useSession } from "../session";
 import type { Run, Workflow } from "../api/types";
 import { summarizeVersions, lastRun } from "../lib/versions";
 import type { VersionSummary } from "../lib/versions";
@@ -19,6 +20,7 @@ export interface WorkflowSummary {
 }
 
 export default function Home() {
+  const { expire } = useSession();
   const [items, setItems] = useState<WorkflowSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,12 +43,17 @@ export default function Home() {
       );
       if (!cancelled) setItems(summaries);
     })().catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "couldn't load");
+      if (cancelled) return;
+      if (isAuthError(err)) {
+        expire();
+        return;
+      }
+      setError(err instanceof Error ? err.message : "couldn't load");
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [expire]);
 
   if (error) {
     return (

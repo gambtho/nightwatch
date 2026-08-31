@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { approveVersion, getWorkflow } from "../api/client";
+import { approveVersion, getWorkflow, isAuthError } from "../api/client";
+import { useSession } from "../session";
 import type { Version, Workflow } from "../api/types";
 import PermitDiagram from "../components/PermitDiagram";
 import { parseSteps } from "../lib/steps";
@@ -16,6 +17,7 @@ import "./screens.css";
 export default function Approve() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { expire } = useSession();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [draft, setDraft] = useState<Version | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -33,14 +35,17 @@ export default function Approve() {
         setLoaded(true);
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "couldn't load");
+        if (cancelled) return;
+        if (isAuthError(err)) {
+          expire();
+          return;
         }
+        setError(err instanceof Error ? err.message : "couldn't load");
       });
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, expire]);
 
   async function approve() {
     if (!id || !draft) return;
@@ -50,6 +55,10 @@ export default function Approve() {
       await approveVersion(id, draft.number);
       navigate(`/workflows/${id}`);
     } catch (err) {
+      if (isAuthError(err)) {
+        expire();
+        return;
+      }
       setError(err instanceof Error ? err.message : "approval failed");
       setApproving(false);
     }
@@ -77,7 +86,7 @@ export default function Approve() {
     );
   }
 
-  const steps = parseSteps(draft.steps);
+  const stepsView = parseSteps(draft.steps);
 
   return (
     <div className="screen">
@@ -88,16 +97,22 @@ export default function Approve() {
         </p>
       )}
 
-      {steps.length > 0 && (
-        <section className="approve-steps">
-          <div className="label">What it will do</div>
+      <section className="approve-steps">
+        <div className="label">What it will do</div>
+        {stepsView.recognized ? (
           <ol>
-            {steps.map((s) => (
+            {stepsView.steps.map((s) => (
               <li key={s.id}>{s.text}</li>
             ))}
           </ol>
-        </section>
-      )}
+        ) : (
+          // On the one gate in the product, an unreadable steps document
+          // must never look like "no steps" — say it, and discourage approval.
+          <p className="error-note">
+            This version's steps couldn't be read. Don't approve what you can't see.
+          </p>
+        )}
+      </section>
 
       <section className="approve-diagram">
         <div className="label">What it can reach</div>

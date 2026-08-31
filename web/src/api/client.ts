@@ -15,6 +15,10 @@ export class ApiError extends Error {
   }
 }
 
+export function isAuthError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "same-origin",
@@ -22,12 +26,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    let message = res.statusText;
+    // statusText is often empty over HTTP/2, so always fall back to the code.
+    let message = res.statusText || `HTTP ${res.status}`;
     try {
       const body = (await res.json()) as { error?: string };
       if (body.error) message = body.error;
     } catch {
-      // non-JSON error body; keep the status text
+      // non-JSON error body; keep the fallback message
     }
     throw new ApiError(res.status, message);
   }

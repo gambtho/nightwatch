@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fireRun, getRunEvents, getWorkflow, listRuns } from "../api/client";
+import { fireRun, getRunEvents, getWorkflow, isAuthError, listRuns } from "../api/client";
 import type { Run, RunEvent, Version, Workflow } from "../api/types";
 import PermitDiagram from "../components/PermitDiagram";
 import { dollars, timeAgo } from "../lib/format";
 import { parseSteps } from "../lib/steps";
 import { describeSchedule, nextRunLabel } from "../lib/schedule";
 import { summarizeVersions } from "../lib/versions";
+import { useSession } from "../session";
 import "./screens.css";
 
 function RunRow({ run }: { run: Run }) {
@@ -17,6 +18,7 @@ function RunRow({ run }: { run: Run }) {
   useEffect(() => {
     if (!open || events !== null) return;
     let cancelled = false;
+    setEventsError(false);
     getRunEvents(run.id)
       .then(({ events }) => {
         if (!cancelled) setEvents(events);
@@ -82,40 +84,57 @@ function RunRow({ run }: { run: Run }) {
   );
 }
 
+// Keyed by workflow id so navigating between workflows remounts with fresh
+// state — no stale data from the previous workflow can win a fetch race.
 export default function WorkflowDetail() {
   const { id } = useParams<{ id: string }>();
+  if (!id) return null;
+  return <WorkflowDetailInner key={id} id={id} />;
+}
+
+function WorkflowDetailInner({ id }: { id: string }) {
+  const { expire } = useSession();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [versions, setVersions] = useState<Version[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
   const [firing, setFiring] = useState(false);
   const [fireError, setFireError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    const [{ workflow, versions }, { runs }] = await Promise.all([
-      getWorkflow(id),
-      listRuns(id),
-    ]);
-    setWorkflow(workflow);
-    setVersions(versions);
-    setRuns([...runs].sort((a, b) => b.created_at.localeCompare(a.created_at)));
-  }, [id]);
-
   useEffect(() => {
-    load().catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : "couldn't load");
-    });
-  }, [load]);
+    let cancelled = false;
+    Promise.all([getWorkflow(id), listRuns(id)])
+      .then(([{ workflow, versions }, { runs }]) => {
+        if (cancelled) return;
+        setWorkflow(workflow);
+        setVersions(versions);
+        setRuns([...runs].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (isAuthError(err)) {
+          expire();
+          return;
+        }
+        setError(err instanceof Error ? err.message : "couldn't load");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, refresh, expire]);
 
   async function fire() {
-    if (!id) return;
     setFiring(true);
     setFireError(null);
     try {
       await fireRun(id);
-      await load();
+      setRefresh((n) => n + 1);
     } catch (err) {
+      if (isAuthError(err)) {
+        expire();
+        return;
+      }
       setFireError(err instanceof Error ? err.message : "couldn't start a run");
     } finally {
       setFiring(false);
@@ -136,7 +155,7 @@ export default function WorkflowDetail() {
 
   const { approved, latestDraft } = summarizeVersions(versions);
   const shown = approved ?? latestDraft;
-  const steps = shown ? parseSteps(shown.steps) : [];
+  const stepsView = shown ? parseSteps(shown.steps) : null;
   const schedule = approved?.schedule;
 
   return (
@@ -174,15 +193,18 @@ export default function WorkflowDetail() {
         </p>
       )}
 
-      {steps.length > 0 && (
+      {stepsView && stepsView.steps.length > 0 && (
         <section className="wf-section">
           <div className="label">What it does{shown && !approved ? " (draft)" : ""}</div>
           <ol className="wf-steps">
-            {steps.map((s) => (
+            {stepsView.steps.map((s) => (
               <li key={s.id}>{s.text}</li>
             ))}
           </ol>
         </section>
+      )}
+      {stepsView && !stepsView.recognized && (
+        <p className="error-note">This version's steps couldn't be read.</p>
       )}
 
       {approved && (

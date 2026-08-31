@@ -78,6 +78,6 @@ describe("Login", () => {
       screen.getByRole("button", { name: /email me a sign-in link/i }),
     );
 
-    expect(await screen.findByText(/didn't send/i)).toBeInTheDocument();
+    expect(await screen.findByText(/couldn't send it \(boom\)/i)).toBeInTheDocument();
   });
 });

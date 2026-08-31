@@ -9,8 +9,17 @@ export interface Step {
   text: string;
 }
 
-export function parseSteps(doc: unknown): Step[] {
-  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) return [];
+export interface StepsView {
+  steps: Step[];
+  /** False when the document was neither decision-9 nor legacy shaped —
+   * callers must say the steps are unreadable, not render an empty list. */
+  recognized: boolean;
+}
+
+export function parseSteps(doc: unknown): StepsView {
+  if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
+    return { steps: [], recognized: false };
+  }
   const record = doc as Record<string, unknown>;
 
   if (record.v === 1 && Array.isArray(record.steps)) {
@@ -22,12 +31,12 @@ export function parseSteps(doc: unknown): Step[] {
         steps.push({ id, text });
       }
     }
-    return steps;
+    return { steps, recognized: true };
   }
 
   // Legacy compiled form: mirror the server's migration synthesis.
   if (typeof record.kickoff === "string" && record.kickoff !== "") {
-    return [{ id: "job", text: record.kickoff }];
+    return { steps: [{ id: "job", text: record.kickoff }], recognized: true };
   }
-  return [];
+  return { steps: [], recognized: false };
 }

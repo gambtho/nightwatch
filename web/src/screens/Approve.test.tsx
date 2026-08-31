@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Approve from "./Approve";
+import { SessionProvider } from "../session";
 import { mockApi } from "../test/helpers";
 
 afterEach(() => {
@@ -27,13 +28,23 @@ const draft = {
 };
 
 function renderApprove(routes: Parameters<typeof mockApi>[0]) {
-  mockApi(routes);
+  mockApi({
+    "GET /v1/me": {
+      body: {
+        user: { id: "u", email: "e", role: "owner" },
+        tenant: { id: "t", name: "dev" },
+      },
+    },
+    ...routes,
+  });
   return render(
     <MemoryRouter initialEntries={["/workflows/wf1/approve"]}>
-      <Routes>
-        <Route path="/workflows/:id/approve" element={<Approve />} />
-        <Route path="/workflows/:id" element={<div>detail page</div>} />
-      </Routes>
+      <SessionProvider>
+        <Routes>
+          <Route path="/workflows/:id/approve" element={<Approve />} />
+          <Route path="/workflows/:id" element={<div>detail page</div>} />
+        </Routes>
+      </SessionProvider>
     </MemoryRouter>,
   );
 }
@@ -103,6 +114,29 @@ describe("Approve", () => {
 
     expect(
       await screen.findByText(/nothing here is waiting for approval/i),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("Approve — unreadable steps", () => {
+  it("says the steps couldn't be read instead of hiding the section", async () => {
+    renderApprove({
+      "GET /v1/workflows/wf1": {
+        body: {
+          workflow: {
+            id: "wf1",
+            name: "weekly digest",
+            created_at: "2026-08-30T00:00:00Z",
+          },
+          versions: [{ ...draft, steps: { v: 99 } }],
+        },
+      },
+    });
+
+    expect(
+      await screen.findByText(
+        /steps couldn't be read. Don't approve what you can't see/i,
+      ),
     ).toBeInTheDocument();
   });
 });
