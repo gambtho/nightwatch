@@ -38,7 +38,7 @@ finishes, or a cross-cutting decision is taken.
 | Packaging shell (`app/`)         | **Merged as record** (#42, Wails v3 spike) — lane PAUSED by direction change 2; `app/` gets a paused banner |
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
-| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49); **K2 GO** (user, 2026-08-31) — K1 session exited, fresh-session prompt below           |
+| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49); **K2 delivered: PR #62** (live `llm:`, set-key Secret, real runtime; decisions below)  |
 | Lean-in cleanup                  | **COMPLETE AND FULLY MERGED** (#51, #52, #54, #55, #56) — the repo is onboarding-ready                     |
 | P2 — Connectors main road        | **OWNS `server/`. A MERGED (#57); B delivered: #59** (key-verify + ledger 00013; decisions below). C after #59 merges |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
@@ -123,6 +123,37 @@ bundled-DB agonizing does not apply here). One decision deliberately
 reserved for the transition design: whether the K8s shape replaces the
 server scheduler with CronJob or keeps it for admission/metering
 integration.
+
+**K2 delivered (PR #62), coordinator-accepted decisions:**
+
+- **Flat `llm:` schema**: `{kind: anthropic|openai_compatible, base_url,
+  model, secretRef}` + `local: true` as the explicit keyless marker
+  (mutually exclusive with secretRef). Diverges from K1's commented
+  nested sketch — accepted; `model` added because a chat call cannot
+  exist without one.
+- **Key path**: `tomtectl set-key` reads from stdin only (hidden TTY
+  prompt or pipe — never argv/env), writes the Secret named by
+  `spec.llm.secretRef` with the ownership-label gate; injected as env via
+  secretKeyRef; `up` pre-flights Secret existence; `down` leaves the
+  Secret in place.
+- **One runtime binary, one image, two modes** (`cmd/agent-runtime`,
+  same module, shares the strict parser; its `stub` subcommand serves
+  the e2e's OpenAI-compatible endpoint reading the SAME Secret — the e2e
+  proves the Secret round trip on both ends). Image `tomte-agent:0.2.0`,
+  no registry published — **release/registry is an open question, not
+  K2's**.
+- **Three review-found hardenings, board memory**: (a) Go's redirect
+  policy strips `Authorization` on cross-host hops but NOT `x-api-key` —
+  the anthropic path could have leaked the key to a redirect target; the
+  runtime client now refuses redirects outright. (b) A keyed agent
+  refuses to call out unauthenticated even if a ConfigMap edit adds
+  secretRef to a pod started without the key env. (c) Keyed plain-http
+  only for loopback or explicit `.svc`/`.svc.cluster.local` hosts — a
+  bare single-label service name is rejected (resolver search domains
+  could route it off-cluster with the key in cleartext).
+- **Owed to the user**: the real-endpoint path (Anthropic, pasted key)
+  is documented but not hand-verified — no live key in the session; one
+  manual run requested.
 
 ## Lean-in cleanup (2026-08-31): onboarding-ready repo
 
