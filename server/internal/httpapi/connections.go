@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -33,7 +34,16 @@ func (d Deps) putConnection(w http.ResponseWriter, r *http.Request) {
 		Provider string `json:"provider"`
 		Value    string `json:"value"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Provider == "" || body.Value == "" || name == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and value required"})
+		return
+	}
+	if body.Provider == "" || body.Value == "" || name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider and value required"})
 		return
 	}

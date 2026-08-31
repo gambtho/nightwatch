@@ -31,11 +31,9 @@ func (f *fakeAuth) VerifyRunToken(ctx context.Context, bearer string) (proxy.Run
 type fakePermits struct {
 	permit permit.Permit
 	err    error
-	calls  int
 }
 
 func (f *fakePermits) PermitForRun(ctx context.Context, tenantID, runID uuid.UUID) (permit.Permit, error) {
-	f.calls++
 	return f.permit, f.err
 }
 
@@ -191,6 +189,7 @@ func TestPermitSourceFailureFailsClosed(t *testing.T) {
 	e.permits.err = errors.New("db down")
 	resp := doAnthropic(t, e, "tok")
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Contains(t, e.events.events, "proxy.denied")
 }
 
 func TestForwardInjectsCredentialAndStrips(t *testing.T) {
@@ -313,6 +312,7 @@ func TestHookErrorChoosesStatus(t *testing.T) {
 
 	resp := doAnthropic(t, e, "tok")
 	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	require.Contains(t, e.events.events, "proxy.denied")
 }
 
 func TestCredentialFailureIs500WithEvent(t *testing.T) {
@@ -361,4 +361,45 @@ func TestInternalPassthrough(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	require.Equal(t, "/internal/runs/abc/events", gotPath)
 	require.Equal(t, "Bearer run-token", gotAuthz) // bearer forwarded; internal API re-auths it
+}
+
+// TestInternalPassthroughRestrictedToInternalPrefix proves the pass-through
+// cannot be used to reach anything else on the control plane's own origin —
+// InternalBase is the server's own baseURL, so an unrestricted relay would
+// let a run token reach the public /v1 API, or recurse into
+// /proxy/internal/... itself.
+func TestInternalPassthroughRestrictedToInternalPrefix(t *testing.T) {
+	var hit bool
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(origin.Close)
+
+	e := &env{
+		auth:    &fakeAuth{},
+		permits: &fakePermits{},
+		creds:   &fakeCreds{},
+		events:  &fakeEvents{},
+	}
+	cfg := proxy.DefaultConfig()
+	cfg.InternalBase = origin.URL
+	mux := http.NewServeMux()
+	proxy.RegisterRoutes(mux, proxy.Deps{Auth: e.auth, Permits: e.permits,
+		Credentials: e.creds, Events: e.events, Hook: proxy.NopHook{}, Config: cfg})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	for _, path := range []string{
+		"/proxy/internal/v1/workflows",
+		"/proxy/internal/proxy/internal/runs/abc/events",
+	} {
+		req, err := http.NewRequestWithContext(context.Background(), "GET", ts.URL+path, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, path)
+	}
+	require.False(t, hit, "restricted path must never reach the origin")
 }

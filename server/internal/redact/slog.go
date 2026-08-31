@@ -39,8 +39,12 @@ func (h Handler) redactAttrs(attrs []slog.Attr) []slog.Attr {
 }
 
 func (h Handler) redactAttr(a slog.Attr) slog.Attr {
-	if a.Value.Kind() == slog.KindString {
+	switch a.Value.Kind() {
+	case slog.KindString:
 		return slog.String(a.Key, h.R.Redact(a.Value.String()))
+	case slog.KindGroup:
+		return slog.Attr{Key: a.Key, Value: slog.GroupValue(h.redactAttrs(a.Value.Group())...)}
+	default:
+		return a
 	}
-	return a
 }

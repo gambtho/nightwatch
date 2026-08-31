@@ -135,6 +135,14 @@ func newDoHelper(t *testing.T, base string, cookie *http.Cookie) func(method, pa
 // Authorization slot, injects the platform key, and forwards to a fake
 // OpenAI upstream.
 func TestEndToEndRunThroughProxy(t *testing.T) {
+	// Pins the SDK-env-autoload isolation property that Task 10's wiring
+	// otherwise rests on a comment: the pinned openai-go SDK auto-loads
+	// OPENAI_API_KEY from the environment into client options if present.
+	// If that ever crept back into a real credential, this proves it is
+	// never used — the injected platform key below is what must reach
+	// upstream, not this one.
+	t.Setenv("OPENAI_API_KEY", "sdk-must-not-see-this")
+
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
 

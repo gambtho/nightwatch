@@ -39,3 +39,10 @@ func TestConnectionPutValidation(t *testing.T) {
 	resp, _ = e.do(t, "PUT", "/v1/connections/default", map[string]any{"provider": "anthropic", "value": ""})
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+func TestConnectionPutOversizedBodyIs413(t *testing.T) {
+	e := newEnv(t)
+	resp, _ := e.do(t, "PUT", "/v1/connections/default",
+		map[string]any{"provider": "anthropic", "value": strings.Repeat("x", 2<<20)})
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
