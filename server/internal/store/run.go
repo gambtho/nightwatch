@@ -254,10 +254,14 @@ func (s *Store) ListStuckRuns(ctx context.Context, cutoff time.Time) ([]Run, err
 }
 
 func (s *Store) MonthSpendCents(ctx context.Context, tenantID uuid.UUID, monthStart time.Time) (int, error) {
+	// Run costs plus the non-run ledger (spend_entry): the budget bounds
+	// everything the product spends from the user's key, not just runs.
 	var cents int
 	err := s.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(cost_cents), 0) FROM run
-		 WHERE tenant_id = $1 AND finished_at >= $2 AND cost_cents IS NOT NULL`,
+		`SELECT COALESCE((SELECT SUM(cost_cents) FROM run
+		    WHERE tenant_id = $1 AND finished_at >= $2 AND cost_cents IS NOT NULL), 0)
+		  + COALESCE((SELECT SUM(cost_cents) FROM spend_entry
+		    WHERE tenant_id = $1 AND created_at >= $2), 0)`,
 		tenantID, monthStart).Scan(&cents)
 	return cents, err
 }
