@@ -1,3 +1,7 @@
+> Historical (2026-08-31): the Substrate thread was closed by the pivot to
+> customer-deployed Tomte; the spike's value was extracted into the platform
+> spec corrections and [the board](../superpowers/plans/2026-08-31-parallel-sessions.md).
+
 # Agent Substrate — Verification Spike
 
 **Date:** 2026-08-30

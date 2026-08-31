@@ -1,3 +1,8 @@
+> Historical (2026-08-31): the Substrate thread was closed by the pivot to
+> customer-deployed Tomte — see
+> [the pivot spec](../superpowers/specs/2026-08-31-tomte-pivot-design.md).
+> Kept as a record of the hosted-era analysis.
+
 # How Nightshift runs while everyone sleeps
 
 **Technical briefing for leadership review · August 2026**

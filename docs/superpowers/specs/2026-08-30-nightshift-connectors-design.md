@@ -1,3 +1,7 @@
+> Amended (2026-08-31): the OAuth machinery designed here was removed in P1;
+> the API-key/token-capture road continues as queue item P2. Read through
+> [the pivot spec](./2026-08-31-tomte-pivot-design.md) ("Credentials without OAuth").
+
 # Nightshift Connector Catalog — Design
 
 **Status:** Design approved in conversation; spec awaiting review

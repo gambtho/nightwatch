@@ -1,3 +1,7 @@
+> Superseded in part (2026-08-31): magic-link login, signup, and mail were
+> removed in P1; the session core survives. See the pivot spec's "Identity at
+> its floor" — [2026-08-31-tomte-pivot-design.md](./2026-08-31-tomte-pivot-design.md).
+
 # Nightshift Identity + Onboarding — Design
 
 **Status:** Design proposed; not yet planned or built
