@@ -203,16 +203,16 @@ Substrate supplies **isolation and lifecycle only**. It is deliberately harness-
 and has no notion of budgets, credentials, scheduling, versioning, or grading. So
 everything this design treats as a governance guarantee is **ours to build**:
 
-| Nightshift concept                            | Where it is enforced                                                                                                                                                               |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What it may reach, and with which credentials | An **egress proxy we operate**. Actors get no direct egress; the proxy holds the permit and substitutes credentials at the boundary, so no customer credential enters the sandbox. |
-| Which tools it may use                        | The harness, bounded by the proxy.                                                                                                                                                 |
-| Spend cap                                     | Our metering, checked before each model request.                                                                                                                                   |
-| Isolation                                     | Substrate — gVisor or microVM, with state reset between actors.                                                                                                                    |
-| Schedule                                      | Our scheduler.                                                                                                                                                                     |
-| Proof it ran                                  | Run records **pushed** by the harness — Substrate exposes no log or event API.                                                                                                     |
-| Change control                                | Our workflow versioning, coupled to Substrate's immutable ActorTemplates.                                                                                                          |
-| Rule grading                                  | Our grader. This is what lets an alert name a _specific broken promise_.                                                                                                           |
+| Nightshift concept                            | Where it is enforced                                                                                                                                                                       |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| What it may reach, and with which credentials | An **egress proxy we operate**. Actors get no direct egress; the proxy holds the permit and substitutes credentials at the boundary, so no customer credential enters the sandbox.         |
+| Which tools it may use                        | The harness, bounded by the proxy.                                                                                                                                                         |
+| Spend cap                                     | Our metering, checked before each model request.                                                                                                                                           |
+| Isolation                                     | Substrate — gVisor or microVM, with state reset between actors.                                                                                                                            |
+| Schedule                                      | Our scheduler.                                                                                                                                                                             |
+| Proof it ran                                  | Run records **pushed** by the harness — Substrate exposes no log or event API.                                                                                                             |
+| Change control                                | Our workflow versioning, entirely in our database (corrected 2026-08-31: ActorTemplates map to harness releases, not workflow versions — see the platform spec's governance primitive #8). |
+| Rule grading                                  | Our grader. This is what lets an alert name a _specific broken promise_.                                                                                                                   |
 
 Two consequences the UX must not paper over:
 
