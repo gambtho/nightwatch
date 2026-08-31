@@ -1,5 +1,5 @@
-// Package harness is the agent loop that executes one run. It is the code
-// that will later live inside a Substrate actor, which is why it reports
+// Package harness is the agent loop that executes one run. It must stay
+// hostable inside any compute implementation, which is why it reports
 // results only through its Sink (run records are pushed, never pulled) and
 // receives everything else through Input and Deps.
 //

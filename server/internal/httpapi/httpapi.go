@@ -37,9 +37,9 @@ type Deps struct {
 	Catalog *catalog.Catalog
 }
 
-// Platform run-model defaults, used when the env leaves the choice to us:
-// the cheapest priced Anthropic pair. Per-tenant override is a
-// designed-for seam, not built.
+// Platform run-model defaults: the cheapest priced Anthropic pair. Used
+// only in legacy env mode (no endpoint record, env leaves the choice to
+// us); a configured endpoint decides provider and model itself.
 const (
 	DefaultRunProvider = "anthropic"
 	DefaultRunModel    = "claude-haiku-4-5"

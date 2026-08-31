@@ -63,7 +63,7 @@ func TestFireRunRequiresApprovedVersion(t *testing.T) {
 	require.NotEmpty(t, e.compute.invokes[0].RunToken)
 
 	// The run is visible through the read endpoints.
-	resp, out = e.do(t, "GET", "/v1/runs/"+run["id"].(string), nil)
+	resp, _ = e.do(t, "GET", "/v1/runs/"+run["id"].(string), nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp, out = e.do(t, "GET", fmt.Sprintf("/v1/workflows/%s/runs", id), nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode)

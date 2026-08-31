@@ -138,14 +138,14 @@ func newDoHelper(t *testing.T, base string, cookie *http.Cookie) func(method, pa
 	}
 }
 
-// TestEndToEndRunThroughProxy proves the Plan 2 invariant: a run completes
+// TestEndToEndRunThroughProxy proves the proxy invariant: a run completes
 // with ZERO credentials in the harness. The real ported openai provider is
 // pointed at the proxy; the proxy authenticates the run token from the
 // Authorization slot, injects the platform key, and forwards to a fake
 // OpenAI upstream.
 func TestEndToEndRunThroughProxy(t *testing.T) {
-	// Pins the SDK-env-autoload isolation property that Task 10's wiring
-	// otherwise rests on a comment: the pinned openai-go SDK auto-loads
+	// Pins the SDK-env-autoload isolation property that the harness
+	// wiring otherwise rests on a comment: the pinned openai-go SDK auto-loads
 	// OPENAI_API_KEY from the environment into client options if present.
 	// If that ever crept back into a real credential, this proves it is
 	// never used — the injected platform key below is what must reach

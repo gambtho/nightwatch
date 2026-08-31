@@ -130,13 +130,13 @@ func (h *handler) llm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) internal(w http.ResponseWriter, r *http.Request) {
-	h.passthrough(w, r) // Task 7
+	h.passthrough(w, r)
 }
 
 func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider string, route ProviderRoute, id RunIdentity, p permit.Permit, ep *endpoint.Endpoint) {
 	if err := h.d.Hook.Before(r.Context(), HookRequest{Identity: id, Provider: provider}); err != nil {
-		// The typed HookError picks 403 vs 429 (Plan 3 metering); anything
-		// else fails closed as 403.
+		// The typed HookError picks 403 vs 429 (the meter's spend
+		// denials); anything else fails closed as 403.
 		status := http.StatusForbidden
 		var he HookError
 		if errors.As(err, &he) && (he.Status == http.StatusForbidden || he.Status == http.StatusTooManyRequests) {
