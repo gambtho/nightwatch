@@ -72,8 +72,8 @@ An MCP server reached over streamable HTTP, from one of two origins:
   full canonicalization and probe pipeline below.
 
 Either way the result is a per-tenant `mcp_server` row (id, tenant, canonical
-URL, auth mode, discovered-tools snapshot) — remote servers are tenant state,
-not shared catalog content. Its "operations" are whatever `tools/list`
+URL, auth mode) plus **immutable discovered-tools snapshot revisions** (see
+Discovery) — remote servers are tenant state, not shared catalog content. Its "operations" are whatever `tools/list`
 reports; we cannot author or verify them, every rendering surface labels them
 as unverified, and the permit treats them at tool-name granularity.
 
@@ -96,8 +96,14 @@ The stale-permit risk gets a stated policy instead of machinery:
   tightening, added constraint). Anything that widens reach — new host, new
   method, loosened constraint — ships as a **new op name**, which no approved
   permit contains until a re-approved version lists it.
+- **The narrow-only rule is enforced mechanically, not by convention:** a CI
+  check diffs the embedded catalog against the previous commit and fails on
+  any reach-widening edit to an existing op (host, method, path template,
+  removed constraint, loosened arg schema). Policy backed by a gate, matching
+  the repo's immutable-version posture.
 - The permit records the catalog build version at approval time for audit;
-  enforcement always uses the running catalog.
+  enforcement always uses the running catalog, which the CI gate guarantees
+  is never wider than what was approved.
 
 ## Permit `connections` — the reserved map, defined
 
@@ -118,7 +124,8 @@ connector ids for curated entries and `mcp:{server-uuid}` for remote servers:
     "mcp:7f3a2c10-…": {
       "kind": "remote_mcp",
       "connection": "default",
-      "tools": ["search_tickets", "get_ticket"]
+      "tools": ["search_tickets", "get_ticket"],
+      "snapshot": "sha256:9c41…"
     }
   }
 }
@@ -134,6 +141,10 @@ Validation stays in `permit.Parse`, same fail-closed style as v1:
   the running catalog with every listed op present, and every `mcp:` key must
   name an `mcp_server` row belonging to the tenant. A permit cannot reference
   a connector that does not exist.
+- Each `remote_mcp` entry carries a required `snapshot` — the content hash of
+  the discovered-tools snapshot revision the permit was approved against; the
+  named revision must exist for that server, and every listed tool must
+  appear in it.
 - Existing approved permits (`connections` absent or empty) parse unchanged.
 
 `connection` names the vault credential per entry with the same `"default"`
@@ -151,8 +162,13 @@ forward streaming → append event. Fail closed at every step.
 
 ```
 /proxy/connector/{connector}/{op}     curated op invocation (POST, JSON args)
-/proxy/mcp/{serverID}/{path...}       remote MCP pass-through (JSON-RPC)
+/proxy/mcp/{serverID}                 remote MCP pass-through (JSON-RPC)
 ```
+
+The MCP route carries **no path remainder**: the proxy forwards every request
+to the registered server's exact canonical endpoint URL, mirroring the LLM
+routes' one-exact-tuple posture (`server/internal/proxy/handler.go:82-89`). A
+harness cannot steer a request to another path on the approved origin.
 
 Differences from the LLM routes:
 
@@ -170,12 +186,15 @@ Differences from the LLM routes:
   header placement replaces the current hard-coded provider switch in
   `forward`), and forwards. The harness never constructs upstream URLs.
 - **Authorize, remote MCP.** The JSON-RPC envelope is parsed under a 64 KiB
-  scan cap: batch requests rejected, unparseable envelopes rejected,
-  non-tool methods rejected. `initialize`, `tools/list`, `ping`, and client
-  `notifications/*` pass; `tools/call` requires `params.name` in the permit's
-  tool allowlist. The proxy forwards `Mcp-Session-Id` and SSE responses
-  untouched — it parses the envelope for enforcement but is not a stateful
-  MCP participant.
+  scan cap: batch requests rejected, unparseable envelopes rejected. Allowed
+  methods are an **exhaustive enumeration** — `initialize`, `tools/list`,
+  `tools/call`, `ping`, `notifications/initialized`,
+  `notifications/cancelled` — and nothing else; there is no
+  `notifications/*` wildcard, so a vendor-defined notification with side
+  effects is 403 like any other unknown method. `tools/call` additionally
+  requires `params.name` in the permit's tool allowlist. The proxy forwards
+  `Mcp-Session-Id` and SSE responses untouched — it parses the envelope for
+  enforcement but is not a stateful MCP participant.
 - **Hook widening.** `HookRequest` gains optional `Connector`/`Op` fields
   (additive), so Plan 3 metering can price tool calls without reopening the
   proxy. `Provider` stays for LLM routes.
@@ -241,6 +260,21 @@ domain).
   `CredentialSource.Credential(ctx, tenantID, name, provider)` survives with
   its signature intact.
 
+### Capturing static secrets (`api_key`)
+
+OAuth is not the only capture path. The existing write endpoint hard-codes
+`kind = "llm_api_key"` (`server/internal/httpapi/connections.go:29-61`), so it
+**widens**: `PUT /v1/connections/{name}` gains an optional `kind` in the body
+(default `llm_api_key`, for compatibility) and accepts `api_key` with a
+`provider` of `mcp:{server-uuid}` — this is how a remote MCP server's bearer
+secret is stored. Registering an MCP server with `auth: api_key` and no
+matching connection is accepted but the server is unusable until the secret
+arrives; `GET /v1/catalog` shows the missing-credential state. Connection
+identity is **always provider-qualified** — the unique key is
+`(tenant_id, provider, name)` and every route that names a connection takes
+the provider (the existing `DELETE …?provider=` shape), so `{name}` alone is
+never ambiguous.
+
 ### Connect flow (platform apps)
 
 - `POST /v1/connections/oauth/{connector}/start` (session-authed) → provider
@@ -263,9 +297,14 @@ domain).
 
 At injection time, if the access token is within a 60-second expiry skew, the
 proxy refreshes before forwarding — under a per-connection singleflight plus
-a Postgres advisory lock keyed on the connection id, so concurrent runs (or
-proxy replicas) do not race a rotating refresh token. The new bundle is
-persisted before use. This is the one place the vault gains a **write on the
+a **transaction-scoped** Postgres advisory lock keyed on the connection id,
+so concurrent runs (or proxy replicas) do not race a rotating refresh token.
+The expiry decision made before the lock is **discarded on acquisition**: the
+holder re-reads the connection inside the transaction and re-checks — if a
+winner already refreshed, it uses the stored bundle and refreshes nothing; if
+the row is gone or marked `needs_reauth`, it fails the tool call rather than
+retrying with a stale (possibly rotated) refresh token. The new bundle is
+persisted in the same transaction that holds the lock, before use. This is the one place the vault gains a **write on the
 proxy request path** — stated plainly, extending the parent spec's
 decrypt-only claim. Refresh failure, or an upstream 401 on a request, marks
 the connection `needs_reauth`, fails the tool call as a **tool-level error**
@@ -274,8 +313,9 @@ the connection `needs_reauth`, fails the tool call as a **tool-level error**
 
 ### Revocation
 
-`DELETE /v1/connections/{name}` calls the provider's revoke endpoint
-best-effort, then deletes the row. In-flight runs lose the credential on
+`DELETE /v1/connections/{name}?provider=…` (provider-qualified, matching the
+existing API shape) calls the provider's revoke endpoint best-effort for
+`oauth` kinds, then deletes the row. In-flight runs lose the credential on
 their next request — consistent with the parent spec's "nothing outlives the
 database check". Provider-side revocation (a user revoking from Google's
 security page) surfaces as the 401 → `needs_reauth` path above.
@@ -292,13 +332,19 @@ security page) surfaces as the 401 → `needs_reauth` path above.
   the row exists.
 - **`POST /v1/mcp-servers/{id}/refresh-tools`** runs `initialize` +
   `tools/list` via a **control-plane MCP client** — session-authed, not the
-  run-token proxy path, same hardened dialer — and stores the snapshot.
-  Build-time discovery is not a run and must not be reachable with a run
-  token.
-- The permit pins tool names at approval. A vendor adding tools changes
-  nothing until a new version is approved (unknown names are 403 regardless);
-  a vendor removing a tool surfaces as tool-level errors, never as silent
-  widening.
+  run-token proxy path, same hardened dialer — and stores a **new immutable
+  snapshot revision** (content-hashed; prior revisions are kept while any
+  approved permit pins them). Build-time discovery is not a run and must not
+  be reachable with a run token.
+- **The permit pins a snapshot revision at approval, not just tool names.**
+  Run-context tool projection reads the pinned revision, so a refresh can
+  never change the schema or description an approved workflow's model sees —
+  adopting a newer revision requires a new approved version, mirroring the
+  repo's immutable-version model (`store.VersionDoc`,
+  `workflow_version.status`). A vendor adding tools changes nothing until
+  re-approval (unknown names are 403 regardless); a vendor removing or
+  breaking a tool surfaces as tool-level errors at call time, never as
+  silent widening.
 
 ## Harness — the tool loop and the transport rework
 
@@ -319,10 +365,20 @@ proxy routes.
   default 20 (per-workflow override is a later feature).
 - **`GET /internal/runs/{id}/context` grows a `tools` array**: tool
   definitions **server-derived** from the approved permit joined with the
-  catalog (curated `args_schema`) and the MCP snapshots (remote tool
-  schemas). The harness stays a dumb executor: it never sees the permit,
+  catalog (curated `args_schema`) and the permit-pinned snapshot revisions
+  (remote tool schemas). The harness stays a dumb executor: it never sees the permit,
   never holds a credential, and cannot grant itself a tool the control plane
   did not project.
+- **The provider contract widens to carry tool errors.** Today a tool-result
+  message is content plus a tool-use id (`server/internal/llm/provider.go:23-29`),
+  and the Anthropic adapter hard-codes `is_error: false`
+  (`server/internal/llm/anthropic.go:121-124`) — so "tool-level errors return
+  to the model" is an **interface change, not free**: the tool-result message
+  gains an explicit `IsError`, mapped to Anthropic's `tool_result.is_error`
+  and, for providers with no error flag (OpenAI-shaped APIs), to a stated
+  error-prefix convention in the result content. Denials, refresh failures,
+  and upstream connector errors all set it; without this they would present
+  to the model as successful results.
 - Run events mirror the harvested vocabulary: `tool.call.ok` /
   `tool.call.fail` with tool name and duration only — no args, no results.
 
@@ -342,8 +398,14 @@ the run. Unknown/finalized run tokens → 401, unchanged.
 
 - **Enforcement matrix, per kind:** op not in permit; constraint miss;
   unknown connector; args failing schema; tool not in allowlist; batch and
-  oversized envelopes; non-tool MCP methods — every one 403 + a recorded
-  `proxy.denied`.
+  oversized envelopes; any MCP method outside the enumerated set (including
+  vendor-defined notifications) — every one 403 + a recorded `proxy.denied`;
+  and the MCP route reaches only the registered endpoint URL regardless of
+  request path.
+- **Snapshot pinning:** after a `refresh-tools` that changes a tool's schema,
+  a run fired from a previously approved version still projects the pinned
+  revision's schemas; adopting the new revision requires a re-approved
+  version.
 - **SSRF suite** with a fake resolver: rebinding flip between check and dial
   (must be inert — the dial is pinned); metadata IP; v4-mapped v6 private
   ranges; IP-literal registration; redirect relayed not followed; TLS name
