@@ -172,7 +172,11 @@ than a required deploy-time value.
    connectors use.
 2. The key is **verified with one live, minimal call** through the proxy
    path before anything else is asked. A bad paste fails here, not at the
-   first 3 AM run.
+   first 3 AM run. The budget is set one step later, so this call is not
+   cap-covered — instead it is **disclosed and metered**: the screen names
+   it before it happens ("we'll make one tiny test call — well under a cent,
+   on your key"), and its cost is recorded so it counts against the month
+   once the budget exists.
 3. **Set a monthly budget** — one number, suggested default, explained as
    "how much Tomte may spend from your key per month" (see Metering).
 4. Land in the **build conversation**. No email, no account, no login —
@@ -189,7 +193,14 @@ than a required deploy-time value.
   separate operator command on this path. Before applying migrations, the
   shell takes a **backup** (`pg_dump` to the state dir, rotated, last 3
   kept) — the data is one user's rows, so this costs nothing and turns a
-  failed migration into a restore instead of a support case.
+  failed migration into a restore instead of a support case. The restore
+  path is defined, not implied: on migration failure the shell restores the
+  pre-migration dump and relaunches the **previous app version** (staged
+  updates keep the prior binary until the first successful post-migration
+  start), notifying the user; the failed update is marked so auto-update
+  does not retry it into a restore loop — the next attempt waits for a
+  newer release. A restore that itself fails is the unrecoverable case, and
+  the app says so plainly, naming the backup's on-disk location.
 - **The catalog gate matters more, not less**: the narrow-only rule
   (connectors spec) is what makes silent auto-update compatible with
   approve-once — an update may never widen what an approved permit means.
@@ -208,7 +219,12 @@ One per-user application-data directory
 - `config` — endpoint choice, budget, autostart, listen port. Non-secret.
 - `backups/` — rotated pre-migration dumps.
 - Secrets never live here in plaintext: the master key is in the keychain;
-  everything the vault holds is encrypted under it exactly as today.
+  everything the vault holds is encrypted under it exactly as today. **One
+  named exception**: on Linux without a Secret Service, the master key's
+  0600 fallback file lives in this directory — the root of trust is then a
+  file, stated honestly rather than hidden behind a wrapping key that would
+  itself have to live beside it. Vault contents in the database stay
+  encrypted regardless; the claim that narrows is where the root key rests.
 
 ## The sleeping machine
 
@@ -284,9 +300,16 @@ One install, one user. What survives, what dies:
 - **The shell mints the session.** At launch, the shell inserts a session
   row (the `dev-session` mechanism generalized into a `local-session` path
   inside the server library — not a CLI) and injects the cookie into the
-  webview. "Open in browser" from the tray mints a fresh one-time session
-  URL on loopback. Sessions keep their idle/absolute expiry; re-mint at
-  launch makes expiry invisible to the user.
+  webview. "Open in browser" from the tray mints a **single-use, short-TTL
+  handoff token**: the browser opens `/local/handoff?token=…`, the server
+  atomically consumes the token (the `login_token` single-use shape, minus
+  the email), sets the session cookie, and redirects — the token is dead
+  after one exchange or one minute, whichever comes first, and
+  `RequireSession` stays on every normal API route; nothing unauthenticated
+  exists beyond that one exchange. Sessions keep their idle/absolute
+  expiry; the shell re-mints at launch **and on every window (re)open**
+  when the session is missing or expired, so a long-idle tray app never
+  serves the window a 401 and expiry stays invisible to the user.
 - **Dies — login as a surface.** The email form, magic-link request/verify
   endpoints, the interstitial, `login_token` and its sweep, enumeration
   defenses, rate budgets: removed, with a migration dropping `login_token`.
@@ -396,7 +419,8 @@ connectors spec designed for user-controlled destinations applies unchanged
   first-run-generated secret in the **OS keychain**, handed to the server by
   the shell at boot; `TOMTE_VAULT_KEY` survives as the dev/headless path;
   Linux without a Secret Service falls back to a 0600 file in the state
-  dir. The KEK layer's multi-tenant rationale is gone; it is kept because
+  dir — the named exception to the no-plaintext-at-rest claim (see "Where
+  state lives"). The KEK layer's multi-tenant rationale is gone; it is kept because
   removing it is churn, not because it earns anything.
 - **Per-run and per-workflow caps stay exactly as approved** — they are the
   diagram's spend line and the product's spend story
@@ -425,7 +449,12 @@ plus one vault connection:
 - `{kind: "anthropic" | "openai_compatible", base_url, connection}` — the
   three presets are fixed base URLs; "another service" and "on this
   computer" are `openai_compatible` with a user-entered base URL. The key
-  is a vault `llm_api_key` connection, as today.
+  is a vault `llm_api_key` connection, as today. A `local` endpoint carries
+  **no connection at all**: the proxy skips credential resolution and
+  injection for it and forwards without an auth header — the permit's
+  `llm.connection` resolution must tolerate an endpoint with no credential
+  rather than fail a lookup that cannot succeed, a contract worth its own
+  test.
 - The proxy's per-provider fixed upstream host becomes the **endpoint
   record's host** — still resolved proxy-side, still never model-authored
   (the harness names a provider, never a URL). The base URL is validated at
@@ -436,6 +465,16 @@ plus one vault connection:
   **out of scope v1** — one endpoint, switchable in settings. The permit's
   `llm.providers` allowlist and `llm.connection` survive unchanged and keep
   the door open.
+- **Switching endpoints is a governance act, not a silent setting.**
+  Approve-once means the user approved spend and behavior against a
+  particular endpoint, so approval records the endpoint identity (the
+  canonical base URL) on the version for audit, and the settings switch is
+  an explicit confirmation naming what changes ("your 3 workflows will now
+  run against …"), recorded as an event. Before the switch completes, the
+  pricing gate re-runs for every approved version's compiled
+  (provider, model) against the new endpoint — an unpriced pair gets the
+  price form at switch time, not a failed 3 AM run. Per-run caps and the
+  budget bound spend on the new endpoint exactly as before.
 
 ### The priced-pair gate, reworked
 
@@ -449,13 +488,22 @@ gate's purpose (no silent unmetered spend) survives; the dead end does not:
 2. **User-entered price** — for an unpriced model on a remote endpoint, the
    approval surface offers an inline two-number form (\$ per million tokens
    in / out, with a link to the provider's pricing page) instead of
-   refusing. The entered price is stored per (provider, model) in local
-   config and feeds `CostCents` exactly as a bundled row would. Approval
+   refusing. The entered price is stored per **(endpoint, model)** — keyed
+   by the endpoint's canonical base URL, so a custom endpoint can never
+   inherit a price entered for a different one, and switching endpoints
+   re-asks instead of silently reusing — and feeds `CostCents` exactly as a
+   bundled row would (bundled rows stay keyed (provider, model) for the
+   presets). Approval
    still does not proceed without a price for remote endpoints — the gate
    holds; the fix moved from "impossible" to "one form".
-3. **Local endpoints are \$0 by construction** — a loopback base URL marks
-   the endpoint `local`; runs record zero cost, the spend line renders
-   "runs on your computer — free", and the pricing gate does not apply.
+3. **Local endpoints are \$0 by explicit classification, not inference** —
+   choosing the "on this computer" preset marks the endpoint `local`. The
+   preset requires a loopback base URL, but a loopback URL alone never
+   implies `local` (a tunnel or proxy to a paid service can sit on
+   localhost): a custom "another service" endpoint stays on the normal
+   priced, budget-counted path regardless of its host. On a `local`
+   endpoint, runs record zero cost, the spend line renders "runs on your
+   computer — free", and the pricing gate does not apply.
    `max_tokens` derivation (steps v1 compiler) falls back to a fixed
    default instead of a price-derived one.
 
