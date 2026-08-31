@@ -149,6 +149,33 @@ scheduler/reaper/meter wiring in `serve()` (do not displace it),
 > gambtho identity; prettier), PR to main. **Spec only; no `server/` or
 > `deploy/` changes yet.**
 
+## Delta sheet: notes for the escalation implementation
+
+From the delegation-specs session, verified against `main` @ b7af659 after
+Plan 3 merged (2026-08-31):
+
+- **Amendment 2 is done** — the reaper keys off
+  `COALESCE(dispatched_at, created_at)` (`store/run.go:239`); a suspended
+  run that resumes days after creation is no longer reaped on sight.
+- **Amendments 1 and 3 remain open by design**: the
+  `run_one_active_per_workflow` index predicate still reads
+  `status IN ('pending','running')` (must gain `awaiting_input`), and
+  `engine.Fire` does not check `workflow.status` (must fire only `active`
+  once objectives add that column). Both land with the escalation /
+  objectives implementations.
+- **Two store guards block escalation resume as written** (correct for
+  Plan 3, must be widened — not relaxed — by escalation):
+  - `MarkRunDispatched` updates `WHERE dispatched_at IS NULL` and returns
+    `ErrNotFound` if already stamped; resume must re-stamp `dispatched_at`.
+  - `ResetRunToken` requires `status = 'pending' AND dispatched_at IS NULL`;
+    a resumed run satisfies neither, but needs a fresh token because
+    suspension clears `runner_token_hash`.
+  - The right generalization: both guards exist to ensure **no live token
+    holder** when the token swap happens. "Never dispatched" implies that
+    today; "suspended with the hash cleared" implies it equally. Widen the
+    predicates to state the no-token-holder invariant directly rather than
+    dropping them.
+
 ## Also owed eventually
 
 - Connector implementation plan (after identity lands; written against
