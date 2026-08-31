@@ -235,8 +235,13 @@ replaces them.
 
 - **Tracking task: upstream `EgressPolicy` enforcement.** The per-actor API landed
   2026-08-28 (unenforced); the gateway, per-actor identity certs, and MITM
-  credential-injection stack are all in place waiting to consume it, so enforcement is
-  plausibly imminent. Convergence plan: **keep our permit compilable to upstream's
+  credential-injection stack are all in place waiting to consume it, and upstream is
+  actively designing policy delivery under
+  [agent-substrate/substrate#1325](https://github.com/agent-substrate/substrate/issues/1325)
+  ("Egress policy readiness", opened 2026-08-30 by a maintainer, with sub-issues for
+  extension points, policy delivery to enforcement points, and template default
+  policy) — gateway-side enforcement is maintainer-claimed and mid-design. Our proxy
+  remains the guarantee for now. Convergence plan: **keep our permit compilable to upstream's
   `EgressPolicy`** (hostname/CIDR first-match plus header injection) and avoid semantics
   theirs cannot express (e.g. per-path rules) unless the product demands them. If
   enforcement ships, the proxy becomes defence in depth or migrates to programming
