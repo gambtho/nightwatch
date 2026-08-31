@@ -241,11 +241,14 @@ replaces them.
   ("Egress policy readiness", opened 2026-08-30 by a maintainer, with sub-issues for
   extension points, policy delivery to enforcement points, and template default
   policy) — gateway-side enforcement is maintainer-claimed and mid-design. Our proxy
-  remains the guarantee for now. Convergence plan: **keep our permit compilable to upstream's
-  `EgressPolicy`** (hostname/CIDR first-match plus header injection) and avoid semantics
-  theirs cannot express (e.g. per-path rules) unless the product demands them. If
-  enforcement ships, the proxy becomes defence in depth or migrates to programming
-  `EgressPolicy`.
+  remains the guarantee for now. Convergence plan: keep the permit's **host-level
+  floor** compilable to upstream's `EgressPolicy` (hostname/CIDR first-match plus header
+  injection). Per-operation and per-path rules and credential injection are
+  application-layer and stay ours permanently — the connectors design already requires
+  them, so that is a settled property rather than a constraint to avoid. If upstream
+  enforcement ships it replaces the floor beneath the proxy — our authored
+  NetworkPolicies, eventually the masquerade residual — not the proxy itself. The proxy
+  has no expiry date; it has a shrinking lower half. The open part is timing, not shape.
 - ~~**GCS dependency for snapshots** — a cloud coupling inherited from Substrate.
   Acceptable?~~ **Dissolved 2026-08-30:** storage is pluggable (GCS or S3); the project
   itself runs dev on an in-cluster S3 store. Snapshot GC is ours to operate.
