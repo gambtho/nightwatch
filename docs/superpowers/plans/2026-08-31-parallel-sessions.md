@@ -38,7 +38,7 @@ finishes, or a cross-cutting decision is taken.
 | Packaging shell (`app/`)         | **Merged as record** (#42, Wails v3 spike) — lane PAUSED by direction change 2; `app/` gets a paused banner |
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
-| K8s agent track (THE FOCUS)      | **K1 delivered: PR #49** (`tomtectl/`, checks green) — decisions recorded below; K2 next after merge       |
+| K8s agent track (THE FOCUS)      | **K1 MERGED** (#49 @ 9c9d970; 6 review findings fixed, re-verified on kind) — lane holds for K2 launch      |
 | Lean-in cleanup                  | **Delivered: #51 (estate), #52 (login retirement), #54 (server hygiene)** — all awaiting merge             |
 | P2 — Connectors main road        | **Plan delivered: PR #53** (4 PRs: A Slack, B key-verify+ledger, C MCP+SSRF, D MCP enforce); decisions ruled below. Takes `server/` when #54 merges |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
