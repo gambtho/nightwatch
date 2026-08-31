@@ -52,7 +52,9 @@ durations; `serve` refuses to start unless the deadline strictly exceeds
 the token TTL, since a run whose token has already expired can never
 finalize itself before the reaper would be allowed to sweep it.
 `TOMTE_DEFAULT_MONTHLY_CAP_CENTS` (default `0`, meaning unlimited)
-sets the tenant monthly spend cap in cents.
+sets the default monthly budget in cents — how much Tomte may spend
+from the user's key per month (Tomte meters only what goes through
+Tomte). The user edits it at `PUT /v1/settings/budget`.
 
 ### Scheduler and reaper
 
@@ -87,7 +89,7 @@ reaper itself can see or prevent.
 ### Metering
 
 `internal/meter.Meter` is wired as the egress proxy's `Hook`: every
-provider call is checked against the tenant's monthly spend cap
+provider call is checked against the user's monthly budget
 (`TOMTE_DEFAULT_MONTHLY_CAP_CENTS`, UTC calendar month) before it is
 allowed to reach the upstream — the cap is enforced at the proxy hook,
 not before a run is admitted.
@@ -130,7 +132,7 @@ server/
   internal/store/               hand-written pgx queries; one file per aggregate
   internal/engine/              shared fire path, scheduler, orphaned-run reaper
   internal/schedule/            cron + IANA timezone schedule artifact
-  internal/meter/               tenant monthly spend cap, wired as the proxy Hook
+  internal/meter/               the monthly budget meter, wired as the proxy Hook
   internal/httpapi/             public /v1 API: DB-backed sessions, local handoff, Origin policy
   internal/mail/                transactional email seam: Postmark sender + dev log sender
   internal/internalapi/         harness-facing /internal API (run-JWT auth)

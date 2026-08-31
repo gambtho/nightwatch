@@ -35,7 +35,8 @@
 //	                          reaper only sweeps runs past a strictly longer
 //	                          deadline
 //	TOMTE_DEFAULT_MONTHLY_CAP_CENTS
-//	                          tenant monthly spend cap in cents, default 0
+//	                          default monthly budget in cents (the user's
+//	                          own spend from their key), default 0
 //	                          (unlimited)
 package main
 
