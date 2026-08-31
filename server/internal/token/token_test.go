@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/token"
 )
 
 func TestSignVerify(t *testing.T) {

@@ -9,10 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/meter"
-	"github.com/gambtho/nightwatch/server/internal/proxy"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/meter"
+	"github.com/gambtho/tomte/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
 )
 
 var testKEK = []byte("test-wrapped-kek")

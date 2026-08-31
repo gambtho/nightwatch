@@ -11,8 +11,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // The platform-app connect flow (connectors spec, vault section).

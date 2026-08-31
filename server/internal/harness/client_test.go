@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/harness"
 )
 
 func invokeAgainst(t *testing.T, handler http.HandlerFunc, name string) (harness.ToolResult, error) {
@@ -43,7 +43,7 @@ func TestInvoke401Split(t *testing.T) {
 	require.Error(t, err, "proxy-auth 401 is fatal")
 
 	res, err := invokeAgainst(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Nightshift-Upstream", "1")
+		w.Header().Set("Tomte-Upstream", "1")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
 	}, "slack__list_channels")

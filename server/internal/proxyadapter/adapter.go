@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/permit"
-	"github.com/gambtho/nightwatch/server/internal/proxy"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/token"
-	"github.com/gambtho/nightwatch/server/internal/vault"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/proxy"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/vault"
 )
 
 type Set struct {

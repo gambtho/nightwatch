@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/llm"
-	"github.com/gambtho/nightwatch/server/internal/permit"
-	"github.com/gambtho/nightwatch/server/internal/schedule"
-	"github.com/gambtho/nightwatch/server/internal/steps"
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/schedule"
+	"github.com/gambtho/tomte/server/internal/steps"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // maxDocBytes bounds the request body decodeDoc will read, so a client

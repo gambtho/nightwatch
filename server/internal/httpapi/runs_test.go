@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/compute"
+	"github.com/gambtho/tomte/server/internal/compute"
 )
 
 // fakeCompute records invocations instead of running anything.

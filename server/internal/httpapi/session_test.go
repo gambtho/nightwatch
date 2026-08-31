@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
 )
 
 func TestRequireSessionInfraErrorIsNot401(t *testing.T) {
@@ -37,7 +37,7 @@ func TestRequireSessionInfraErrorIsNot401(t *testing.T) {
 
 func TestSessionCookieContract(t *testing.T) {
 	c := httpapi.SessionCookie("tok")
-	require.Equal(t, "__Host-ns_session", c.Name)
+	require.Equal(t, "__Host-tomte_session", c.Name)
 	require.Equal(t, "tok", c.Value)
 	require.True(t, c.Secure)
 	require.True(t, c.HttpOnly)
@@ -47,7 +47,7 @@ func TestSessionCookieContract(t *testing.T) {
 	require.Positive(t, c.MaxAge)
 
 	cleared := httpapi.ClearSessionCookie()
-	require.Equal(t, "__Host-ns_session", cleared.Name)
+	require.Equal(t, "__Host-tomte_session", cleared.Name)
 	require.Negative(t, cleared.MaxAge)
 }
 

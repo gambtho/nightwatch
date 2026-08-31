@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/httpapi"
 )
 
 // requestMagicLink POSTs the magic-link form and returns the raw response
@@ -138,8 +138,8 @@ func TestInterstitialGETConsumesNothing(t *testing.T) {
 		resp.Body.Close()
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
-		require.Contains(t, string(body), "Continue to Nightshift")
-		require.NotContains(t, resp.Header.Get("Set-Cookie"), "ns_session")
+		require.Contains(t, string(body), "Continue to Tomte")
+		require.NotContains(t, resp.Header.Get("Set-Cookie"), "tomte_session")
 	}
 
 	// The token still works: the GETs consumed nothing.
@@ -156,7 +156,7 @@ func TestInterstitialGETUnknownTokenRendersExpiredPage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Contains(t, string(body), "expired")
-	require.NotContains(t, string(body), "Continue to Nightshift")
+	require.NotContains(t, string(body), "Continue to Tomte")
 }
 
 func TestVerifyFirstLoginMintsTenantAndRedirectsToBuild(t *testing.T) {

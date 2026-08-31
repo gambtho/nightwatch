@@ -1,4 +1,4 @@
-module github.com/gambtho/nightwatch/server
+module github.com/gambtho/tomte/server
 
 go 1.26.2
 

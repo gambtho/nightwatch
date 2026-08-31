@@ -12,8 +12,8 @@ export default function Build() {
       <h1>What do you want taken care of?</h1>
       <p className="dim">
         Soon, you'll describe it here the way you'd describe it to a coworker — "every
-        Monday I spend an hour digging through tickets" — and Nightshift will tell you
-        honestly what it can do, what it would get wrong, and what it would need to reach.
+        Monday I spend an hour digging through tickets" — and Tomte will tell you honestly
+        what it can do, what it would get wrong, and what it would need to reach.
       </p>
       <p className="dim">
         That conversation isn't ready yet. Workflows set up another way appear on{" "}

@@ -3,7 +3,7 @@
 // preserve its reach — anything wider must ship as a new op name.
 //
 //	catalog-gate                     check embedded defs against the embedded baseline
-//	                                 (the same check nightshift serve runs at startup)
+//	                                 (the same check tomte serve runs at startup)
 //	catalog-gate OLD_DIR NEW_DIR     diff two catalog definition directories; exits 1
 //	                                 on any reach-widening change (CI: OLD_DIR from the
 //	                                 merge base, NEW_DIR from the candidate)
@@ -21,7 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gambtho/nightwatch/server/internal/catalog"
+	"github.com/gambtho/tomte/server/internal/catalog"
 )
 
 func main() {

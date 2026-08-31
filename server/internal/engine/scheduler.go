@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/schedule"
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/schedule"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // CapChecker is the slice of the meter the scheduler needs: don't create

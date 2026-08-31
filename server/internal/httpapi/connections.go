@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // connectionJSON deliberately has no field that could carry the secret;

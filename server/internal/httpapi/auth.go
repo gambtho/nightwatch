@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 const (
@@ -37,18 +37,18 @@ type authHandlers struct {
 // interstitialPage is served by GET /auth/verify. Mail scanners prefetch
 // every link, so the GET consumes nothing; only the button's POST does.
 var interstitialPage = template.Must(template.New("verify").Parse(`<!doctype html>
-<meta charset="utf-8"><title>Sign in — Nightshift</title>
+<meta charset="utf-8"><title>Sign in — Tomte</title>
 <p>Click to finish signing in.</p>
 <form method="post" action="/v1/auth/verify">
 <input type="hidden" name="token" value="{{.}}">
-<button type="submit">Continue to Nightshift</button>
+<button type="submit">Continue to Tomte</button>
 </form>
 `))
 
 // expiredPage greets expired, reused, and unknown tokens identically —
 // never an error page a non-technical user has to interpret.
 const expiredPage = `<!doctype html>
-<meta charset="utf-8"><title>Sign in — Nightshift</title>
+<meta charset="utf-8"><title>Sign in — Tomte</title>
 <p>This sign-in link has expired or was already used.</p>
 <p><a href="/">Request a new one</a> — links only last a few minutes.</p>
 `
@@ -107,9 +107,9 @@ func (a *authHandlers) tryToSendLink(r *http.Request, email, next string) {
 		return
 	}
 	link := a.d.PublicBaseURL.String() + "/auth/verify?token=" + url.QueryEscape(value)
-	body := "Sign in to Nightshift:\n\n" + link + "\n\nThis link expires in 15 minutes. " +
+	body := "Sign in to Tomte:\n\n" + link + "\n\nThis link expires in 15 minutes. " +
 		"If you didn't request it, ignore this email."
-	if err := a.d.Mailer.Send(ctx, email, "Sign in to Nightshift", body); err != nil {
+	if err := a.d.Mailer.Send(ctx, email, "Sign in to Tomte", body); err != nil {
 		slog.Error("auth: send magic link", "err", err)
 	}
 }

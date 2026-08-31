@@ -97,7 +97,7 @@ type Compiled struct {
 }
 
 // Platform is the platform-selected execution policy: provider and model
-// come from NIGHTSHIFT_RUN_PROVIDER/NIGHTSHIFT_RUN_MODEL, max tokens from
+// come from TOMTE_RUN_PROVIDER/TOMTE_RUN_MODEL, max tokens from
 // the approved spend cap against that model's pricing.
 type Platform struct {
 	Provider  string

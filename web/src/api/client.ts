@@ -9,7 +9,7 @@ import type {
 } from "./types";
 
 // Same-origin fetch client. The server authenticates with the
-// __Host-ns_session cookie and 403s any present-but-foreign Origin on
+// __Host-tomte_session cookie and 403s any present-but-foreign Origin on
 // mutating routes, so the app must be served from (or proxied through)
 // the configured public origin — see vite.config.ts for the dev topology.
 

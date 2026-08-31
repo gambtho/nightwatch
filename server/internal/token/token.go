@@ -17,7 +17,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-const hkdfInfo = "nightshift:run-jwt"
+const hkdfInfo = "tomte:run-jwt"
 
 type RunClaims struct {
 	RunID     uuid.UUID

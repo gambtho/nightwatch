@@ -113,7 +113,7 @@ func (c *Client) Invoke(ctx context.Context, name string, input json.RawMessage)
 		body = append(body[:maxToolResultBytes], []byte("\n\n[tool result truncated at 256KiB]")...)
 	}
 	switch {
-	case resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("Nightshift-Upstream") == "":
+	case resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("Tomte-Upstream") == "":
 		// The proxy's own 401: the run token is dead (finalized,
 		// revoked, expired) and nothing this run does can recover.
 		// A relayed upstream 401 (marker present) is a broken connector

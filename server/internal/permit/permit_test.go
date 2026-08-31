@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/permit"
+	"github.com/gambtho/tomte/server/internal/permit"
 )
 
 func TestParseValid(t *testing.T) {

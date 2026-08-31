@@ -10,12 +10,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/harness"
-	"github.com/gambtho/nightwatch/server/internal/internalapi"
-	"github.com/gambtho/nightwatch/server/internal/llm"
-	"github.com/gambtho/nightwatch/server/internal/store"
-	"github.com/gambtho/nightwatch/server/internal/testpg"
-	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/tomte/server/internal/harness"
+	"github.com/gambtho/tomte/server/internal/internalapi"
+	"github.com/gambtho/tomte/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/testpg"
+	"github.com/gambtho/tomte/server/internal/token"
 )
 
 var testKEK = []byte("test-wrapped-kek") // opaque to the store; real KEKs arrive with vault tests

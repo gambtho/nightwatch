@@ -294,7 +294,7 @@ func (s *Service) Revoke(ctx context.Context, provider string, b Bundle) error {
 // front of this lookup when it exists.
 func EnvClients(get func(string) string) ClientSource {
 	return func(ctx context.Context, provider string) (ClientCreds, error) {
-		prefix := "NIGHTSHIFT_OAUTH_" + strings.ToUpper(strings.ReplaceAll(provider, "-", "_"))
+		prefix := "TOMTE_OAUTH_" + strings.ToUpper(strings.ReplaceAll(provider, "-", "_"))
 		c := ClientCreds{ID: get(prefix + "_CLIENT_ID"), Secret: get(prefix + "_CLIENT_SECRET")}
 		if c.ID == "" || c.Secret == "" {
 			return ClientCreds{}, fmt.Errorf("oauth: no platform app configured for %s (set %s_CLIENT_ID and %s_CLIENT_SECRET)", provider, prefix, prefix)

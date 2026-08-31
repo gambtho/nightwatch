@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // SessionCookieName carries the __Host- prefix: browsers accept it only
@@ -21,7 +21,7 @@ import (
 // exactly our origin. Local dev over plain-HTTP localhost works in
 // browsers that extend Secure-cookie lenience to localhost (Chromium,
 // Firefox); Safari does not.
-const SessionCookieName = "__Host-ns_session"
+const SessionCookieName = "__Host-tomte_session"
 
 // sessionCookieMaxAge mirrors the session row's 30-day absolute cap; the
 // row's 7-day idle window can end the session earlier than the cookie.

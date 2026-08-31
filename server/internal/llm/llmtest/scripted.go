@@ -4,7 +4,7 @@ package llmtest
 import (
 	"context"
 
-	"github.com/gambtho/nightwatch/server/internal/llm"
+	"github.com/gambtho/tomte/server/internal/llm"
 )
 
 type Scripted struct {

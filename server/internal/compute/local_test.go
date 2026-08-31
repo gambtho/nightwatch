@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/compute"
+	"github.com/gambtho/tomte/server/internal/compute"
 )
 
 func TestLocalActorStatePersistsAcrossInvokes(t *testing.T) {

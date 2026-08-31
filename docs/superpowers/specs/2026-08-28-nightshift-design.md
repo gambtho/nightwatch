@@ -1,3 +1,5 @@
+> Product renamed to Tomte, 2026-08-31; this document predates the rename.
+
 # Nightshift — Design
 
 **Status:** Design approved; UX prototype not yet built

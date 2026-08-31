@@ -33,7 +33,7 @@ export default function Login() {
       setErrorDetail(
         err instanceof ApiError
           ? `The server couldn't send it (${err.message}).`
-          : "Couldn't reach Nightshift.",
+          : "Couldn't reach Tomte.",
       );
       setState("error");
     }

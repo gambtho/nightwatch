@@ -12,9 +12,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/gambtho/nightwatch/server/internal/oauth"
-	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
-	"github.com/gambtho/nightwatch/server/internal/store"
+	"github.com/gambtho/tomte/server/internal/oauth"
+	"github.com/gambtho/tomte/server/internal/proxyadapter"
+	"github.com/gambtho/tomte/server/internal/store"
 )
 
 // oauthEnv extends env with a fake token endpoint and an oauth-kind
