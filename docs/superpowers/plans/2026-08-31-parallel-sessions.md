@@ -39,8 +39,7 @@ ready.
 - Merge all outstanding spec PRs to `main`.
 - **Plan 4 spec** (grading + alerting) — prompt below.
 - **Plan 5 spec** (Substrate/K8s Compute) — prompt below.
-- **Identity plan-writing** — allowed against the delta sheet below;
-  execution still gated on Plan 3's merge.
+- **Identity plan-writing** — allowed against the delta sheet below.
 - Anything in `src/`, user research, prototype work.
 
 ---
