@@ -9,6 +9,7 @@
 //	DATABASE_URL            Postgres DSN (required)
 //	NIGHTSHIFT_SESSION_KEY  base64, 32 bytes (required for serve/dev-session)
 //	NIGHTSHIFT_RUNNER_KEY   base64, 32 bytes (required for serve)
+//	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for dev-session)
 //	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
 //	NIGHTSHIFT_STATE_DIR    actor state root, default $TMPDIR/nightshift-actors
 //	ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
@@ -34,6 +35,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/token"
+	"github.com/gambtho/nightwatch/server/internal/vault"
 	"github.com/google/uuid"
 )
 
@@ -164,7 +166,15 @@ func devSession(ctx context.Context, args []string) error {
 			return err
 		}
 	} else {
-		tn, err = s.CreateTenant(ctx, *tenantName)
+		master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
+		if err != nil {
+			return err
+		}
+		wrapped, err := master.NewTenantKEK()
+		if err != nil {
+			return err
+		}
+		tn, err = s.CreateTenant(ctx, *tenantName, wrapped)
 		if err != nil {
 			return err
 		}

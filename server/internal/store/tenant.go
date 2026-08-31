@@ -13,13 +13,52 @@ type Tenant struct {
 	CreatedAt time.Time
 }
 
-func (s *Store) CreateTenant(ctx context.Context, name string) (Tenant, error) {
+// CreateTenant inserts the tenant and its wrapped KEK in one transaction:
+// a tenant without a KEK cannot hold secrets, so the two are born together.
+func (s *Store) CreateTenant(ctx context.Context, name string, wrappedKEK []byte) (Tenant, error) {
 	var t Tenant
-	err := s.pool.QueryRow(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return t, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	err = tx.QueryRow(ctx,
 		`INSERT INTO tenant (name) VALUES ($1) RETURNING id, name, created_at`,
 		name,
 	).Scan(&t.ID, &t.Name, &t.CreatedAt)
-	return t, err
+	if err != nil {
+		return t, err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenant_kek (tenant_id, wrapped_kek) VALUES ($1, $2)`,
+		t.ID, wrappedKEK); err != nil {
+		return t, err
+	}
+	return t, tx.Commit(ctx)
+}
+
+// TenantKEK returns the current (highest-version) KEK — the encrypt path.
+func (s *Store) TenantKEK(ctx context.Context, tenantID uuid.UUID) ([]byte, int, error) {
+	var wrapped []byte
+	var version int
+	err := s.pool.QueryRow(ctx,
+		`SELECT wrapped_kek, version FROM tenant_kek
+		 WHERE tenant_id = $1 ORDER BY version DESC LIMIT 1`,
+		tenantID,
+	).Scan(&wrapped, &version)
+	return wrapped, version, notFound(err)
+}
+
+// TenantKEKAt returns a specific KEK version — the decrypt path, driven by
+// connection.kek_version, which keeps rotation resumable.
+func (s *Store) TenantKEKAt(ctx context.Context, tenantID uuid.UUID, version int) ([]byte, error) {
+	var wrapped []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT wrapped_kek FROM tenant_kek WHERE tenant_id = $1 AND version = $2`,
+		tenantID, version,
+	).Scan(&wrapped)
+	return wrapped, notFound(err)
 }
 
 func (s *Store) GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error) {

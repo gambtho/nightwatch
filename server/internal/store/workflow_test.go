@@ -29,7 +29,7 @@ func testDoc() store.VersionDoc {
 func TestWorkflowVersionLifecycle(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
-	tn, err := s.CreateTenant(ctx, "acme")
+	tn, err := s.CreateTenant(ctx, "acme", testKEK)
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
@@ -72,9 +72,9 @@ func TestWorkflowVersionLifecycle(t *testing.T) {
 func TestWorkflowCrossTenantIsolation(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
-	tnA, err := s.CreateTenant(ctx, "a")
+	tnA, err := s.CreateTenant(ctx, "a", testKEK)
 	require.NoError(t, err)
-	tnB, err := s.CreateTenant(ctx, "b")
+	tnB, err := s.CreateTenant(ctx, "b", testKEK)
 	require.NoError(t, err)
 
 	wf, _, err := s.CreateWorkflow(ctx, tnA.ID, "a's workflow", testDoc())

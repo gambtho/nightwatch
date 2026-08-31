@@ -18,11 +18,13 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/token"
 )
 
+var testKEK = []byte("test-wrapped-kek") // opaque to the store; real KEKs arrive with vault tests
+
 func setup(t *testing.T) (*store.Store, *token.Signer, *httptest.Server, store.Tenant, store.Workflow) {
 	t.Helper()
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
-	tn, err := s.CreateTenant(ctx, "acme")
+	tn, err := s.CreateTenant(ctx, "acme", testKEK)
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
