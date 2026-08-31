@@ -44,6 +44,24 @@ type Steps struct {
 	Provider     string `json:"provider"`
 	Model        string `json:"model"`
 	MaxTokens    int    `json:"max_tokens"`
+	// Endpoint-era compiled docs (compiler_v >= 2) carry the prices
+	// approval resolved; cost is computed from them. Older docs cost via
+	// the bundled table.
+	EndpointPreset     string `json:"endpoint_preset"`
+	PriceInCentsPer1M  int    `json:"price_in_cents_per_1m"`
+	PriceOutCentsPer1M int    `json:"price_out_cents_per_1m"`
+}
+
+// costCents prices one run's usage: from the compiled document's resolved
+// prices when the approval recorded an endpoint (a zero-cost approval
+// recorded 0/0 and correctly yields 0), else the bundled table. Floor
+// once on the combined numerator, like llm.CostCents.
+func costCents(st Steps, u llm.Usage) int {
+	if st.EndpointPreset == "" {
+		return llm.CostCents(st.Provider, st.Model, u)
+	}
+	numerator := int64(u.InputTokens)*int64(st.PriceInCentsPer1M) + int64(u.OutputTokens)*int64(st.PriceOutCentsPer1M)
+	return int(numerator / 1_000_000)
 }
 
 // Tool is one projected tool definition, exactly as the run context
@@ -139,7 +157,7 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 		res.ErrorMsg = err.Error()
 		// A failed tool-loop run has real accumulated usage; pricing it
 		// is what keeps max_turns loops inside the spend caps.
-		res.CostCents = llm.CostCents(in.Steps.Provider, in.Steps.Model, res.Usage)
+		res.CostCents = costCents(in.Steps, res.Usage)
 		emit("run.fail", map[string]any{"kind": kind})
 		if ferr := finish(); ferr != nil {
 			err = errors.Join(err, ferr)
@@ -147,7 +165,7 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 		return res, err
 	}
 	succeed := func(output, stopReason string) (Result, error) {
-		res.CostCents = llm.CostCents(in.Steps.Provider, in.Steps.Model, res.Usage)
+		res.CostCents = costCents(in.Steps, res.Usage)
 		res.Output = output
 		res.Status = StatusSucceeded
 		payload := map[string]any{"status": string(res.Status)}

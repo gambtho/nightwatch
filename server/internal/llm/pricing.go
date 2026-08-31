@@ -69,6 +69,14 @@ func Priced(provider, model string) bool {
 	return ok
 }
 
+// Price returns the bundled table row for a (provider, model) pair — the
+// preset path of the reworked gate; azure/custom endpoints use
+// user-entered rows instead (store.ModelPrice).
+func Price(provider, model string) (inCentsPer1M, outCentsPer1M int, ok bool) {
+	p, ok := priceTable[provider][model]
+	return p.in, p.out, ok
+}
+
 // Token bounds for the compiled max_tokens: the default when no spend cap
 // was approved, and a ceiling so a generous cap cannot compile a
 // max_tokens beyond what the catalogued models' output limits accept.
@@ -84,14 +92,18 @@ const (
 // must have checked Priced first; an unpriced pair falls back to the
 // default rather than an arbitrary value.
 func MaxTokensForBudget(provider, model string, perRunCents int) int {
-	if perRunCents <= 0 {
+	p := priceTable[provider][model]
+	return MaxTokensForOutPrice(p.out, perRunCents)
+}
+
+// MaxTokensForOutPrice is the same derivation with the output price
+// supplied directly — the endpoint path, where prices may be user-entered
+// or zero (zero-cost endpoints fall back to the fixed default).
+func MaxTokensForOutPrice(outCentsPer1M, perRunCents int) int {
+	if perRunCents <= 0 || outCentsPer1M <= 0 {
 		return defaultBudgetTokens
 	}
-	p, ok := priceTable[provider][model]
-	if !ok || p.out <= 0 {
-		return defaultBudgetTokens
-	}
-	tokens := int64(perRunCents) * 1_000_000 / int64(p.out)
+	tokens := int64(perRunCents) * 1_000_000 / int64(outCentsPer1M)
 	if tokens > maxBudgetTokens {
 		return maxBudgetTokens
 	}

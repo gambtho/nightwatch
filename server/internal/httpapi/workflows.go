@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/tomte/server/internal/endpoint"
 	"github.com/gambtho/tomte/server/internal/llm"
 	"github.com/gambtho/tomte/server/internal/permit"
 	"github.com/gambtho/tomte/server/internal/schedule"
@@ -210,8 +211,18 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// The configured endpoint decides provider, model, prices, and the
+	// gate; no endpoint row is legacy env mode (RunProvider/RunModel +
+	// bundled pricing, exactly the pre-endpoint behavior).
+	ep, err := d.currentEndpoint(r, claims.TenantID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	provider, model := d.runModel()
-	if !llm.Priced(provider, model) {
+	if ep != nil {
+		provider, model = ep.Provider(), ep.RunModel
+	} else if !llm.Priced(provider, model) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "no pricing for platform run model " + provider + "/" + model + " — spend caps require a priced model",
 		})
@@ -239,7 +250,19 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 	// BYOK LLM connection and every connector credential (present and
 	// not needs_reauth). "default" LLM resolution may fall back to the
 	// platform key, so only an explicit name is checked there.
-	if p.LLM.Connection != "default" {
+	// With an endpoint configured, the ENDPOINT's connection is the
+	// credential source of truth (permit.llm.connection is legacy-mode
+	// only) — and a local endpoint has none to check.
+	switch {
+	case ep != nil && ep.Preset == endpoint.PresetLocal:
+	case ep != nil:
+		if _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, provider, ep.Connection); cerr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "endpoint connection " + ep.Connection + " does not exist for " + provider + " — paste the key first",
+			})
+			return
+		}
+	case p.LLM.Connection != "default":
 		if _, cerr := d.Store.GetConnection(r.Context(), claims.TenantID, provider, p.LLM.Connection); cerr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "permit names llm connection " + p.LLM.Connection + " which does not exist for " + provider,
@@ -271,11 +294,26 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 	if p.Spend != nil {
 		perRunCents = p.Spend.PerRunCents
 	}
-	compiled, err := json.Marshal(steps.Compile(doc, cur.Doc.Rubric, steps.Platform{
+	platform := steps.Platform{
 		Provider:  provider,
 		Model:     model,
 		MaxTokens: llm.MaxTokensForBudget(provider, model, perRunCents),
-	}))
+	}
+	if ep != nil {
+		inCents, outCents, priceErr, perr := d.resolvePrices(r, claims.TenantID, ep)
+		if perr != nil {
+			writeErr(w, perr)
+			return
+		}
+		if priceErr != nil {
+			// The gate holds — but the dead end became one form: this body
+			// is the frontend's inline two-number price contract.
+			writeJSON(w, http.StatusBadRequest, priceErr)
+			return
+		}
+		platform = platformFor(ep, inCents, outCents, perRunCents)
+	}
+	compiled, err := json.Marshal(steps.Compile(doc, cur.Doc.Rubric, platform))
 	if err != nil {
 		writeErr(w, err)
 		return

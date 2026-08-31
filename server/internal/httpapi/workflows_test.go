@@ -17,6 +17,7 @@ import (
 
 	"github.com/gambtho/tomte/server/internal/engine"
 	"github.com/gambtho/tomte/server/internal/httpapi"
+	"github.com/gambtho/tomte/server/internal/steps"
 	"github.com/gambtho/tomte/server/internal/store"
 	"github.com/gambtho/tomte/server/internal/testpg"
 	"github.com/gambtho/tomte/server/internal/token"
@@ -160,7 +161,7 @@ func TestApproveCompilesExecutionForm(t *testing.T) {
 	require.NoError(t, err)
 	var compiled map[string]any
 	require.NoError(t, json.Unmarshal(v.Compiled, &compiled))
-	require.Equal(t, float64(1), compiled["compiler_v"])
+	require.Equal(t, float64(steps.CompilerV), compiled["compiler_v"])
 	require.Equal(t, httpapi.DefaultRunProvider, compiled["provider"])
 	require.Equal(t, httpapi.DefaultRunModel, compiled["model"])
 	require.Contains(t, compiled["system_prompt"], "1. Look at last week's support tickets.")
