@@ -60,17 +60,97 @@ func TestTickFiresDueOccurrenceOnce(t *testing.T) {
 	require.Len(t, runs, 1)
 }
 
-func TestTickStalenessWindowSkipsOldOccurrences(t *testing.T) {
+// No heartbeat (a fresh install's very first tick): the default window
+// applies and an hours-old occurrence does not fire — there was no
+// running scheduler that could have owed it.
+func TestTickNoHeartbeatKeepsDefaultWindow(t *testing.T) {
 	s, eng, _, tn, wf := scheduledSetup(t)
 	ctx := context.Background()
 
-	// Hours past the 09:00 occurrence: outside W, never fires.
 	now := time.Date(2026, 9, 7, 15, 0, 0, 0, time.UTC)
 	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
 	sched.Tick(ctx)
 	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
 	require.NoError(t, err)
 	require.Empty(t, runs)
+
+	// The completed tick persisted its heartbeat.
+	hb, err := s.GetSchedulerHeartbeat(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, hb)
+	require.True(t, hb.Equal(now))
+}
+
+// The fire-on-wake case that never fires on main: the machine slept (or
+// the app was quit) from before the 09:00 occurrence until 15:04. The
+// persisted heartbeat widens the lookback past the gap, the occurrence
+// fires exactly once, and the run records its scheduled fire_time.
+func TestTickFiresOccurrenceHoursOldAfterWake(t *testing.T) {
+	s, eng, fc, tn, wf := scheduledSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.SetSchedulerHeartbeat(ctx, time.Date(2026, 9, 7, 8, 59, 0, 0, time.UTC)))
+	now := time.Date(2026, 9, 7, 15, 4, 0, 0, time.UTC)
+	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
+
+	sched.Tick(ctx)
+	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Equal(t, "schedule", runs[0].FireReason)
+	require.Equal(t, time.Date(2026, 9, 7, 9, 0, 0, 0, time.UTC).Unix(), runs[0].FireTime.Unix())
+	require.Len(t, fc.invokes, 1)
+
+	// Once, not twice: the next tick owes nothing.
+	sched.Tick(ctx)
+	runs, err = s.ListRuns(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+}
+
+// A week of downtime fires each workflow at most once — mostRecentDue
+// returns only the latest occurrence of the daily schedule.
+func TestTickWakeAfterLongDowntimeFiresLatestOnly(t *testing.T) {
+	s, eng, _, tn, wf := scheduledSetup(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.SetSchedulerHeartbeat(ctx, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)))
+	now := time.Date(2026, 9, 7, 15, 4, 0, 0, time.UTC)
+	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
+
+	sched.Tick(ctx)
+	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Equal(t, time.Date(2026, 9, 7, 9, 0, 0, 0, time.UTC).Unix(), runs[0].FireTime.Unix())
+}
+
+// A failed create pass must not advance the heartbeat: the missed
+// occurrence would land permanently outside the next lookback.
+func TestTickFailedCreatePassKeepsHeartbeat(t *testing.T) {
+	s, eng, _, tn, wf := scheduledSetup(t)
+	ctx := context.Background()
+
+	// A canceled context fails the pass at the store, the simplest
+	// infrastructure failure to inject.
+	before := time.Date(2026, 9, 7, 8, 59, 0, 0, time.UTC)
+	require.NoError(t, s.SetSchedulerHeartbeat(ctx, before))
+	now := time.Date(2026, 9, 7, 15, 4, 0, 0, time.UTC)
+	sched := &engine.Scheduler{Engine: eng, Store: s, Now: func() time.Time { return now }}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	sched.Tick(canceled)
+
+	hb, err := s.GetSchedulerHeartbeat(ctx)
+	require.NoError(t, err)
+	require.True(t, hb.Equal(before), "heartbeat must not advance past a failed pass")
+
+	// The next healthy tick still fires the owed occurrence.
+	sched.Tick(ctx)
+	runs, err := s.ListRuns(ctx, tn.ID, wf.ID)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
 }
 
 func TestTickSkipsWhenCapped(t *testing.T) {
