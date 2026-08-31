@@ -35,8 +35,47 @@ finishes, or a cross-cutting decision is taken.
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
 | P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 final (zero_cost + 6 Codex findings folded); implementation underway        |
 | CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
-| Packaging shell (`app/`)         | **Lane opened** — plan + spike first; prompt below                                                         |
+| Packaging shell (`app/`)         | **PAUSED by direction change 2** — plan+spike delivered (PR #42, Wails v3); no further work until unpaused |
+| Frontend pivot surfaces          | **Delivered: PRs #43, #46, #47** (161 web tests green on the union); lane idle — see direction change 2    |
+| K8s agent track                  | **THE FOCUS (direction change 2)** — template + simple CLI, hello-world agent on a cluster; prompt below   |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
+
+## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
+
+Leadership decision, relayed by the user. The verbatim ask: **"can we have a
+template for an agent that creates a hello world agent running on a k8s
+cluster, then expand to leverage llm to enhance the agent, allow connectors,
+etc -- use a simple cli to get the agent running on k8s"** — with the stated
+frame: focus specifically on an agent running on Kubernetes (simplest
+possible solution, no Substrate), CLI rather than UI, and from there
+**transition to the full Tomte experience** (governance, defined
+connectors, etc.).
+
+Three shaping answers from the user, deliberate — do not relitigate:
+
+- **Phase-1 shape: CLI-local, agents on K8s.** No hosted control plane at
+  first: a simple CLI (kubeconfig-driven) gets the agent running on a
+  cluster. The coordinator's recommendation (whole verified stack
+  in-cluster) was considered and not chosen.
+- **Bare agent first.** Phase 1 ships WITHOUT the governance spine — no
+  egress proxy, no permits, key via K8s Secret. Governance arrives in the
+  transition, not on day 1. (Recorded with the coordinator's named risk:
+  retrofitting enforcement is the expensive path; the transition phases
+  must treat the existing proxy/permit stack as the destination, not
+  reinvent it.)
+- **P1 continues as planned.** The server/ lane keeps building the Tomte
+  floor — the "full Tomte experience" the K8s track transitions into is
+  the P1+ stack. The pivot-spec estate is NOT re-triaged by this change.
+
+Lane dispositions: **K8s agent track is the focus** (new lane, prompt
+below). **Packaging (`app/`) is paused** — the desktop shell is not the
+near-term path; PR #42 stays as the record; the pending product calls
+(platform order, update feed) are moot while paused. **Frontend goes idle**
+after its three open PRs (#43/#46/#47) merge; login retirement still
+follows P1's local-session mint whenever the user wants it. CI, README,
+demo lanes are unaffected. Click-install's ultimate fate (shelved vs
+deferred) is deliberately NOT decided — the user answered the desktop
+question with the quote above; nothing forecloses either path.
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
@@ -420,6 +459,55 @@ five never take it. Each prompt is self-contained.
 > behavior (that direction is reversed) or features that don't exist yet as
 > if they exist; write in terms of what is built vs designed. Keep it under
 > ~120 lines — a README, not a spec.
+
+### Prompt — K8s agent track, phase K1 (THE FOCUS, new lane, parallel)
+
+> You own the K8s agent track — the project's current focus (direction
+> change 2). Read the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` (the
+> "Direction change 2" section carries the verbatim leadership ask and the
+> three shaping decisions) before writing anything. Work in a linked
+> worktree; you take no `server/` lock and touch no existing top-level dir.
+>
+> The ask, verbatim: "a template for an agent that creates a hello world
+> agent running on a k8s cluster, then expand to leverage llm to enhance
+> the agent, allow connectors, etc — use a simple cli to get the agent
+> running on k8s." Simplest possible solution; no Substrate; CLI, not UI.
+>
+> **Phase K1 (this session): hello world on a cluster via a simple CLI.**
+> Brainstorm briefly, write a short plan (PR it to `main` or lead your
+> implementation PR with it — your call at this size), then build:
+>
+> 1. **An agent template**: the smallest scaffold that becomes a running
+>    agent — a container entrypoint plus a manifest. The agent's behavior
+>    (for K1, print/serve hello world on a loop) must come from a mounted
+>    config/instructions file, not hardcode — that file is the seam that
+>    later grows into LLM prompts (K2), connectors (K3), and eventually
+>    Tomte's steps/permit shape. Keep the file's schema tiny and versioned.
+> 2. **A simple CLI** (new top-level dir; propose the name — Go, matching
+>    the repo): `init` scaffolds a new agent from the template; a
+>    deploy/run command gets it onto the cluster the user's kubeconfig
+>    points at; `status` and `logs` round it out. No CRDs, no operator, no
+>    controller; a plain namespaced Deployment or Job via client-go or
+>    shelling out to kubectl — pick the simplest that is honest, and say
+>    why. Helm only if it genuinely earns it (at K1 it probably doesn't).
+> 3. **Verification is a real cluster**: stand up kind (or k3d), run your
+>    own CLI end to end, and show `logs` returning hello world. A README
+>    in the lane dir walks a newcomer through the same five minutes.
+>
+> **Known destination, not K1 scope**: K2 adds an LLM call (OpenAI-
+> compatible base URL + key from a K8s Secret; align the endpoint config
+> vocabulary with the board's five-preset enum so convergence stays
+> cheap). K3 adds connectors and begins the transition to the full Tomte
+> experience — the EXISTING proxy/permit/scheduler stack is that
+> destination; do not design K1 in a way that forecloses mounting it
+> later (this is why the config-file seam matters). Phase 1 is
+> deliberately bare — no proxy, no permits (user decision, recorded on
+> the board); resist the urge to add governance early.
+>
+> PR to `main`; CI (PR #41's workflows) must pass once #41 is merged.
+> Report your naming and structure decisions to the coordinating session
+> for the board.
 
 ## Pivot spec MERGED (PR #37); name FINAL
 
