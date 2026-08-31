@@ -17,8 +17,7 @@ var ErrHandoffTokenInvalid = errors.New("store: handoff token expired or already
 
 // CreateHandoffToken records the hash of a single-use browser-handoff
 // token for an existing user. It opportunistically sweeps rows expired
-// for more than an hour — cleanup on the write path, no background loop
-// (the login_token trick, kept).
+// for more than an hour — cleanup on the write path, no background loop.
 func (s *Store) CreateHandoffToken(ctx context.Context, tokenHash []byte, tenantID, userID uuid.UUID, ttl time.Duration) error {
 	if _, err := s.pool.Exec(ctx,
 		`DELETE FROM handoff_token WHERE expires_at < now() - interval '1 hour'`); err != nil {

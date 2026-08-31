@@ -128,12 +128,17 @@ go test ./...
 server/
   go.mod, go.sum
   cmd/tomte/main.go        serve | migrate | dev-session
+  cmd/catalog-gate/             CI gate: catalog edits may only narrow an op's reach
   internal/db/                  pool, goose migrate, migrations/*.sql
   internal/testpg/              shared Postgres testcontainer helper
   internal/store/               hand-written pgx queries; one file per aggregate
   internal/engine/              shared fire path, scheduler, orphaned-run reaper
   internal/schedule/            cron + IANA timezone schedule artifact
   internal/meter/               the monthly budget meter, wired as the proxy Hook
+  internal/catalog/             embedded curated connector catalog + validation
+  internal/endpoint/            the tenant's one configured LLM endpoint (presets, base URL)
+  internal/steps/               user-facing steps document + deterministic compiler
+  internal/redact/              scrubs known secret values from log output
   internal/httpapi/             public /v1 API: DB-backed sessions, local handoff, Origin policy
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)

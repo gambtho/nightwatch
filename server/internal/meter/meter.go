@@ -1,7 +1,7 @@
 // Package meter enforces spend caps. It implements proxy.Hook, so the
 // monthly budget — the user's own cap on what Tomte may spend from
 // their key per month — is checked before every model request at the egress
-// proxy — the enforcement point the platform spec mandates. Fail closed:
+// proxy, the one enforcement point all outbound traffic crosses. Fail closed:
 // if spend cannot be read, the request is denied.
 package meter
 

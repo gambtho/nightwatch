@@ -1,6 +1,6 @@
 // Package internalapi is the harness-facing API: run context out, run
-// records in. Substrate exposes no log or event retrieval API, so run
-// records exist only because the harness pushes them here.
+// records in. Nothing scrapes the compute host's logs, so run records
+// exist only because the harness pushes them here.
 package internalapi
 
 import (
@@ -39,7 +39,7 @@ func RegisterRoutes(mux *http.ServeMux, d Deps) {
 type authedHandler func(w http.ResponseWriter, r *http.Request, claims token.RunClaims)
 
 // The harness pushes small JSON records, not data; cap every body. Per-run
-// event and output budgets are the metering plan's concern (Plan 3).
+// event and output budgets are the meter's concern.
 const maxBodyBytes = 1 << 20
 
 // auth verifies the bearer run-JWT, requires that the token's run is the

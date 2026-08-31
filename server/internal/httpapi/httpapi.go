@@ -38,8 +38,8 @@ type Deps struct {
 }
 
 // Platform run-model defaults, used when the env leaves the choice to us:
-// the cheapest priced Anthropic pair. Per-tenant override is a
-// designed-for seam, not built.
+// the cheapest priced Anthropic pair. A configured endpoint record
+// overrides both (legacy env mode only).
 const (
 	DefaultRunProvider = "anthropic"
 	DefaultRunModel    = "claude-haiku-4-5"

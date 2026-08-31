@@ -1,8 +1,7 @@
 // Package compute is the seam between the control plane and whatever hosts
-// actors. The platform spec mandates this interface so the pre-1.0
-// Substrate dependency stays replaceable; the Substrate and Kubernetes-Jobs
-// implementations are Plan 5. Local is the in-process implementation that
-// keeps the seam honest from day one.
+// actors: the control plane never depends on a concrete host, so a
+// cluster-backed implementation can replace Local without a redesign.
+// Local is the in-process implementation that keeps the seam honest.
 package compute
 
 import (
@@ -18,9 +17,9 @@ type WorkflowRef struct {
 	WorkflowID uuid.UUID
 }
 
-// TemplateRef names the actor template (image + config). Local ignores it;
-// Substrate's ActorTemplates are immutable, so workflow-version changes
-// will map to new templates (governance primitive #8).
+// TemplateRef names the actor template (image + config) for hosts that
+// need one. Local ignores it: run behavior comes from the run context the
+// harness fetches per run, never from the template.
 type TemplateRef struct {
 	Name string
 }

@@ -28,9 +28,8 @@ type Secret struct {
 }
 
 // HookRequest identifies the request the Hook is asked to admit.
-// Provider is set on LLM routes; Connector/Op on connector routes — the
-// additive widening that lets Plan 3 price tool calls without reopening
-// the proxy.
+// Provider is set on LLM routes; Connector/Op on connector routes — one
+// hook admits both kinds of traffic.
 type HookRequest struct {
 	Identity  RunIdentity
 	Provider  string
@@ -69,7 +68,7 @@ type NopHook struct{}
 
 func (NopHook) Before(ctx context.Context, req HookRequest) error { return nil }
 
-// HookError lets a Hook (Plan 3 metering) choose the response status.
+// HookError lets a Hook (the meter) choose the response status.
 // Only 403 and 429 are honored; any other error maps to 403.
 type HookError struct {
 	Status int

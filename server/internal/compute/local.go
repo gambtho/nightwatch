@@ -73,8 +73,8 @@ func (l *Local) Invoke(ctx context.Context, a ActorID, payload InvokeRequest) (H
 	return Handle{ActorID: a, RunID: payload.RunID}, nil
 }
 
-// Suspend is a no-op locally; suspension is Substrate's economic premise,
-// not ours to fake here.
+// Suspend is a no-op locally: an in-process actor holds no resources
+// worth reclaiming between runs.
 func (l *Local) Suspend(ctx context.Context, a ActorID) error { return nil }
 
 func (l *Local) Destroy(ctx context.Context, a ActorID) error {
