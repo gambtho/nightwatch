@@ -125,7 +125,7 @@ func serve(ctx context.Context) error {
 			return
 		}
 		if _, err := harness.Run(ctx,
-			harness.Input{Steps: steps, APIKey: apiKeyFor(steps.Provider)},
+			harness.Input{Steps: steps, RunToken: req.RunToken},
 			harness.Deps{ProviderFactory: factory, Sink: client}); err != nil {
 			slog.Error("harness: run failed", "run", req.RunID, "err", err)
 		}

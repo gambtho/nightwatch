@@ -100,3 +100,23 @@ func TestRunFinalizeErrorSurfaces(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, harness.StatusSucceeded, res.Status) // the work succeeded; recording it did not
 }
+
+func TestRunTokenRidesTheAPIKeySlot(t *testing.T) {
+	var sawKey string
+	provider := &keyCapturingProvider{onKey: func(k string) { sawKey = k }}
+	_, err := harness.Run(context.Background(),
+		harness.Input{Steps: steps(), RunToken: "run-jwt-abc"},
+		harness.Deps{
+			ProviderFactory: func(string) (llm.Provider, error) { return provider, nil },
+			Sink:            &memSink{},
+		})
+	require.NoError(t, err)
+	require.Equal(t, "run-jwt-abc", sawKey)
+}
+
+type keyCapturingProvider struct{ onKey func(string) }
+
+func (p *keyCapturingProvider) Chat(ctx context.Context, msgs []llm.Message, opts llm.CallOptions, onChunk func(llm.StreamChunk)) (llm.Usage, error) {
+	p.onKey(opts.APIKey)
+	return llm.Usage{}, nil
+}
