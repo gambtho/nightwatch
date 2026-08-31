@@ -106,4 +106,5 @@ cronfoundry (see the foundation plan's task notes).
     forever with nothing noticing. Plan 3 (scheduling) must add an orphaned-run reaper
     that finalizes runs stuck past a deadline as `failed`/`error_kind: "orphaned"`, and
     revisit the run-token TTL against actor queueing depth. (2026-08-30 final branch
-    review.)
+    review.) Closed by Plan 3 (2026-08-31): reaper + deadline>TTL invariant shipped;
+    queueing dissolved by the one-active-run admission index.
