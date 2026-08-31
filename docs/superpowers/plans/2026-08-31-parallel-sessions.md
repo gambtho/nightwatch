@@ -11,8 +11,8 @@ Update this file when a plan merges or a session finishes.
 | ------------------------------- | -------------------------------------------------------------- |
 | Plan 1 — Foundation             | **Merged** (PR #1)                                             |
 | Plan 2 — Egress proxy + vault   | **Merged** (PR #5)                                             |
-| Plan 3 — Scheduling + metering  | **Executing** (branch `sched-spec`; owns `server/`)            |
-| Identity spec                   | Written (PR #6) — implementation queued                        |
+| Plan 3 — Scheduling + metering  | **Merged** (PR #10, 2026-08-31)                                |
+| Identity spec                   | Written (PR #6) — implementation **green-lit, owns `server/`** |
 | Connector-catalog spec          | Written — plan+implementation queued                           |
 | Substrate verification spike    | Findings written — feeds the Plan 5 spec                       |
 | User research / facilitator kit | Separate session (branch `demo/dev-persona`) — always parallel |
@@ -25,10 +25,10 @@ ready.
 
 ### Serialized `server/` queue
 
-1. **Plan 3** (running now) →
-2. **Identity implementation** (small, invasive: replaces the session
-   mechanism across httpapi and every test helper; retires
-   `NIGHTSHIFT_SESSION_KEY`) →
+1. ~~**Plan 3**~~ (merged, PR #10) →
+2. **Identity implementation** (OWNS `server/` NOW — green-lit
+   2026-08-31; small, invasive: replaces the session mechanism across
+   httpapi and every test helper; retires `NIGHTSHIFT_SESSION_KEY`) →
 3. **Connectors** (plan + implementation — collides with `permit.Parse`,
    the proxy, and the harness, and wants identity's session changes
    settled) →
@@ -47,8 +47,11 @@ ready.
 
 ## Delta sheet: what Plan 3 changes (for the identity session's plan)
 
-Write the identity implementation plan against merged `main` PLUS these
-deltas; re-verify each against the real tree before executing.
+**Plan 3 is now merged — these deltas are live on `main`.** Verify each
+against the real tree; late additions beyond the original sheet: the
+scheduler/reaper/meter wiring in `serve()` (do not displace it),
+`httpapi.approveVersion` re-checks `llm.Priced` on the stored draft, and
+`internal/engine`, `internal/schedule`, `internal/meter` are new packages.
 
 - **Migrations 00007 and 00008 are taken** (`00007_schedule.sql`,
   `00008_scheduling_runs.sql`); identity's migrations start at **00009**.
@@ -79,8 +82,9 @@ deltas; re-verify each against the real tree before executing.
   `fakeCompute`; the e2e file has a shared `newDoHelper`. Identity's
   session replacement touches `newEnv`, the `SessionCookie` call sites in
   e2e, and `dev-session` in `main.go`.
-- **Execution gate: do not touch `server/` until the Plan 3 PR merges and
-  the coordinating session gives the green light.**
+- **Execution gate: OPEN (2026-08-31).** Plan 3 (PR #10) is merged and the
+  coordinating session has green-lit the identity implementation — it owns
+  `server/` until its PR merges.
 
 ---
 
