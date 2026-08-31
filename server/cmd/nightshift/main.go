@@ -7,7 +7,16 @@
 // Configuration (env):
 //
 //	DATABASE_URL            Postgres DSN (required)
-//	NIGHTSHIFT_SESSION_KEY  base64, 32 bytes (required for serve/dev-session)
+//	NIGHTSHIFT_PUBLIC_BASE_URL
+//	                        canonical customer-facing origin, scheme + host
+//	                        (required for serve). HTTPS required; http is
+//	                        allowed for localhost only. Single source for
+//	                        magic-link URLs, the Origin check, and redirect
+//	                        joining — Host/proxy headers are never used.
+//	NIGHTSHIFT_POSTMARK_TOKEN, NIGHTSHIFT_MAIL_FROM
+//	                        Postmark server token and From address; when
+//	                        either is unset, magic-link email is written to
+//	                        the log instead (dev)
 //	NIGHTSHIFT_RUNNER_KEY   base64, 32 bytes (required for serve)
 //	NIGHTSHIFT_VAULT_KEY    base64, 32 bytes (required for serve/dev-session)
 //	NIGHTSHIFT_LISTEN_ADDR  default 127.0.0.1:8080
@@ -30,6 +39,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -46,6 +56,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/httpapi"
 	"github.com/gambtho/nightwatch/server/internal/internalapi"
 	"github.com/gambtho/nightwatch/server/internal/llm"
+	"github.com/gambtho/nightwatch/server/internal/mail"
 	"github.com/gambtho/nightwatch/server/internal/meter"
 	"github.com/gambtho/nightwatch/server/internal/proxy"
 	"github.com/gambtho/nightwatch/server/internal/proxyadapter"
@@ -134,7 +145,16 @@ func serve(ctx context.Context) error {
 	defer pool.Close()
 
 	s := store.New(pool)
-	sessionKey := keyFromEnv("NIGHTSHIFT_SESSION_KEY")
+	publicBase, err := httpapi.ParsePublicBaseURL(mustEnv("NIGHTSHIFT_PUBLIC_BASE_URL"))
+	if err != nil {
+		return err
+	}
+	var mailer mail.Sender = mail.LogSender{}
+	if tok, from := os.Getenv("NIGHTSHIFT_POSTMARK_TOKEN"), os.Getenv("NIGHTSHIFT_MAIL_FROM"); tok != "" && from != "" {
+		mailer = mail.NewPostmark(tok, from)
+	} else {
+		slog.Warn("mail: NIGHTSHIFT_POSTMARK_TOKEN/NIGHTSHIFT_MAIL_FROM unset; magic links go to the log")
+	}
 	signer := token.New(keyFromEnv("NIGHTSHIFT_RUNNER_KEY"))
 	master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
 	if err != nil {
@@ -200,7 +220,7 @@ func serve(ctx context.Context) error {
 	m := &meter.Meter{Store: s, DefaultCap: defaultCap}
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: eng, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 
 	adapters := proxyadapter.New(s, signer, master, platform)
@@ -250,40 +270,62 @@ func devSession(ctx context.Context, args []string) error {
 	defer pool.Close()
 	s := store.New(pool)
 
+	// Resolve the email first: the global unique index means an email maps
+	// to at most one tenant, so an existing user's tenant is reused and
+	// only a genuinely new email mints one.
 	var tn store.Tenant
-	if *tenantID != "" {
-		id, err := uuidParse(*tenantID)
-		if err != nil {
+	user, err := s.UserByEmail(ctx, *email)
+	switch {
+	case err == nil:
+		if tn, err = s.GetTenant(ctx, user.TenantID); err != nil {
 			return err
 		}
-		tn, err = s.GetTenant(ctx, id)
-		if err != nil {
+		if *tenantID != "" {
+			id, err := uuidParse(*tenantID)
+			if err != nil {
+				return err
+			}
+			if id != tn.ID {
+				return fmt.Errorf("email %s already belongs to tenant %s, not %s", user.Email, tn.ID, id)
+			}
+		}
+	case errors.Is(err, store.ErrNotFound):
+		if *tenantID != "" {
+			id, err := uuidParse(*tenantID)
+			if err != nil {
+				return err
+			}
+			if tn, err = s.GetTenant(ctx, id); err != nil {
+				return err
+			}
+		} else {
+			master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
+			if err != nil {
+				return err
+			}
+			wrapped, err := master.NewTenantKEK()
+			if err != nil {
+				return err
+			}
+			if tn, err = s.CreateTenant(ctx, *tenantName, wrapped); err != nil {
+				return err
+			}
+		}
+		if user, err = s.UpsertUser(ctx, tn.ID, *email); err != nil {
 			return err
 		}
-	} else {
-		master, err := vault.NewMaster(keyFromEnv("NIGHTSHIFT_VAULT_KEY"))
-		if err != nil {
-			return err
-		}
-		wrapped, err := master.NewTenantKEK()
-		if err != nil {
-			return err
-		}
-		tn, err = s.CreateTenant(ctx, *tenantName, wrapped)
-		if err != nil {
-			return err
-		}
+	default:
+		return err
 	}
-	user, err := s.UpsertUser(ctx, tn.ID, *email)
+
+	value, tokenHash, err := httpapi.NewSessionToken()
 	if err != nil {
 		return err
 	}
-	cookie, err := httpapi.SessionCookie(keyFromEnv("NIGHTSHIFT_SESSION_KEY"),
-		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: user.Role},
-		24*time.Hour)
-	if err != nil {
+	if _, err := s.CreateSession(ctx, tokenHash, tn.ID, user.ID); err != nil {
 		return err
 	}
+	cookie := httpapi.SessionCookie(value)
 	fmt.Printf("tenant: %s\nuser:   %s\ncookie: %s=%s\n", tn.ID, user.ID, cookie.Name, cookie.Value)
 	return nil
 }

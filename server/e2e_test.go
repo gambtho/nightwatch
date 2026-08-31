@@ -35,7 +35,6 @@ func TestEndToEndRun(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
 
-	sessionKey := bytes.Repeat([]byte{1}, 32)
 	signer := token.New(bytes.Repeat([]byte{2}, 32))
 	provider := &llmtest.Scripted{
 		Response: "This week: 40% of tickets were about the new billing page.",
@@ -61,7 +60,7 @@ func TestEndToEndRun(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -71,9 +70,7 @@ func TestEndToEndRun(t *testing.T) {
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
-	cookie, err := httpapi.SessionCookie(sessionKey,
-		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: "owner"}, time.Hour)
-	require.NoError(t, err)
+	cookie := mintSession(t, s, tn.ID, user.ID)
 
 	do := newDoHelper(t, ts.URL, cookie)
 
@@ -106,6 +103,17 @@ func TestEndToEndRun(t *testing.T) {
 	out = do("GET", "/v1/runs/"+runID+"/events", nil)
 	events := out["events"].([]any)
 	require.GreaterOrEqual(t, len(events), 2) // run.start, run.finish
+}
+
+// mintSession inserts a DB-backed session row and returns the cookie that
+// authenticates as it.
+func mintSession(t *testing.T, s *store.Store, tenantID, userID uuid.UUID) *http.Cookie {
+	t.Helper()
+	value, tokenHash, err := httpapi.NewSessionToken()
+	require.NoError(t, err)
+	_, err = s.CreateSession(context.Background(), tokenHash, tenantID, userID)
+	require.NoError(t, err)
+	return httpapi.SessionCookie(value)
 }
 
 // newDoHelper returns a helper that performs an authenticated JSON request
@@ -148,7 +156,6 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
 
-	sessionKey := bytes.Repeat([]byte{1}, 32)
 	signer := token.New(bytes.Repeat([]byte{2}, 32))
 	master, err := vault.NewMaster(bytes.Repeat([]byte{3}, 32))
 	require.NoError(t, err)
@@ -191,7 +198,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	})
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: &engine.Engine{Store: s, Signer: signer, Compute: local}, Vault: master})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	adapters := proxyadapter.New(s, signer, master, map[string]string{"openai": "platform-openai-key"})
 	cfg := proxy.DefaultConfig()
@@ -211,9 +218,7 @@ func TestEndToEndRunThroughProxy(t *testing.T) {
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
-	cookie, err := httpapi.SessionCookie(sessionKey,
-		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: "owner"}, time.Hour)
-	require.NoError(t, err)
+	cookie := mintSession(t, s, tn.ID, user.ID)
 
 	do := newDoHelper(t, ts.URL, cookie)
 
@@ -262,7 +267,6 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	s := store.New(testpg.New(t))
 	ctx := context.Background()
 
-	sessionKey := bytes.Repeat([]byte{1}, 32)
 	signer := token.New(bytes.Repeat([]byte{2}, 32))
 	provider := &llmtest.Scripted{
 		Response: "scheduled digest",
@@ -286,7 +290,7 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	eng := &engine.Engine{Store: s, Signer: signer, Compute: local}
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, SessionKey: sessionKey, Engine: eng})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -300,9 +304,7 @@ func TestEndToEndScheduledRun(t *testing.T) {
 	require.NoError(t, err)
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
-	cookie, err := httpapi.SessionCookie(sessionKey,
-		httpapi.SessionClaims{UserID: user.ID, TenantID: tn.ID, Role: "owner"}, time.Hour)
-	require.NoError(t, err)
+	cookie := mintSession(t, s, tn.ID, user.ID)
 	do := newDoHelper(t, ts.URL, cookie)
 
 	out := do("POST", "/v1/workflows", map[string]any{
