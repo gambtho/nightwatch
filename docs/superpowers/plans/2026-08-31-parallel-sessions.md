@@ -19,6 +19,7 @@ finishes, or a cross-cutting decision is taken.
 | Identity spec                    | **Merged** (PR #6)                                                                                                       |
 | Identity implementation          | **Merged** (PR #17)                                                                                                      |
 | Steps v1 (decision 9)            | **Merged** (PR #19) — **`server/` is FREE and unassigned**                                                               |
+| Connectors                       | **In flight** — plan PR #25, deadlock fix PR #24; **owns `server/`**                                                     |
 | Connector-catalog spec           | **Merged** (PR #8) — plan owed                                                                                           |
 | Delegation specs                 | **Merged** (PR #9) — escalation, permits, objectives; plans owed                                                         |
 | Substrate verification spike     | **Merged** (PR #7) — corrections owned by the docs lane                                                                  |
@@ -52,7 +53,8 @@ it extends the existing `server/cmd/nightshift` binary
    it was small, independent of everything else, and the frontend cannot
    consume a `steps` contract that is still the compiled execution form.
    **`server/` has been free and unassigned since it merged.** →
-4. **Connectors** — NEXT IN LINE, and now the critical path for two lanes:
+4. **Connectors** — IN FLIGHT (plan PR #25: seven phases). The critical path
+   for two lanes:
    the frontend cannot progress past its first slice without the build
    resource, which depends on this. Plan and implementation; collides with
    `permit.Parse`, the proxy, and the harness; four downstream specs depend on
@@ -129,9 +131,26 @@ never our own bookkeeping.
   than over `slog.Default().Handler()`.
 
   Consequence: the binary does not start. The frontend lane had to smoke-test
-  against a hand-rolled `httpapi.RegisterRoutes` harness instead. **The next
-  session to take `server/` should fix this first** — it is small and it
-  blocks any demo or manual verification.
+  against a hand-rolled `httpapi.RegisterRoutes` harness instead.
+  **Fixed in PR #24** (hang reproduced on `main`, fix verified serving, suite
+  green) — awaiting merge, and it should not wait behind feature work.
+
+- **No CI exists, and a merged security control depends on it.** The repo has
+  no `.github/` and no workflow files anywhere — verified. The connectors spec
+  states the catalog's narrow-only rule "is enforced mechanically, not by
+  convention: a CI [gate]" (line 104), and the merged **escalation** design's
+  first anti-injection control rests on it: "the catalog's append-only rule
+  means an operation's reach cannot have silently widened" (line 188). With no
+  CI, that is convention plus a tool nobody runs.
+
+  **Interim, in the connectors plan phase 1:** a committed catalog baseline
+  plus `cmd/catalog-gate`, with the server refusing to boot on a widening
+  diff. That is tamper-**evident** — a widening becomes a deliberate two-file
+  edit visible in review — not tamper-proof. Only a PR-time CI diff against
+  the merge base closes it.
+
+  **CI setup is unowned and repo-global.** It is a security follow-up, not
+  tooling hygiene, and it needs an owner who is not the connectors lane.
 
 ## Cross-cutting decisions
 
