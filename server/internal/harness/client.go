@@ -102,14 +102,22 @@ func (c *Client) Invoke(ctx context.Context, name string, input json.RawMessage)
 		return ToolResult{}, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxToolResultBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxToolResultBytes+1))
 	if err != nil {
 		return ToolResult{}, err
 	}
+	truncated := len(body) > maxToolResultBytes
+	if truncated {
+		// The model must know it is working from partial data — a
+		// silently cut-off result would read as a complete one.
+		body = append(body[:maxToolResultBytes], []byte("\n\n[tool result truncated at 256KiB]")...)
+	}
 	switch {
-	case resp.StatusCode == http.StatusUnauthorized:
-		// The run token is dead (finalized, revoked, expired): nothing
-		// this run does can recover. Fatal.
+	case resp.StatusCode == http.StatusUnauthorized && resp.Header.Get("Nightshift-Upstream") == "":
+		// The proxy's own 401: the run token is dead (finalized,
+		// revoked, expired) and nothing this run does can recover.
+		// A relayed upstream 401 (marker present) is a broken connector
+		// credential instead — tool-level, handled below.
 		return ToolResult{}, fmt.Errorf("harness client: tool %s: %s", name, resp.Status)
 	case resp.StatusCode >= 300:
 		return ToolResult{

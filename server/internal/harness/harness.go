@@ -137,17 +137,28 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 		res.Status = StatusFailed
 		res.ErrorKind = kind
 		res.ErrorMsg = err.Error()
+		// A failed tool-loop run has real accumulated usage; pricing it
+		// is what keeps max_turns loops inside the spend caps.
+		res.CostCents = llm.CostCents(in.Steps.Provider, in.Steps.Model, res.Usage)
 		emit("run.fail", map[string]any{"kind": kind})
 		if ferr := finish(); ferr != nil {
 			err = errors.Join(err, ferr)
 		}
 		return res, err
 	}
-	succeed := func(output string) (Result, error) {
+	succeed := func(output, stopReason string) (Result, error) {
 		res.CostCents = llm.CostCents(in.Steps.Provider, in.Steps.Model, res.Usage)
 		res.Output = output
 		res.Status = StatusSucceeded
-		emit("run.finish", map[string]any{"status": string(res.Status)})
+		payload := map[string]any{"status": string(res.Status)}
+		// A max_tokens stop means the final answer was cut by budget;
+		// the run still succeeds (the budget was approved) but the
+		// record says so instead of passing truncation off as a clean
+		// finish.
+		if stopReason != "" && stopReason != "end_turn" && stopReason != "stop" {
+			payload["stop_reason"] = stopReason
+		}
+		emit("run.finish", payload)
 		if err := finish(); err != nil {
 			return res, err
 		}
@@ -181,7 +192,7 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 			return fail("llm_error", err)
 		}
 		res.Usage = usage
-		return succeed(out.String())
+		return succeed(out.String(), "")
 	}
 
 	tcp, ok := provider.(llm.ToolCapableProvider)
@@ -211,7 +222,7 @@ func Run(ctx context.Context, in Input, d Deps) (Result, error) {
 		res.Usage.OutputTokens += tr.Usage.OutputTokens
 
 		if len(tr.ToolUses) == 0 {
-			return succeed(out.String())
+			return succeed(out.String(), tr.StopReason)
 		}
 		msgs = append(msgs, llm.Message{
 			Role: llm.RoleAssistant, Content: tr.Text, ToolUses: tr.ToolUses,
@@ -250,21 +261,28 @@ func dispatchAll(ctx context.Context, invoker ToolInvoker, uses []llm.ToolUse, e
 	}
 	wg.Wait()
 
-	msgs := make([]llm.Message, 0, len(uses))
+	// Emit every call's event first — a sibling that completed (and may
+	// have written upstream) keeps its audit record even when another
+	// call's transport failure aborts the run. Events carry tool name
+	// and duration only, never args or results.
+	var transportErr error
 	for i, use := range uses {
 		o := outcomes[i]
-		if o.err != nil {
-			emit("tool.call.fail", map[string]any{
-				"tool": use.Name, "duration_ms": o.took.Milliseconds(),
-			})
-			return nil, o.err
-		}
-		// Events carry tool name and duration only — no args, no results.
 		typ := "tool.call.ok"
-		if o.result.IsError {
+		if o.err != nil || o.result.IsError {
 			typ = "tool.call.fail"
 		}
 		emit(typ, map[string]any{"tool": use.Name, "duration_ms": o.took.Milliseconds()})
+		if o.err != nil && transportErr == nil {
+			transportErr = o.err
+		}
+	}
+	if transportErr != nil {
+		return nil, transportErr
+	}
+	msgs := make([]llm.Message, 0, len(uses))
+	for i, use := range uses {
+		o := outcomes[i]
 		msgs = append(msgs, llm.Message{
 			Role: llm.RoleTool, ToolUseID: use.ID,
 			Content: o.result.Content, IsError: o.result.IsError,

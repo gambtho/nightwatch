@@ -224,6 +224,11 @@ func (h *handler) connector(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	// Everything from here on is the UPSTREAM's response. The marker is
+	// what lets the harness tell a relayed upstream 401 (broken
+	// connector credential — a tool-level failure the model sees) from
+	// the proxy's own 401 (dead run token — fatal to the run).
+	w.Header().Set("Nightshift-Upstream", "1")
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}

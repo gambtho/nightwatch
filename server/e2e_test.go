@@ -489,7 +489,10 @@ func TestEndToEndConnectorToolRun(t *testing.T) {
 			t.Errorf("harness context: %v", err)
 			return
 		}
-		require.Len(t, tools, 3, "permit ops projected as tools")
+		if len(tools) != 3 {
+			t.Errorf("expected 3 projected tools, got %d", len(tools))
+			return
+		}
 		_, _ = harness.Run(ctx, harness.Input{Steps: steps, Tools: tools, RunToken: req.RunToken}, harness.Deps{
 			ProviderFactory: factory,
 			Sink:            client,
