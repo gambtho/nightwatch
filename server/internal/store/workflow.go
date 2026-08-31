@@ -121,7 +121,11 @@ func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, 
 
 // ApproveVersion marks a draft approved and stores its compiled execution
 // form in the same transaction — an approved row always carries the
-// compiled document its runs will serve.
+// compiled document its runs will serve. Callers must compile fresh from
+// this version's artifacts (steps.Compile against the current platform
+// model); copying another row's compiled blob would satisfy the CHECK but
+// silently pin a stale compilation. The escalation amendment flow is a
+// planned second caller of this path.
 func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UUID, number int, approvedBy uuid.UUID, compiled json.RawMessage) (Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
