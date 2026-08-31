@@ -110,6 +110,20 @@ From the K1 session (2026-08-31), coordinator-verified checks green:
 - **Owed**: no CI workflow covers `tomtectl/` — routed to the
   estate-cleanup prompt below (`tomtectl.yml` mirroring `server.yml`).
 
+**Standing guidance (user-confirmed, 2026-08-31): the K8s track has NO
+database, ever.** The cluster is the store — agent.yaml in a ConfigMap,
+keys in Secrets, run state in Deployment/Job status; K8s primitives also
+cover scheduling (CronJob, `concurrencyPolicy: Forbid`,
+`startingDeadlineSeconds`). `tomtectl` must never grow SQLite or any other
+store. What genuinely needs a durable store — the proxy audit trail, spend
+metering, approvals-as-records, run history — arrives only with the
+governed control plane at the K3+ transition, deployed into the cluster as
+a normal workload (in-cluster Postgres is boring; the desktop pivot's
+bundled-DB agonizing does not apply here). One decision deliberately
+reserved for the transition design: whether the K8s shape replaces the
+server scheduler with CronJob or keeps it for admission/metering
+integration.
+
 ## Lean-in cleanup (2026-08-31): onboarding-ready repo
 
 User decision: fully lean into direction change 2 and clean the repo for
