@@ -2,7 +2,21 @@
   "id": "slack",
   "name": "Slack",
   "description": "Read channels and messages in your Slack workspace, and post messages to channels you approve.",
-  "auth": { "provider": "slack" },
+  "auth": {
+    "provider": "slack",
+    "capture": {
+      "start_url": "https://api.slack.com/apps?new_app=1",
+      "start_label": "Create the Slack app",
+      "steps": [
+        "Click Create App and give it a name for your workspace.",
+        "Click Install to your workspace and approve.",
+        "Copy the token that starts with xoxb- and paste it below."
+      ],
+      "secret_prefix": "xoxb-",
+      "placeholder": "xoxb-…",
+      "verify_op": "auth_test"
+    }
+  },
   "hosts": ["slack.com"],
   "ops": [
     {
@@ -81,6 +95,18 @@
         "body": { "channel": "channel", "text": "text" }
       },
       "constraints": [{ "field": "channel" }]
+    },
+    {
+      "name": "auth_test",
+      "description": "Check that the pasted token works and which workspace it belongs to.",
+      "effect": "read",
+      "scopes": [],
+      "args_schema": { "type": "object", "additionalProperties": false },
+      "binding": {
+        "method": "POST",
+        "host": "slack.com",
+        "path": "/api/auth.test"
+      }
     }
   ]
 }

@@ -34,6 +34,9 @@ type catalogConnectorJSON struct {
 	Connected bool            `json:"connected"`
 	Status    string          `json:"status,omitempty"`
 	Ops       []catalogOpJSON `json:"ops"`
+	// Capture is the guided token-capture card, verbatim from the
+	// catalog def — copy the paste surface renders as data.
+	Capture *catalog.Capture `json:"capture,omitempty"`
 }
 
 func (d Deps) getCatalog(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +67,7 @@ func (d Deps) getCatalog(w http.ResponseWriter, r *http.Request) {
 			AuthProvider: con.Auth.Provider,
 			Connected:    status[con.Auth.Provider] != "",
 			Status:       status[con.Auth.Provider],
+			Capture:      con.Auth.Capture,
 		}
 		for _, op := range con.Ops {
 			oj := catalogOpJSON{

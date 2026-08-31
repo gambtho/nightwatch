@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gambtho/tomte/server/internal/captureverify"
 	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/engine"
 	"github.com/gambtho/tomte/server/internal/store"
@@ -35,6 +36,10 @@ type Deps struct {
 	// Catalog is the validated curated connector catalog. Version writes
 	// check permit connections against it; GET /v1/catalog serves it.
 	Catalog *catalog.Catalog
+	// CaptureVerify checks a pasted connector token upstream, before it
+	// is stored — the paste path is session-authed only, never the run
+	// path.
+	CaptureVerify *captureverify.Client
 }
 
 // Platform run-model defaults: the cheapest priced Anthropic pair. Used

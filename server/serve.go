@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/gambtho/tomte/server/internal/captureverify"
 	"github.com/gambtho/tomte/server/internal/catalog"
 	"github.com/gambtho/tomte/server/internal/compute"
 	"github.com/gambtho/tomte/server/internal/db"
@@ -182,6 +183,7 @@ func Start(ctx context.Context, o Options) (*Server, error) {
 	httpapi.RegisterRoutes(mux, httpapi.Deps{
 		Store: s, Engine: eng, Vault: master, PublicBaseURL: public,
 		RunProvider: o.RunProvider, RunModel: o.RunModel, Catalog: cat,
+		CaptureVerify: &captureverify.Client{},
 	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer, Catalog: cat})
 

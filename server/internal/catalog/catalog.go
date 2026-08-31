@@ -55,6 +55,28 @@ type Connector struct {
 // share one, so one pasted token can cover them all.
 type Auth struct {
 	Provider string `json:"provider"`
+	// Capture is the structured guided-capture card for pasting this
+	// connector's token — copy is data, not code, so the frontend renders
+	// whatever the catalog ships.
+	Capture *Capture `json:"capture,omitempty"`
+}
+
+// Capture is the guided token-capture card: where to start, what to do,
+// what shape the pasted secret has, and which op proves the paste works.
+type Capture struct {
+	StartURL   string `json:"start_url,omitempty"`
+	StartLabel string `json:"start_label,omitempty"`
+	// Steps are the user-facing instructions, in order.
+	Steps []string `json:"steps"`
+	// SecretPrefix catches a wrong-string paste instantly, before any
+	// upstream call.
+	SecretPrefix string `json:"secret_prefix,omitempty"`
+	Placeholder  string `json:"placeholder,omitempty"`
+	// VerifyOp names a read op of this connector invoked with the pasted
+	// token, session-authed, before it is stored. It is the one op
+	// allowed to declare no scopes — verifying a token must not itself
+	// require one.
+	VerifyOp string `json:"verify_op,omitempty"`
 }
 
 // Op is the atomic unit of enforcement, approval copy, and tool
@@ -187,6 +209,29 @@ func validateConnector(c *Connector) error {
 	if len(c.Ops) == 0 {
 		return fmt.Errorf("at least one op required")
 	}
+	// Capture is validated before the ops so a dangling verify_op reports
+	// as the authoring mistake it is, not as a scope error on the op that
+	// lost its exemption.
+	if cap := c.Auth.Capture; cap != nil {
+		if len(cap.Steps) == 0 {
+			return fmt.Errorf("capture: at least one steps entry required")
+		}
+		if cap.VerifyOp != "" {
+			var vop *Op
+			for _, op := range c.Ops {
+				if op.Name == cap.VerifyOp {
+					vop = op
+					break
+				}
+			}
+			if vop == nil {
+				return fmt.Errorf("capture: verify_op %q not an op of this connector", cap.VerifyOp)
+			}
+			if vop.Effect != EffectRead {
+				return fmt.Errorf("capture: verify_op %q must be a read op", cap.VerifyOp)
+			}
+		}
+	}
 	c.ops = make(map[string]*Op, len(c.Ops))
 	for _, op := range c.Ops {
 		if err := validateOp(c, op); err != nil {
@@ -210,7 +255,10 @@ func validateOp(c *Connector, op *Op) error {
 	if op.Effect != EffectRead && op.Effect != EffectWrite {
 		return fmt.Errorf("effect must be read or write")
 	}
-	if len(op.Scopes) == 0 {
+	// Every op declares its reach in scopes — except the declared verify
+	// op, whose whole job is checking a token without requiring one.
+	isVerifyOp := c.Auth.Capture != nil && c.Auth.Capture.VerifyOp == op.Name
+	if len(op.Scopes) == 0 && !isVerifyOp {
 		return fmt.Errorf("at least one scope required")
 	}
 	schema, err := ParseSchema(op.ArgsSchema)
@@ -322,6 +370,12 @@ func (c *Catalog) Connectors() []*Connector {
 		out = append(out, c.connectors[id])
 	}
 	return out
+}
+
+// Op returns one of the connector's operations by name.
+func (c *Connector) Op(name string) (*Op, bool) {
+	op, ok := c.ops[name]
+	return op, ok
 }
 
 // Op returns an operation by connector id and op name.
