@@ -218,6 +218,29 @@ func (s *Store) GetApprovedVersion(ctx context.Context, tenantID, workflowID uui
 		workflowID, tenantID))
 }
 
+// ListApprovedVersions returns every approved version in the tenant — the
+// endpoint switch gate walks them to re-check pricing and permits and to
+// recompile (see SwitchLLMEndpoint).
+func (s *Store) ListApprovedVersions(ctx context.Context, tenantID uuid.UUID) ([]Version, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+versionCols+` FROM workflow_version
+		 WHERE tenant_id = $1 AND status = 'approved' ORDER BY created_at`,
+		tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Version
+	for rows.Next() {
+		v, err := scanVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 type SchedulableWorkflow struct {
 	TenantID   uuid.UUID
 	WorkflowID uuid.UUID
