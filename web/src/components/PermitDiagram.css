@@ -1,0 +1,118 @@
+.permit {
+  margin: 0;
+}
+
+.permit-boundary {
+  border: 2px dashed var(--limit);
+  border-radius: 14px;
+  padding: 22px 16px 16px;
+  position: relative;
+  background: rgb(214 69 69 / 0.03);
+}
+
+.permit-boundary-tag {
+  position: absolute;
+  top: -11px;
+  left: 16px;
+  background: var(--limit);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.permit-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.permit-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.permit-arrow {
+  opacity: 0.4;
+}
+
+.permit-agent {
+  flex: 0.9;
+  text-align: center;
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  border-radius: 12px;
+  padding: 14px 10px;
+}
+
+.permit-agent-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  margin-top: 2px;
+}
+
+.permit-agent-providers {
+  color: var(--dim);
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+.permit-agent-none {
+  color: var(--danger);
+}
+
+.permit-agent-cost {
+  color: var(--moon);
+  font-size: 0.75rem;
+  margin-top: 6px;
+}
+
+.permit-read-label {
+  color: var(--read);
+}
+
+.permit-write-label {
+  color: var(--write);
+}
+
+.permit-empty {
+  color: var(--dim);
+  font-size: 0.82rem;
+  font-style: italic;
+  margin-top: 6px;
+}
+
+.permit-denied {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 14px 0 0;
+  padding: 0;
+  opacity: 0.5;
+}
+
+.permit-denied-item {
+  font-size: 0.78rem;
+}
+
+.permit-unrecognized {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 560px) {
+  .permit-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .permit-arrow {
+    align-self: center;
+    transform: rotate(90deg);
+  }
+}
