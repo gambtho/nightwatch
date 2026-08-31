@@ -225,12 +225,17 @@ export default function Connections() {
 
       <section className="conn-section">
         <div className="label">Tools Tomte knows how to reach</div>
-        {catalog === undefined && <p className="dim">Loading…</p>}
+        {(catalog === undefined || (catalog != null && overlay === null)) && (
+          <p className="dim">Loading…</p>
+        )}
         {catalog === null && (
           <p className="error-note">
             The catalog couldn't be loaded, so nothing can be connected right now. Refresh
             to try again.
           </p>
+        )}
+        {catalog != null && overlay !== null && catalog.length === 0 && (
+          <p className="dim">The catalog is empty — nothing to connect yet.</p>
         )}
         {catalog !== undefined &&
           catalog !== null &&

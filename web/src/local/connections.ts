@@ -45,6 +45,10 @@ export type VerifyResult = { ok: true } | { ok: false; message: string };
 const OVERLAY_KEY = "tomte.local-connections.v1";
 const MCP_KEY = "tomte.local-mcp.v1";
 
+// localStorage in the browser; an in-memory map where it's missing —
+// this vitest jsdom setup exposes no global `localStorage`, so the map
+// is what the tests exercise. Writes also fall back to the map on a
+// storage failure, so the seam never rejects; the screens rely on that.
 const memory = new Map<string, string>();
 
 function hasLocalStorage(): boolean {
@@ -66,11 +70,15 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson(key: string, value: unknown): void {
   const raw = JSON.stringify(value);
-  if (hasLocalStorage()) {
-    localStorage.setItem(key, raw);
-  } else {
-    memory.set(key, raw);
+  try {
+    if (hasLocalStorage()) {
+      localStorage.setItem(key, raw);
+      return;
+    }
+  } catch {
+    // storage refused the write — keep the never-rejects guarantee
   }
+  memory.set(key, raw);
 }
 
 /** Clears the fake store — for tests only. */
@@ -121,13 +129,16 @@ export function stateView(state: ConnectionState): StateView {
   }
 }
 
-// The Slack guide is the spec's worked example: the manifest link
-// pre-authors the app so the paste is Create → Install → copy token.
+// The Slack guide follows the spec's worked example, minus the
+// `manifest_url=…` parameter that pre-authors the app — the manifest's
+// hosted home is an open question on the board, and P2's catalog guide
+// carries the real URL. Until then the steps describe the plain create,
+// with no claim of pre-filling.
 const SLACK_GUIDE: CaptureGuide = {
   startUrl: "https://api.slack.com/apps?new_app=1",
   startLabel: "Create the Slack app",
   steps: [
-    "Click Create App — we've pre-filled what Tomte needs.",
+    "Click Create App and give it a name for your workspace.",
     "Click Install to your workspace and approve.",
     "Copy the token that starts with xoxb- and paste it below.",
   ],

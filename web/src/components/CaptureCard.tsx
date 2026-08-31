@@ -28,6 +28,12 @@ export interface CaptureCardProps {
   /** Instant wrong-string-paste check; a message blocks the verify. */
   checkShape?: (secret: string) => string | null;
   onVerify: (secret: string) => Promise<CaptureVerify>;
+  /**
+   * Called after a successful verify. The card stays in its "Checking…"
+   * state until the parent advances or unmounts it — so advance
+   * synchronously, or own any failure of your async follow-up; a
+   * follow-up that silently rejects would leave the card stuck.
+   */
   onVerified: (secret: string) => void;
   /** Extra fields above the secret input (e.g. a per-resource URL). */
   children?: ReactNode;
