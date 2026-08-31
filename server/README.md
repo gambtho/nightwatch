@@ -18,14 +18,31 @@ export DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmod
 
 go run ./cmd/nightshift migrate
 
-export NIGHTSHIFT_SESSION_KEY=$(openssl rand -base64 32)
+export NIGHTSHIFT_PUBLIC_BASE_URL=http://localhost:8080
 export NIGHTSHIFT_RUNNER_KEY=$(openssl rand -base64 32)
 export NIGHTSHIFT_VAULT_KEY=$(openssl rand -base64 32)
 go run ./cmd/nightshift serve
 ```
 
-`nightshift dev-session` mints a tenant, owner user, and session cookie for
-local use (no production login flow exists yet). Other env vars — listen
+`NIGHTSHIFT_PUBLIC_BASE_URL` is the canonical customer-facing origin
+(scheme + host, nothing else). It must be HTTPS — plain `http` is accepted
+for `localhost`/`127.0.0.1`/`::1` only — because it carries magic-link
+tokens, defines the trusted `Origin` for CSRF checks, and anchors
+post-login redirects. Host and proxy headers are never used for any of
+those.
+
+Login is an email magic link (`POST /v1/auth/magic-link` →
+`GET /auth/verify` interstitial → consuming `POST /v1/auth/verify`); the
+first verified login mints the tenant. Sessions are opaque DB-backed
+cookies (`__Host-ns_session`) with a 7-day idle window inside a 30-day
+cap. Magic-link email goes through Postmark when
+`NIGHTSHIFT_POSTMARK_TOKEN` and `NIGHTSHIFT_MAIL_FROM` are set; otherwise
+the link is written to the server log (the dev flow).
+
+`nightshift dev-session` mints a tenant, owner user, and session row for
+local use, printing the cookie. It reuses the tenant an existing email
+already belongs to; only a genuinely new email mints a tenant. Other env
+vars — listen
 address, actor state directory, platform model credentials — are documented
 in `cmd/nightshift/main.go`'s package comment. The `*_API_KEY`-shaped vars
 are gone: `NIGHTSHIFT_PLATFORM_ANTHROPIC_KEY`,
@@ -118,7 +135,8 @@ server/
   internal/engine/              shared fire path, scheduler, orphaned-run reaper
   internal/schedule/            cron + IANA timezone schedule artifact
   internal/meter/               tenant monthly spend cap, wired as the proxy Hook
-  internal/httpapi/             public /v1 API + session auth
+  internal/httpapi/             public /v1 API: magic-link auth, DB-backed sessions, Origin policy
+  internal/mail/                transactional email seam: Postmark sender + dev log sender
   internal/internalapi/         harness-facing /internal API (run-JWT auth)
   internal/token/                run-JWT signer (HKDF + HS256)
   internal/llm/                  ported providers + pricing; llmtest/ fake
