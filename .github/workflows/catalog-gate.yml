@@ -1,0 +1,65 @@
+# The connector catalog's narrow-only rule, enforced at PR time.
+#
+# Two merged security designs rest on this gate (connectors spec line 104,
+# escalation design line 188), and the click-install pivot makes it
+# load-bearing: auto-update ships catalog changes to users' machines, so
+# this check is what keeps a silent update compatible with approve-once —
+# an update may never widen what an approved permit means. A widening must
+# ship as a NEW op name; narrowings and removals pass.
+name: catalog-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the merge base with the target branch exists
+          # locally; the repo is small enough that this is cheap.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      # The same check `tomte serve` runs at boot: embedded defs/ parse,
+      # validate, and do not widen the committed baseline/ snapshot.
+      - name: Embedded defs vs committed baseline
+        working-directory: server
+        run: go run ./cmd/catalog-gate
+
+      # The PR-time check the interim boot gate cannot provide: diff the
+      # candidate defs/ against the merge base's defs/, so a widening
+      # cannot land even as a deliberate two-file defs+baseline edit.
+      # The merge base's JSON is parsed by the candidate's catalog code;
+      # a definition the new code rejects fails loudly rather than
+      # slipping through.
+      - name: Diff defs against merge base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          mb=$(git merge-base "origin/$BASE_REF" HEAD)
+          echo "merge base: $mb"
+          if ! git cat-file -e "$mb:server/internal/catalog/defs" 2>/dev/null; then
+            echo "no catalog defs at merge base; nothing to diff"
+            exit 0
+          fi
+          old=$(mktemp -d)
+          git archive "$mb" server/internal/catalog/defs | tar -x -C "$old"
+          cd server
+          go run ./cmd/catalog-gate "$old/server/internal/catalog/defs" internal/catalog/defs
