@@ -33,7 +33,7 @@ finishes, or a cross-cutting decision is taken.
 | Pivot spec (click-install)       | **Merged** (PR #37) — queue re-derived from it below                                                       |
 | Rename Nightshift → Tomte        | **Merged** (PR #38) — name FINAL (user, 2026-08-31); trademark counsel still owed                          |
 | `serve` startup deadlock         | **Fixed and merged** (PR #24) — `main` boots; the rename lane verified a real `tomte serve` boot           |
-| P1 — Subtraction and floor       | **Owns `server/`.** Plan PR #45 final (zero_cost + 6 Codex findings folded); implementation underway        |
+| P1 — Subtraction and floor       | **Delivered pending review: PR #48** (all 8 items, migration 00012, suite green per commit). Plan: PR #45   |
 | CI / catalog gate                | **Delivered: PR #41, all three workflows green in CI** — awaiting merge; closes the no-CI defect on merge  |
 | Packaging shell (`app/`)         | **PAUSED by direction change 2** — plan+spike delivered (PR #42, Wails v3); no further work until unpaused |
 | Frontend pivot surfaces          | **Delivered: PRs #43, #46, #47** (161 web tests green on the union); lane idle — see direction change 2    |
@@ -647,6 +647,40 @@ undocumented for third parties and needs token exchange.
 - Preset enum for the record:
   `anthropic|openai|openrouter|github|azure|custom|local`. Next migration
   confirmed 00012.
+
+## Delta sheet: what P1 changes (PR #48, delivered pending review)
+
+From the P1 session (2026-08-31); full detail in the PR body. Verify against
+the tree after merge. `server/` passes to **P2 (connectors main road)** when
+#48 merges.
+
+- **For packaging** (paused, but this is its contract when it resumes —
+  and for the K8s track's eventual convergence):
+  `server.Start(ctx, server.Options) (*server.Server, error)` at the module
+  root. `Options{DatabaseURL, ListenAddr (":0" ok), PublicBaseURL (optional
+  override), RunnerKey, VaultKey, StateDir, RunProvider/RunModel (legacy env
+  mode), RunTokenTTL, RunDeadline, DefaultMonthlyCapCents, PlatformKeys,
+  LogHandler}`; `Server.{Addr, BaseURL, MintLocalSession, HandoffURL,
+  Shutdown, Err}`. Host allowlist is automatic (whole mux, logged
+  rejections). **OWED to whoever ships a webview**: browser-level
+  verification that the http-loopback cookie (plain `tomte_session`, not
+  Secure — the Safari constraint) is accepted.
+- **For frontend** (idle; wire-up work when it resumes): settings API
+  documented in `docs/api/v1.md` — `GET/PUT /v1/settings/endpoint`
+  (presets `anthropic|openai|openrouter|github|azure|custom|local`; switch
+  409s: `connection_missing` / `unpriced_models` / `provider_not_permitted`
+  / `invalid_permit`), `GET/PUT /v1/settings/prices` (explicit base_url),
+  `GET/PUT /v1/settings/budget`. Approve 400
+  `{error:"unpriced_model", model, base_url}` is the inline price-form
+  trigger. Login/magic-link routes are gone;
+  `GET /local/handoff?token=&next=` sets the session cookie. Catalog lists
+  Slack only; connection JSON lost `metadata`, kept `status`.
+- **Post-plan deltas, coordinator-noted**: endpoint-provider mismatch at
+  the proxy fails CLOSED (no static-table fallback once an endpoint record
+  is configured); a `Caps.OverCap` infrastructure error keeps the scheduler
+  heartbeat, so wake catch-up survives transient DB errors.
+- Frozen labels honored: `tomte:run-jwt` untouched; `tomte-oauth-state`
+  deleted with its consumer, never renamed.
 
 ## Rule: no pre-stacked PR bases
 
