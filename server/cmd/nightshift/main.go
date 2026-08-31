@@ -185,8 +185,12 @@ func serve(ctx context.Context) error {
 	for _, v := range platform {
 		secretVals = append(secretVals, v)
 	}
+	// The inner handler must not be slog.Default().Handler(): that handler
+	// writes through the log package, and slog.SetDefault rewires log's
+	// output back through the new slog default — the first log call would
+	// re-enter this handler and deadlock on log's mutex.
 	slog.SetDefault(slog.New(redact.Handler{
-		Inner: slog.Default().Handler(),
+		Inner: slog.NewTextHandler(os.Stderr, nil),
 		R:     redact.New(secretVals),
 	}))
 
