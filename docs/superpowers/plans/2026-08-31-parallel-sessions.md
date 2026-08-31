@@ -39,7 +39,7 @@ finishes, or a cross-cutting decision is taken.
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
 | K8s agent track (THE FOCUS)      | **K1 MERGED** (#49 @ 9c9d970; 6 review findings fixed, re-verified on kind) — lane holds for K2 launch      |
-| Lean-in cleanup                  | **Hygiene #54 + login #52 MERGED**; estate COMPLETE — #51 and #56 (tomtectl CI, all 4 workflows green) await merge |
+| Lean-in cleanup                  | **ALL LANES DELIVERED.** Merged: #54, #52. Awaiting merge: #51, #56, #55 (docs — **merge #55 AFTER #51**: its README layout describes the post-removal tree) |
 | P2 — Connectors main road        | **OWNS `server/`** (handed off on #54's merge). Plan PR #53 (4 PRs: A Slack, B key-verify+ledger 00013, C MCP+SSRF 00014, D MCP enforce); rulings below |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
