@@ -100,9 +100,18 @@ Each tick:
    (`NIGHTSHIFT_GRADE_WINDOW`, default 24 h — the window is what prevents a
    first deploy from grading all of history), and no terminal grade. Grade
    each (below).
-2. **Evaluate triggers** — for each workflow touched this tick (new grade or
-   newly finalized run), run the [trigger evaluation](#auto-pause-triggers),
-   a pure function of the workflow's recent run + grade history.
+2. **Evaluate triggers** — for **every workflow with a run finalized inside
+   the grading window** (any status, rubric or not — a plain
+   `finished_at > now() - window` scan over `run`, distinct on workflow), run
+   the [trigger evaluation](#auto-pause-triggers), a pure function of the
+   workflow's recent run + grade history. The scan is deliberately **not**
+   "workflows touched this tick": finalization happens on three independent
+   paths (harness finalize, `engine.failDispatch`, the reaper), none of which
+   this loop observes directly, and a crash between a finalization and the
+   next tick must not drop a trigger. Re-evaluating an unchanged workflow is
+   idempotent by construction — the pause transition no-ops when already
+   paused, and the non-pausing alert kinds carry dedup keys (below) — so no
+   outbox or watermark is needed; the window bound keeps the scan small.
 
 Failed runs are never graded — there is no output to hold to a quality bar;
 they feed the hard-failure trigger instead. A paused workflow's runs are
@@ -216,7 +225,7 @@ cap-adjacent runs fail their own inspection.
 
 ```sql
 CREATE TABLE run_grade (
-    run_id uuid PRIMARY KEY REFERENCES run (id) ON DELETE CASCADE,
+    run_id uuid PRIMARY KEY,
     tenant_id uuid NOT NULL,
     workflow_id uuid NOT NULL,
     version int NOT NULL,          -- the run's pinned version; names the rubric graded against
@@ -232,6 +241,13 @@ CREATE TABLE run_grade (
     tokens_in int, tokens_out int, cost_cents int,
     created_at timestamptz NOT NULL DEFAULT now(),
     graded_at timestamptz,
+    -- Binds the grade to its run's OWN tenant/workflow/version — a grade
+    -- cannot name a (workflow, version) pair its run does not belong to.
+    -- Backed by a new UNIQUE index on run (id, tenant_id, workflow_id, version)
+    -- (id alone is already the PK, so the index adds no new uniqueness, only
+    -- a composite FK target — the same convention as roadmap decision 4).
+    FOREIGN KEY (run_id, tenant_id, workflow_id, version)
+        REFERENCES run (id, tenant_id, workflow_id, version) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, workflow_id)
         REFERENCES workflow (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (workflow_id, version)
@@ -310,24 +326,44 @@ transition is the dedup).
 
 | Trigger     | Condition (post-anchor, most recent first)                                                         | Reason    |
 | ----------- | -------------------------------------------------------------------------------------------------- | --------- |
-| **Rubric**  | Some criterion id has `verdict: fail` in the 3 most recent **graded** runs                         | `rubric`  |
+| **Rubric**  | Some criterion id's 3 most recent **definitive verdicts** are all `fail`                           | `rubric`  |
 | **Spend**   | The 3 most recent finalized runs each carry a `spend.exceeded` run event                           | `spend`   |
 | **Failure** | The 3 most recent finalized runs are all `status = 'failed'` (any `error_kind`, orphaned included) | `failure` |
 
 Sequencing rules, stated so implementations don't guess:
 
-- The rubric streak is computed over **graded runs only** — runs with
-  `error`/`skipped` grades, failed runs, and `cannot_grade` verdicts neither
-  extend nor reset it. Failed runs _do_ reset the spend streak's "each
-  carries the event" chain only by not carrying the event; they are counted
-  by the failure trigger instead.
+- **A criterion's sequence contains only its definitive verdicts** — the
+  `pass`/`fail` results that criterion received in `graded` runs. A
+  `cannot_grade` verdict, an `error`/`skipped` grade, or a failed run
+  contributes nothing to that criterion's sequence: it neither extends nor
+  resets the streak, it is simply absent. So `fail, cannot_grade, fail, fail`
+  is a streak of three and pauses; `fail, pass, fail, fail` is a streak of
+  two and does not. Failed runs are counted by the failure trigger instead,
+  and a run absent the `spend.exceeded` event breaks the spend chain by not
+  carrying it.
 - This answers Plan 3's open question directly: **yes, `spend.exceeded`
   feeds auto-pause**, as its own trigger with its own reason — an overrun is
   a broken permit promise, not a broken rubric promise, and the alert must
   name which.
-- A criterion id that disappears from the currently approved rubric cannot
-  fire (its streak is orphaned; the version-approval anchor already resets
-  it anyway).
+- **Criterion id identity vs. the anchor, reconciled**: the id is what an
+  alert and a future streak attach to; it is not a way for failures to
+  outlive a fix. Version approval stamps the anchor, deliberately resetting
+  every _active_ streak (an edit is a fix); a criterion that keeps its id
+  across the edit starts a fresh sequence under the same name, which is what
+  lets the alert say "this same rule again". A criterion id that disappears
+  from the approved rubric cannot fire at all.
+
+### Interaction with graduated permits, stated now
+
+The graduated-permits spec turns "auto-pause" into "demote where a lower
+rung exists, pause only at the bottom rung". That spec is unplanned and
+depends on this grader, so **Plan 4 ships pause-always, and that is v1
+behavior, not an oversight**. When ladders land, their demotion policy
+intercepts the **rubric** trigger's transition — same streak, same alert
+machinery, with "paused" replaced by "now doing less" where a lower rung
+exists and pause remaining the bottom-rung fallback. The spend and failure
+triggers keep pausing regardless: a narrower rung does not fix an
+over-budget permit or a workflow that cannot complete a run.
 
 ### The ungradeable alert
 
@@ -337,8 +373,13 @@ kind `ungradeable` is created **without pausing**. This is the guard against
 the failure mode the blind-spot pass ranked first: the grader breaking (or
 being flooded with `cannot_grade` by injected output) and "silence is good"
 failing silently. Pausing would be wrong — the work itself may be fine — but
-the user must learn that nobody is checking it. Fired only on the exact
-transition to 3, so a persistent outage alerts once per streak, not per run.
+the user must learn that nobody is checking it. Deduplication must survive
+the idempotent re-scan, so "fire on the transition to 3" is implemented as a
+DB fact, not an observation: the alert's `dedup_key` is the id of the run
+that **started** the current unbroken ungradeable streak, unique per
+(workflow, kind). Re-evaluating the same history inserts nothing, a streak
+growing past 3 keys to the same starting run, and a genuinely new streak
+(broken by a definitive grade in between) gets a new key and a new alert.
 
 ### The monthly-cap alert
 
@@ -365,6 +406,7 @@ CREATE TABLE alert (
                         'failure_autopause', 'ungradeable', 'monthly_cap')),
     criterion_id text,             -- rubric_autopause only
     period text,                   -- monthly_cap only: 'YYYY-MM' (UTC)
+    dedup_key text,                -- ungradeable only: starting run id of the streak
     payload jsonb NOT NULL DEFAULT '{}',  -- run ids, quoted reasons, counts
     status text NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'delivered', 'failed')),
@@ -380,8 +422,20 @@ CREATE TABLE alert (
 );
 CREATE UNIQUE INDEX alert_monthly_cap_once
     ON alert (tenant_id, period) WHERE kind = 'monthly_cap';
+CREATE UNIQUE INDEX alert_dedup
+    ON alert (workflow_id, kind, dedup_key) WHERE dedup_key IS NOT NULL;
 CREATE INDEX alert_pending_idx ON alert (next_attempt_at) WHERE status = 'pending';
 ```
+
+**Delivery state is per-alert, because v1 has exactly one destination.**
+`status`/`attempts`/`next_attempt_at` track the alert's single email
+delivery. This deliberately does not support independent per-destination
+retry state; when a second destination arrives (push), delivery state moves
+to an `alert_delivery` child table (one row per alert × destination, same
+columns) and the alert keeps only its creation-time facts. That schema is
+named here as the extension point and deliberately not built speculatively —
+the in-process dispatcher fan-out ported below is about failure _isolation_
+within one attempt, not durable per-destination bookkeeping.
 
 The alert row is the durable fact; delivery is retried from it. `GET
 /v1/alerts` (optional `workflow` filter) lists the tenant's alerts — the
@@ -537,22 +591,28 @@ against something concrete:
   produces per-criterion verdicts — pinning the prompt's delimiting, not the
   model's virtue).
 - **Triggers**: per-criterion streak (fail-fail-fail on one id pauses;
-  fails spread across different ids do not); graded-runs-only sequencing
-  (interleaved failed runs and error grades neither extend nor reset);
-  `streak_anchor_at` (resume, then a third consecutive historical failure
-  does not re-pause; a fresh post-resume streak does); version approval
-  resets; spend and failure triggers on exactly 3; already-paused no-op;
-  pause + alert land in one transaction (a crash between them is
-  impossible by construction).
+  fails spread across different ids do not); definitive-verdict sequencing
+  (`fail, cannot_grade, fail, fail` pauses; interleaved failed runs and
+  error grades neither extend nor reset); **durable discovery** (three
+  failed runs on a rubricless workflow, finalized via harness, dispatch
+  failure, and reaper paths, still pause — with a scheduler/alerter restart
+  between the third finalization and the evaluation); re-scan idempotency
+  (evaluating unchanged history twice creates no second alert — pause
+  no-op, `dedup_key` unique for ungradeable); `streak_anchor_at` (resume,
+  then a third consecutive historical failure does not re-pause; a fresh
+  post-resume streak does); version approval resets; spend and failure
+  triggers on exactly 3; already-paused no-op; pause + alert land in one
+  transaction (a crash between them is impossible by construction).
 - **Pause switch**: scheduled fire skipped while paused and resumes after;
   manual fire allowed while paused; pause/resume idempotency; cross-tenant
   pause reads as 404.
 - **Alerts**: `monthly_cap` uniqueness per (tenant, month) under concurrent
-  ticks; delivery backoff and terminal `failed`; per-destination isolation
-  (email failure doesn't poison a future second destination); rendered email
-  escapes hostile grader-reason content (`<script>` in a reason arrives
-  entity-escaped, against the ported fake-SMTP server); recipient addresses
-  redacted in logs.
+  ticks; delivery backoff and terminal `failed`; dispatcher failure
+  isolation within one attempt (a panicking/failing publisher yields a
+  `Result`, never kills the sweep); rendered email escapes hostile
+  grader-reason content (`<script>` in a reason arrives entity-escaped,
+  against the ported fake-SMTP server); recipient addresses redacted in
+  logs.
 - **e2e**: a scheduled workflow with a rubric produces three consecutive
   failing runs against a fake provider → grade rows, auto-pause, one alert
   row, one email through the fake SMTP server with all four blocks; resume
