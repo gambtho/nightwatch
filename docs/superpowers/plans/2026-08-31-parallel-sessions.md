@@ -39,8 +39,8 @@ finishes, or a cross-cutting decision is taken.
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
 | K8s agent track (THE FOCUS)      | **K1 MERGED** (#49 @ 9c9d970; 6 review findings fixed, re-verified on kind) — lane holds for K2 launch      |
-| Lean-in cleanup                  | **ALL LANES DELIVERED.** Merged: #54, #52. Awaiting merge: #51, #56, #55 (docs — **merge #55 AFTER #51**: its README layout describes the post-removal tree) |
-| P2 — Connectors main road        | **OWNS `server/`** (handed off on #54's merge). Plan PR #53 (4 PRs: A Slack, B key-verify+ledger 00013, C MCP+SSRF 00014, D MCP enforce); rulings below |
+| Lean-in cleanup                  | **COMPLETE AND FULLY MERGED** (#51, #52, #54, #55, #56) — the repo is onboarding-ready                     |
+| P2 — Connectors main road        | **OWNS `server/`. PR A MERGED (#57)**; phase B (key-verify + spend_entry ledger, migration 00013) is GO    |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
 ## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
@@ -288,6 +288,18 @@ Four calls led in the P2 plan, ruled by the coordinating session:
 Frontend divergences flagged in the plan (additive `missing_scopes` on
 VerifyResult; `registerMcpServer` response gains the created row) are
 accepted as additive; the frontend wires them when it wakes.
+
+**Phase A review saves (PR #57), for the board's memory:**
+
+- **The catalog gate's baseline fingerprint silently excluded the new
+  `capture` block** — a repointed `verify_op` would not have demanded a
+  baseline update, a real hole in the narrow-only control's coverage as
+  the catalog grows fields. Now covered, with a drift test so the next
+  new catalog field cannot silently escape the fingerprint either.
+- **Verify initially failed OPEN on an unreadable 2xx** — a WAF or
+  TLS-proxy HTML interstitial would have "verified" a token. Now fails
+  closed, tested. Pattern worth repeating: every verify path fails
+  closed on anything but a well-formed positive.
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
