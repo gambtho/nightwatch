@@ -1,7 +1,8 @@
 # P2 — Connectors Main Road: Implementation Plan
 
-**Status:** Awaiting coordination review; `server/` lock taken only after the
-hygiene pass merges
+**Status:** Decisions 1–4 below coordinator-ruled ACCEPTED (2026-08-31,
+recorded on the board, "P2 plan decisions"); `server/` lock taken only after
+the hygiene pass (PR #54) merges
 **Date:** 2026-08-31
 **Author:** gambtho
 **Spec:** [`2026-08-31-tomte-pivot-design.md`](../specs/2026-08-31-tomte-pivot-design.md)
@@ -116,7 +117,10 @@ verify is a `422` with a user-facing `message` and **nothing is stored**. A
 successful verify stores the connection (existing upsert, `status='ok'`)
 and the `200` response gains an optional `missing_scopes: [...]` warning —
 warn-and-store, per the spec ("warns immediately … instead of failing at
-first run").
+first run"). Re-pasting is idempotent and always re-verifies (coordinator
+condition): a PUT over an existing connection runs the same live verify
+before the upsert replaces the stored value — a stale-but-working token is
+replaced, a bad re-paste changes nothing.
 
 Fail-closed sequencing (the old plan's decision 2, carried forward):
 phase A accepts `kind: api_key` only for providers present in the catalog;
@@ -220,15 +224,20 @@ call doubles as a reachability check. Response: `{ok:true,
 cost_cents, recorded}` or `{ok:false, message}` (mapped upstream auth
 errors, timeouts, connectivity).
 
-**Spec-phrase divergence, stated plainly:** the spec says "through the
-proxy path". The proxy's LLM route requires a run identity and permit and
+**Spec-phrase divergence, ruled:** the spec says "through the proxy
+path". The proxy's LLM route requires a run identity and permit and
 resolves credentials from the vault — none exist at paste time. This plan
-reads "proxy path" as _the same validation and injection semantics_
-(`endpoint.Validate`, `Route`, `CredentialHeader` — shared code, one
-source of truth), with the egress made directly by the server process. If
-coordination reads the spec as requiring the literal proxy hop, this
-decision reverts to minting an internal synthetic identity — noted as the
-alternative, rejected for widening the run-token trust surface.
+reads "proxy path" as _the same validation and injection semantics_, with
+the egress made directly by the server process. **Coordinator-accepted as
+spec interpretation** (the capture-guide section's own control-plane
+verify — "session-authed … never a run token" — is the consistent
+precedent), with a binding condition: the shared code must be the proxy's
+**actual** validation and injection machinery — `endpoint.Validate` for
+the base URL, `endpoint.Route()` / `CredentialHeader()` for the upstream
+and header slot, the same functions the proxy calls — never a parallel
+reimplementation. Tests assert the verify call and the proxy produce the
+same upstream request shape for the same endpoint. The
+synthetic-identity proxy hop is retired, not merely deferred.
 
 Budget posture: the verify consults `Meter.CapCents`/`OverCap` first and
 refuses (`{ok:false, message: budget copy}`) when the budget is exhausted —
@@ -391,8 +400,6 @@ against the real web app where the seams exist to exercise.
   breaks the `ok`-envelope convention, the rule graduates to a per-capture
   declaration (e.g. `verify_ok_field`) — a catalog data change, not a
   reshape.
-- **"Proxy path" reading** (decision 5): reverts to a synthetic-identity
-  proxy hop if coordination rules the spec literal.
 - **Phase 3 (options client):** unscheduled; slots between B and C or after
   D if the build lane asks — its old-plan design (session-authed
   compile-reuse, `effect: write` rejected) is unchanged by anything here.
