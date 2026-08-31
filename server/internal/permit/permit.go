@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
 )
 
@@ -33,6 +34,12 @@ func Parse(raw []byte) (Permit, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		return Permit{}, fmt.Errorf("permit: %w", err)
+	}
+	// Reject trailing garbage after the JSON document (e.g. a second
+	// concatenated object) — Decode stops after one value and silently
+	// ignores whatever follows unless we check for it explicitly.
+	if err := dec.Decode(new(struct{})); err != io.EOF {
+		return Permit{}, fmt.Errorf("permit: trailing data after document")
 	}
 	if p.V != 1 {
 		return Permit{}, fmt.Errorf("permit: unsupported version %d", p.V)

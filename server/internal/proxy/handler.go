@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -36,8 +37,12 @@ func extractRunToken(provider string, r *http.Request) string {
 }
 
 func (h *handler) emit(r *http.Request, id RunIdentity, typ string, payload map[string]any) {
-	// Best-effort: a denial is enforced even if recording it fails.
-	if err := h.d.Events.AppendEvent(r.Context(), id.TenantID, id.RunID, typ, payload); err != nil {
+	// Best-effort: a denial is enforced even if recording it fails. Use a
+	// cancel-free context: a client disconnect must not silently drop the
+	// audit event for a request the proxy already finished handling (same
+	// class of fix as main's failDispatch — audit delivery must survive
+	// client disconnect).
+	if err := h.d.Events.AppendEvent(context.WithoutCancel(r.Context()), id.TenantID, id.RunID, typ, payload); err != nil {
 		slog.Error("proxy: append event", "type", typ, "run", id.RunID, "err", err)
 	}
 }
@@ -60,6 +65,7 @@ func (h *handler) authorize(w http.ResponseWriter, r *http.Request, provider str
 	p, err := h.d.Permits.PermitForRun(r.Context(), id.TenantID, id.RunID)
 	if err != nil {
 		// Fail closed: no permit, no egress.
+		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider, "reason": "permit"})
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return RunIdentity{}, permit.Permit{}, ProviderRoute{}, false
 	}
@@ -104,11 +110,13 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 		if errors.As(err, &he) && (he.Status == http.StatusForbidden || he.Status == http.StatusTooManyRequests) {
 			status = he.Status
 		}
+		h.emit(r, id, "proxy.denied", map[string]any{"provider": provider, "reason": "hook", "status": status})
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
 	secret, err := h.d.Credentials.Credential(r.Context(), id.TenantID, p.LLM.Connection, provider)
 	if err != nil {
+		slog.Error("proxy: credential resolution", "provider", provider, "err", err)
 		h.emit(r, id, "proxy.error", map[string]any{"provider": provider, "stage": "credential"})
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -149,6 +157,9 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 				pr.Out.Header.Set("Authorization", "Bearer "+secret.Value)
 			}
 		},
+		// Route transport errors through the redacting slog handler rather
+		// than the stdlib default logger.
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 	}
 	rp.ServeHTTP(sw, r)
 	h.emit(r, id, "proxy.request", map[string]any{
@@ -163,7 +174,16 @@ func (h *handler) forward(w http.ResponseWriter, r *http.Request, provider strin
 // run-token auth, so this route adds reachability, not authority — it
 // exists so a sandboxed actor whose only egress is the proxy can still
 // deliver run records.
+//
+// InternalBase is the control plane's own base URL — the same origin that
+// serves the public /v1 API — so the forwarded remainder is restricted to
+// paths starting with "internal/". Without this a run token could reach
+// /v1/... on the control plane, or recurse into /proxy/internal/... itself.
 func (h *handler) passthrough(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.PathValue("path"), "internal/") {
+		http.NotFound(w, r)
+		return
+	}
 	base, err := url.Parse(h.d.Config.InternalBase)
 	if err != nil || h.d.Config.InternalBase == "" {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -178,6 +198,7 @@ func (h *handler) passthrough(w http.ResponseWriter, r *http.Request) {
 			pr.Out.URL.RawPath = ""
 			pr.Out.Host = base.Host
 		},
+		ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 	}
 	rp.ServeHTTP(w, r)
 }

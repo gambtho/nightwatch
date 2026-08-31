@@ -32,6 +32,7 @@ func TestParseRejects(t *testing.T) {
 		"unknown field":        `{"v":1,"blast_radius":true}`,
 		"not json":             `nope`,
 		"empty provider name":  `{"v":1,"llm":{"providers":[""]}}`,
+		"trailing garbage":     `{"v":1}garbage`,
 	} {
 		_, err := permit.Parse([]byte(raw))
 		require.Error(t, err, name)
