@@ -55,7 +55,9 @@ export default function Setup() {
   const [opsByConnector, setOpsByConnector] = useState<Record<string, string[]>>({});
   const [resourceText, setResourceText] = useState<Record<string, string>>({});
 
-  const [errors, setErrors] = useState<string[]>([]);
+  // After the first submit attempt, errors recompute live so a fixed
+  // field's message doesn't linger until the next click.
+  const [attempted, setAttempted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -126,16 +128,17 @@ export default function Setup() {
     });
   }
 
+  const errors = attempted ? validateDraft(currentDraft(), catalog ?? null) : [];
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setServerError(null);
-    const draft = currentDraft();
-    const found = validateDraft(draft, catalog ?? null);
-    setErrors(found);
+    setAttempted(true);
+    const found = validateDraft(currentDraft(), catalog ?? null);
     if (found.length > 0) return;
     setSubmitting(true);
     try {
-      const { workflow } = await createWorkflow(toCreateBody(draft));
+      const { workflow } = await createWorkflow(toCreateBody(currentDraft()));
       navigate(`/workflows/${workflow.id}/approve`);
     } catch (err) {
       if (isAuthError(err)) {
