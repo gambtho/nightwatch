@@ -45,7 +45,7 @@ Confirmed facts the plan builds on:
 5. **Handoff is a GET that consumes**: `GET /local/handoff?token=…` atomically consumes (login_token's single-use UPDATE shape), mints the session in the same tx, sets the cookie, 303-redirects. The scanner-proof interstitial existed for _emailed_ links; a loopback URL minted seconds earlier by the shell has no scanner in the path.
 6. `connection.metadata` is dropped with `epoch` (only OAuth ever wrote it); `status` stays.
 7. **Five presets** (board amendment, 2026-08-31, relayed by the coordinating session): Anthropic, OpenAI, OpenRouter, **GitHub Models**, **Azure AI Foundry**, plus custom and local. Verified against current vendor docs:
-   - **GitHub Models**: fixed base URL `https://models.github.ai/inference`, OpenAI-compatible chat/completions, auth `Authorization: Bearer <PAT>` (fine-grained PAT with `models:read`). Quota is **subscription-included, not per-token** — so the preset is classified **zero-cost** like `local` (gate skipped, cost recorded 0, copy "included with your GitHub plan"), but unlike `local` it still requires a credential. Sources: GitHub REST models-inference docs.
+   - **GitHub Models**: fixed base URL `https://models.github.ai/inference`, OpenAI-compatible chat/completions, auth `Authorization: Bearer <PAT>` (fine-grained PAT with `models:read`). Billing is **two-mode** (board correction, 2026-08-31): the free included quota is subscription-included/rate-limited, but **opt-in pay-as-you-go exists** (token units × per-model multipliers; personal accounts default to a $0 spending limit but can raise it), so a blanket $0 classification would be silent unmetered spend — the exact thing the gate exists to prevent. Resolution: **zero-cost is an explicit per-endpoint flag, never preset-inferred.** The github preset asks "free included quota, or paid usage enabled?": free → `zero_cost = true`, gate skipped, cost recorded 0, copy "included with your GitHub plan — if you later enable paid usage, update this in settings"; paid → `zero_cost = false` and the normal user-entered (base URL, model) price path (link GitHub's pricing page). Flipping the flag later is an ordinary endpoint switch through `PUT /v1/settings/endpoint` — a recorded governance event that re-runs the gate and recompiles. `local` is always `zero_cost = true`. Sources: GitHub REST models-inference docs; GitHub changelog 2025-06-24 (paid usage beyond free limits); docs.github.com "About billing for GitHub Models".
    - **Azure AI Foundry**: **per-resource** base URL — Tomte pins the **v1 API**: `https://<resource>.openai.azure.com/openai/v1` or `https://<resource>.services.ai.azure.com/openai/v1`, which is OpenAI-compatible chat/completions with **no `api-version` parameter** (v1 GA). API keys are sent in an **`api-key` header** (Bearer is Entra-token-only, out of scope). Validation: HTTPS, host suffix ∈ {`.openai.azure.com`, `.services.ai.azure.com`}, path exactly `/openai/v1`. No bundled prices (Azure pricing is per-deployment) — the user-entered price path is Azure's pricing story. Source: MS Learn "Azure OpenAI v1 API" (api-version-lifecycle).
 
 ---
@@ -110,9 +110,14 @@ CREATE TABLE llm_endpoint (
   base_url text NOT NULL,
   connection_name text,
   run_model text NOT NULL,
+  -- Explicit $0 classification, never inferred (local always; github only on the
+  -- free included quota — paid GitHub usage takes the user-entered price path).
+  zero_cost boolean NOT NULL DEFAULT false,
   updated_at timestamptz NOT NULL DEFAULT now(),
   -- A local endpoint carries no credential, ever ("Endpoint agnosticism").
-  CONSTRAINT llm_endpoint_local_no_connection CHECK (preset <> 'local' OR connection_name IS NULL)
+  CONSTRAINT llm_endpoint_local_no_connection CHECK (preset <> 'local' OR connection_name IS NULL),
+  CONSTRAINT llm_endpoint_local_zero_cost CHECK (preset <> 'local' OR zero_cost),
+  CONSTRAINT llm_endpoint_zero_cost_presets CHECK (NOT zero_cost OR preset IN ('local', 'github'))
 );
 
 -- User-entered prices, keyed by the endpoint's canonical base URL ("The priced-pair gate, reworked").
@@ -142,7 +147,7 @@ CREATE TABLE tenant_event (
 - `GetSchedulerHeartbeat(ctx) (*time.Time, error)` / `SetSchedulerHeartbeat(ctx, t time.Time) error` (`INSERT … ON CONFLICT (id) DO UPDATE`) — `// System query:` comments; the single documented exception to the tenant-scoping rule for tables (precedent: the three System-query list methods).
 - `CreateHandoffToken(ctx, tokenHash string, tenantID, userID uuid.UUID, ttl time.Duration) error` — inline sweep `DELETE FROM handoff_token WHERE expires_at < now() - interval '1 hour'` on the write path (login_token's trick).
 - `ConsumeHandoffToken(ctx, tokenHash, sessionTokenHash string) (tenantID, userID uuid.UUID, err error)` — one tx: claim via `UPDATE … SET consumed_at = now() WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now() RETURNING tenant_id, user_id`, then the existing unexported `createSession`, commit. `pgx.ErrNoRows` → `ErrHandoffTokenInvalid` (new sentinel).
-- `GetLLMEndpoint(ctx, tenantID) (*LLMEndpoint, error)` (`ErrNotFound` when unset) / `PutLLMEndpoint(ctx, tenantID, e LLMEndpoint) error` (upsert) with `type LLMEndpoint struct { Preset, Kind, BaseURL string; ConnectionName *string; RunModel string }`.
+- `GetLLMEndpoint(ctx, tenantID) (*LLMEndpoint, error)` (`ErrNotFound` when unset) / `PutLLMEndpoint(ctx, tenantID, e LLMEndpoint) error` (upsert) with `type LLMEndpoint struct { Preset, Kind, BaseURL string; ConnectionName *string; RunModel string; ZeroCost bool }`.
 - `GetModelPrice(ctx, tenantID, baseURL, model string) (inCents, outCents int, err error)` / `UpsertModelPrice(ctx, tenantID, baseURL, model string, inCents, outCents int) error` / `ListModelPrices(ctx, tenantID) ([]ModelPrice, error)`.
 - `AppendTenantEvent(ctx, tenantID, eventType string, payload json.RawMessage) error`.
 - `ListApprovedVersions(ctx, tenantID) ([]Version, error)` and `UpdateApprovedCompiled(ctx, tenantID, workflowID uuid.UUID, version int, compiled json.RawMessage) error` (`WHERE status = 'approved'`, `ErrNotFound` otherwise) — for switch-time recompilation.
@@ -222,9 +227,9 @@ type Endpoint struct {
     BaseURL string // canonical; fixed for anthropic/openai/openrouter/github, user-entered for azure/custom/local
     Connection string // vault llm_api_key connection name; empty for local
     RunModel   string
+    ZeroCost   bool   // explicit classification: local always true; github by user choice (free quota vs paid usage); all others false
 }
 func (e Endpoint) Provider() string   // presets → their name ("github", "azure", …); custom → "custom"; local → "local"
-func (e Endpoint) ZeroCost() bool     // Preset ∈ {"local", "github"} — the ONLY $0 classifier, never loopback inference
 func (e Endpoint) Route() (base, method, path string) // kind anthropic → POST v1/messages; openai_compatible → POST chat/completions (path allowlist unchanged; Azure v1 API needs no api-version)
 func (e Endpoint) CredentialHeader() string // "x-api-key" (anthropic) | "api-key" (azure) | "Authorization: Bearer" (rest) | none (local)
 func Canonical(raw string) (string, error) // lowercase scheme+host, strip trailing slash
@@ -263,18 +268,18 @@ PriceOutCentsPer1M int   `json:"price_out_cents_per_1m,omitempty"`
 
 1. `Store.GetLLMEndpoint`; `ErrNotFound` → legacy mode, exactly today's code path.
 2. `provider, model := e.Provider(), e.RunModel`; permit `AllowsProvider(provider)` check as today.
-3. `e.ZeroCost()` (`local`, `github`) → prices 0/0, `MaxTokens = defaultBudgetTokens`, **gate skipped** (`local`: "runs on your computer — free"; `github`: "included with your GitHub plan").
-4. Priced preset → `llm.Price(provider, model)`; miss falls through to 5 (azure/custom always land here — no bundled rows).
+3. `e.ZeroCost` (the explicit flag: `local` always; `github` only in free-quota mode) → prices 0/0, `MaxTokens = defaultBudgetTokens`, **gate skipped** (`local`: "runs on your computer — free"; `github`: "included with your GitHub plan").
+4. Priced preset → `llm.Price(provider, model)`; miss falls through to 5 (azure/custom — and github in paid mode — always land here: no bundled rows).
 5. `Store.GetModelPrice(tenant, e.BaseURL, model)`; miss → **400 with a machine-readable body** `{"error": "unpriced_model", "model": model, "base_url": e.BaseURL}` — the frontend's inline two-number form contract.
 6. Resolved prices + endpoint fields go into `steps.Platform`; `MaxTokens = llm.MaxTokensForOutPrice(outCents, perRunCents)`.
 7. Connection check: `local` endpoints skip the `llm.connection` existence check (nothing to look up); others check `e.Connection` (falling back to today's `"default"` tolerance in legacy mode).
 
-**Harness cost:** in `harness.Run`, cost per turn becomes: `EndpointPreset` ∈ {`local`, `github`} → 0; compiled prices present → `(in*PriceIn + out*PriceOut) / 1e6` floored once (today's floor-once semantics, `costFromCompiled` helper); else (v<2 doc) → `llm.CostCents` as today.
+**Harness cost:** in `harness.Run`, cost per turn becomes: `EndpointPreset != ""` → cost from the compiled prices, `(in*PriceIn + out*PriceOut) / 1e6` floored once (today's floor-once semantics, `costFromCompiled` helper; a zero-cost approval compiled 0/0, so it yields 0 with no preset special-casing); else (v<2 / legacy doc) → `llm.CostCents` as today.
 
 **`httpapi/settings.go`** (all session-authed; mutations Origin-wrapped via `mut(auth(...))`):
 
-- `GET /v1/settings/endpoint` → `{preset, kind, base_url, connection, run_model, connected}` or 404 when unset.
-- `PUT /v1/settings/endpoint` `{preset, base_url, connection, run_model}` → `endpoint.Validate`; then the **switch-time gate**: for every approved version, resolve the new (provider, model) price exactly as approveVersion does; any miss → `409 {"error": "unpriced_models", "models": [{"model": …, "base_url": …}]}` and **no write**. On success: `PutLLMEndpoint`, recompile every approved version (`steps.Parse` the stored draft → `steps.Compile` with the new Platform → `UpdateApprovedCompiled`), `AppendTenantEvent(…, "endpoint.switched", {"from": old.BaseURL|null, "to": new.BaseURL, "preset": new.Preset})`. The recorded governance act.
+- `GET /v1/settings/endpoint` → `{preset, kind, base_url, connection, run_model, zero_cost, connected}` or 404 when unset.
+- `PUT /v1/settings/endpoint` `{preset, base_url, connection, run_model, zero_cost}` (`zero_cost` accepted only for `github` — `local` forces true, everything else forces false; a flip of the flag alone is still a full switch) → `endpoint.Validate`; then the **switch-time gate**: for every approved version, resolve the new (provider, model) price exactly as approveVersion does; any miss → `409 {"error": "unpriced_models", "models": [{"model": …, "base_url": …}]}` and **no write**. On success: `PutLLMEndpoint`, recompile every approved version (`steps.Parse` the stored draft → `steps.Compile` with the new Platform → `UpdateApprovedCompiled`), `AppendTenantEvent(…, "endpoint.switched", {"from": old.BaseURL|null, "to": new.BaseURL, "preset": new.Preset})`. The recorded governance act.
 - `GET /v1/settings/prices` / `PUT /v1/settings/prices` `{base_url, model, input_cents_per_1m, output_cents_per_1m}` (explicit `base_url` so switch-time pricing can target the _new_ endpoint before switching).
 - `GET /v1/settings/budget` → `{monthly_cap_cents}`; `PUT /v1/settings/budget` `{monthly_cap_cents}` → `SetTenantMonthlyCap` (first HTTP caller; the budget is user-owned now).
 
@@ -334,6 +339,6 @@ Tests (`serve_test.go`, testpg-backed): `TestStartBootsAndServes` — `Start` wi
 
 **Packaging lane** — the library seam: `server.Options` / `server.Start(ctx, Options) (*Server, error)` / `Server.{Addr, BaseURL, MintLocalSession, HandoffURL, Shutdown, Err}` exactly as Task 9. `TOMTE_PUBLIC_BASE_URL` optional; Host allowlist automatic.
 
-**Frontend lane** — API shapes: settings endpoints + error contracts exactly as Task 7 (`unpriced_model` / `unpriced_models` bodies are the price-form triggers); preset enum `anthropic|openai|openrouter|github|azure|custom|local` (azure/custom/local take a user base URL; github/local are zero-cost by classification); login/magic-link routes gone; `GET /local/handoff?token=&next=` sets the session cookie; `/v1/me`, logout, Origin rules unchanged.
+**Frontend lane** — API shapes: settings endpoints + error contracts exactly as Task 7 (`unpriced_model` / `unpriced_models` bodies are the price-form triggers); preset enum `anthropic|openai|openrouter|github|azure|custom|local` (azure/custom/local take a user base URL; `zero_cost` is an explicit per-endpoint flag — local always, github by free-vs-paid choice on the capture card, togglable later via the endpoint settings switch); login/magic-link routes gone; `GET /local/handoff?token=&next=` sets the session cookie; `/v1/me`, logout, Origin rules unchanged.
 
 Final numbers (migration verified as 00012, exact signatures as merged) are re-verified against the tree at PR time and reported to the board.
