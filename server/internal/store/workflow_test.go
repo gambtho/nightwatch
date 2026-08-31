@@ -21,7 +21,7 @@ func testDoc() store.VersionDoc {
 			Model:        "claude-sonnet-5",
 			MaxTokens:    2048,
 		},
-		Permit: json.RawMessage(`{"read":["zendesk"],"write":["slack:#support"]}`),
+		Permit: json.RawMessage(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric: json.RawMessage(`{"rules":["never miss a security issue"]}`),
 	}
 }

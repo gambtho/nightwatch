@@ -97,6 +97,7 @@ func TestEndToEndRun(t *testing.T) {
 			"model":         "claude-sonnet-5",
 			"max_tokens":    2048,
 		},
+		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 	})
 	wfID := out["workflow"].(map[string]any)["id"].(string)
 	do("POST", "/v1/workflows/"+wfID+"/versions/1/approve", nil)

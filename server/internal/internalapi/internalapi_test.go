@@ -34,7 +34,7 @@ func setup(t *testing.T) (*store.Store, *token.Signer, *httptest.Server, store.T
 			Model:        "claude-sonnet-5",
 			MaxTokens:    2048,
 		},
-		Permit: []byte(`{}`), Rubric: []byte(`{}`),
+		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`), Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
 	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
