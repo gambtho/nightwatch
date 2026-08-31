@@ -146,6 +146,25 @@ right rather than merely asserted.
 - **External contributions** (e.g. the upstream Substrate egress work).
 - Anything in `src/`, user research, prototype work.
 
+## UX feedback intake (2026-08-31)
+
+From the user, routed to the pivot-spec session the same day:
+
+- **A standalone, reusable connections manager.** Add a connector once
+  (paste a token, register an MCP server); every later build conversation
+  finds it connected. The data layer already supports it — connections are
+  tenant-scoped and the catalog reports `connected` — so this is surface
+  design only. Folded into the pivot spec's charter item 4 (guided capture
+  without OAuth) as a scope upgrade: the capture surface is durable, and
+  build conversations link into it rather than owning capture.
+- **A post-verdict graphical inputs/outputs palette.** The verdict's
+  "I'd need access to" block made visual: possible inputs (read) and
+  outputs (write) from the catalog, connected vs available-but-unconnected.
+  Positioned in the pivot spec's estate triage as an amendment the
+  build-conversation spec's successor gains — not designed yet. The
+  build-conversation frontend items 5–6 become entry points into the
+  connections manager; item 5's OAuth framing is dead regardless.
+
 ## Rule: no pre-stacked PR bases
 
 Added 2026-08-31 after a stacked PR merged into the wrong target and a full
