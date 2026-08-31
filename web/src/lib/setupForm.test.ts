@@ -116,6 +116,15 @@ describe("validateDraft", () => {
     ).toContain("Step 1 is over 500 characters.");
   });
 
+  it("counts characters as the server does — code points, not UTF-16 units", () => {
+    // 500 astral-plane characters: 1000 UTF-16 units but 500 runes.
+    const emoji = "🌙".repeat(500);
+    expect(validateDraft(draft({ steps: [{ id: "s", text: emoji }] }), null)).toEqual([]);
+    expect(
+      validateDraft(draft({ steps: [{ id: "s", text: emoji + "x" }] }), null),
+    ).toContain("Step 1 is over 500 characters.");
+  });
+
   it("rejects bad and duplicate explicit ids", () => {
     const [badId] = validateDraft(
       draft({ steps: [{ id: "Not A Slug", text: "ok" }] }),

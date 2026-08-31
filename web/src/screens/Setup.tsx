@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createWorkflow, getCatalog, isAuthError } from "../api/client";
-import type { CatalogConnector } from "../api/types";
+import { createWorkflow, isAuthError } from "../api/client";
 import PermitDiagram from "../components/PermitDiagram";
 import { connectionView, findOp, opLabel } from "../lib/catalog";
 import { providerLabel } from "../lib/permit";
 import { buildPermitDoc, parseResourceList } from "../lib/permitBuild";
 import type { PermitBuild } from "../lib/permitBuild";
 import {
+  charCount,
   STEP_TEXT_MAX,
   STEPS_MAX,
   slugify,
@@ -15,6 +15,7 @@ import {
   validateDraft,
 } from "../lib/setupForm";
 import type { SetupDraft, StepDraft } from "../lib/setupForm";
+import { useCatalog } from "../lib/useCatalog";
 import { useSession } from "../session";
 import "./screens.css";
 
@@ -51,7 +52,7 @@ export default function Setup() {
   const [spendText, setSpendText] = useState("50");
 
   // undefined = still loading; null = unreachable (grants unavailable).
-  const [catalog, setCatalog] = useState<CatalogConnector[] | null | undefined>();
+  const catalog = useCatalog();
   const [opsByConnector, setOpsByConnector] = useState<Record<string, string[]>>({});
   const [resourceText, setResourceText] = useState<Record<string, string>>({});
 
@@ -60,25 +61,6 @@ export default function Setup() {
   const [attempted, setAttempted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCatalog()
-      .then(({ connectors }) => {
-        if (!cancelled) setCatalog(connectors);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        if (isAuthError(err)) {
-          expire();
-          return;
-        }
-        setCatalog(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expire]);
 
   function resourcesFor(connectorId: string, opName: string): Record<string, string[]> {
     const connector = catalog?.find((c) => c.id === connectorId);
@@ -96,7 +78,9 @@ export default function Setup() {
     return {
       providers,
       connection,
-      perRunCents: spend === "" ? undefined : Number(spend),
+      // Whole decimal digits only — Number() alone would quietly accept
+      // "1e3" or "0x32" as something other than what's on screen.
+      perRunCents: spend === "" ? undefined : /^\d+$/.test(spend) ? Number(spend) : NaN,
       grants: Object.entries(opsByConnector).map(([connector, ops]) => ({
         connector,
         ops: ops.map((op) => ({ op, resources: resourcesFor(connector, op) })),
@@ -194,10 +178,10 @@ export default function Setup() {
                 />
                 <span
                   className={
-                    step.text.trim().length > STEP_TEXT_MAX ? "error-note" : "dim"
+                    charCount(step.text.trim()) > STEP_TEXT_MAX ? "error-note" : "dim"
                   }
                 >
-                  {step.text.trim().length}/{STEP_TEXT_MAX}
+                  {charCount(step.text.trim())}/{STEP_TEXT_MAX}
                 </span>
                 {steps.length > 1 && (
                   <button
@@ -303,7 +287,7 @@ export default function Setup() {
                 <div className="setup-connector-head">
                   <span className="setup-connector-name">{connector.name}</span>
                   <span
-                    className={`wf-badge ${conn.connected ? "wf-badge-ok" : "wf-badge-draft"}`}
+                    className={`wf-badge ${conn.tone === "ok" ? "wf-badge-ok" : "wf-badge-draft"}`}
                   >
                     {conn.label}
                   </span>

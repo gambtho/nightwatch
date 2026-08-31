@@ -2,9 +2,10 @@ import type { CatalogConnector, PermitConnectionDoc, PermitDoc } from "../api/ty
 import { findOp } from "./catalog";
 
 // Builds the permit v1 document from the setup form's model. The server
-// (permit.Parse + validateConnections in server/internal/httpapi) is the
-// authority; this mirrors its rules so the user sees the error before the
-// version write 400s. Two rules that bite a permit builder:
+// (permit.Parse in server/internal/permit, validateConnections in
+// server/internal/httpapi) is the authority; this mirrors the rules the
+// form can trip so the user sees the error before the version write
+// 400s. Two rules that bite a permit builder:
 //   1. a granted op with a constrained arg field must carry a non-empty
 //      resources list for each such field, and
 //   2. resources on a field the op has no constraint for are rejected —
@@ -78,9 +79,10 @@ export function buildPermitDoc(build: PermitBuild): PermitDoc {
 }
 
 /**
- * Mirrors the server's write-time permit checks. `catalog` is null when
- * GET /v1/catalog couldn't be reached — grants can't be validated (or
- * honestly granted) without it.
+ * Mirrors the server's write-time checks a form submission can trip,
+ * plus a duplicate-op check the server doesn't make. `catalog` is null
+ * when GET /v1/catalog isn't available (unreachable, or not yet loaded)
+ * — grants can't be validated (or honestly granted) without it.
  */
 export function validatePermitBuild(
   build: PermitBuild,

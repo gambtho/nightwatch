@@ -30,6 +30,12 @@ export interface SetupDraft {
   permit: PermitBuild;
 }
 
+/** Characters as the server counts them — Unicode code points (Go
+ * runes), not UTF-16 code units, so emoji count once. */
+export function charCount(text: string): number {
+  return [...text].length;
+}
+
 /** Best-effort slug from step text; "" when nothing usable survives. */
 export function slugify(text: string): string {
   const slug = text
@@ -98,7 +104,7 @@ export function validateDraft(
     const text = step.text.trim();
     if (text === "") {
       errors.push(`Step ${n} needs text.`);
-    } else if (text.length > STEP_TEXT_MAX) {
+    } else if (charCount(text) > STEP_TEXT_MAX) {
       errors.push(`Step ${n} is over ${STEP_TEXT_MAX} characters.`);
     }
     const id = ids[i]!;

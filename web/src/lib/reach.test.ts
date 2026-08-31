@@ -47,8 +47,8 @@ describe("reachColumns", () => {
     expect(read[0]).toMatchObject({
       connector: "Google Calendar",
       op: "list events",
-      unrecognized: false,
     });
+    expect(read[0]!.note).toBeUndefined();
     expect(write).toHaveLength(1);
     expect(write[0]).toMatchObject({
       op: "create event",
@@ -56,20 +56,42 @@ describe("reachColumns", () => {
     });
   });
 
-  it("keeps a grant visible in the write column when the catalog can't confirm it", () => {
-    for (const cat of [null, catalog]) {
+  it("marks an op the loaded catalog does not list, in the write column", () => {
+    const { read, write } = reachColumns(
+      [{ connector: "acme", ops: [{ name: "mystery_op", resources: {} }] }],
+      catalog,
+    );
+    expect(read).toHaveLength(0);
+    expect(write).toHaveLength(1);
+    expect(write[0]).toMatchObject({
+      connector: "acme",
+      op: "mystery op",
+      note: "unlisted",
+    });
+  });
+
+  it("marks grants unchecked, not unlisted, when the catalog is unavailable", () => {
+    for (const cat of [null, undefined]) {
       const { read, write } = reachColumns(
-        [{ connector: "acme", ops: [{ name: "mystery_op", resources: {} }] }],
+        [{ connector: "google-calendar", ops: [{ name: "list_events", resources: {} }] }],
         cat,
       );
       expect(read).toHaveLength(0);
       expect(write).toHaveLength(1);
-      expect(write[0]).toMatchObject({
-        connector: "acme",
-        op: "mystery op",
-        unrecognized: true,
-      });
+      expect(write[0]).toMatchObject({ op: "list events", note: "unchecked" });
     }
+  });
+
+  it("keeps an unreadable permit entry visible in the write column", () => {
+    const { write } = reachColumns(
+      [{ connector: "google-calendar", ops: [], unreadable: true }],
+      catalog,
+    );
+    expect(write).toHaveLength(1);
+    expect(write[0]).toMatchObject({
+      connector: "Google Calendar",
+      note: "unreadable",
+    });
   });
 
   it("returns empty columns for no grants", () => {

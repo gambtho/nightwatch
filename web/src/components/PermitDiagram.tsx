@@ -10,15 +10,19 @@ import "./PermitDiagram.css";
 // one; with no grants they say "nothing", honestly, because that is what
 // the server enforces.
 
+const NOTE_TEXT: Record<NonNullable<ReachItem["note"]>, string> = {
+  unlisted: "not in today's catalog",
+  unchecked: "couldn't check the catalog",
+  unreadable: "review before approving",
+};
+
 function ReachEntry({ item }: { item: ReachItem }) {
   return (
     <div className="permit-item" title={item.description}>
       <span className="permit-item-name">
         {item.connector} · {item.op}
       </span>
-      {item.unrecognized && (
-        <span className="permit-item-warn"> — not in today's catalog</span>
-      )}
+      {item.note && <span className="permit-item-warn"> — {NOTE_TEXT[item.note]}</span>}
       {item.resources.map((r) => (
         <div key={r} className="permit-item-only">
           only {r}
@@ -37,7 +41,7 @@ export default function PermitDiagram({
   catalog?: CatalogConnector[] | null;
 }) {
   const view = parsePermit(permit);
-  const { read, write } = reachColumns(view.grants, catalog ?? null);
+  const { read, write } = reachColumns(view.grants, catalog);
 
   return (
     <figure className="permit" aria-label="What this workflow is allowed to reach">

@@ -19,10 +19,12 @@ describe("connectionView", () => {
     expect(connectionView(connector({ connected: true }))).toEqual({
       connected: true,
       label: "Connected",
+      tone: "ok",
     });
     expect(connectionView(connector({ connected: false }))).toEqual({
       connected: false,
       label: "Not connected",
+      tone: "attention",
     });
   });
 

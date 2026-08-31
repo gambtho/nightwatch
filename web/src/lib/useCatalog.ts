@@ -6,11 +6,12 @@ import { useSession } from "../session";
 // Best-effort catalog fetch for screens that render the blast-radius
 // diagram: with it the read/write columns can describe granted ops; when
 // it can't be reached the diagram still shows every grant, conservatively
-// (see lib/reach.ts), so null is a degraded view — never a hidden grant.
+// (see lib/reach.ts), so a missing catalog is a degraded view — never a
+// hidden grant. undefined = still loading, null = unreachable.
 
-export function useCatalog(): CatalogConnector[] | null {
+export function useCatalog(): CatalogConnector[] | null | undefined {
   const { expire } = useSession();
-  const [catalog, setCatalog] = useState<CatalogConnector[] | null>(null);
+  const [catalog, setCatalog] = useState<CatalogConnector[] | null | undefined>();
 
   useEffect(() => {
     let cancelled = false;
@@ -19,8 +20,13 @@ export function useCatalog(): CatalogConnector[] | null {
         if (!cancelled) setCatalog(connectors);
       })
       .catch((err: unknown) => {
-        if (!cancelled && isAuthError(err)) expire();
-        // Any other failure: leave null; the diagram degrades honestly.
+        if (cancelled) return;
+        if (isAuthError(err)) {
+          expire();
+          return;
+        }
+        // Any other failure: null; the diagram degrades honestly.
+        setCatalog(null);
       });
     return () => {
       cancelled = true;

@@ -1,9 +1,10 @@
 // The blast-radius view model, derived from the real permit document —
 // never from prose. Permit v1 (docs/api/v1.md) governs LLM provider
 // egress, per-run spend, and the connections map: per-connector grants at
-// operation granularity. Anything we cannot parse renders as the
-// fail-closed permit, matching the server's own semantics (omitted/empty
-// permit = no egress at all).
+// operation granularity. A document we cannot recognize at all renders as
+// the fail-closed permit (matching the server: omitted/empty permit = no
+// egress); an unparseable connections entry inside a recognized document
+// stays visible, flagged unreadable, so reach is never under-reported.
 
 export interface GrantedOp {
   name: string;
@@ -14,6 +15,9 @@ export interface GrantedOp {
 export interface ConnectionGrant {
   connector: string;
   ops: GrantedOp[];
+  /** True when part of this entry couldn't be parsed — the diagram must
+   * say so rather than under-report reach. */
+  unreadable?: boolean;
 }
 
 export interface PermitView {
@@ -82,8 +86,10 @@ export function parsePermit(doc: unknown): PermitView {
   }
 
   // The connections map is server-validated at version-write time, so a
-  // stored permit's entries are well-formed; still, only render what we
-  // can read as strings rather than guessing.
+  // stored permit's entries are well-formed. Should one still fail to
+  // parse, it must stay visible as unreadable — a dropped grant would
+  // under-report the blast radius at the one gate. (Dropped resource
+  // narrowing renders broader-than-written, the conservative direction.)
   const connections = permit.connections;
   if (
     typeof connections === "object" &&
@@ -92,19 +98,27 @@ export function parsePermit(doc: unknown): PermitView {
   ) {
     for (const [connector, rawEntry] of Object.entries(connections)) {
       if (typeof rawEntry !== "object" || rawEntry === null || Array.isArray(rawEntry)) {
+        view.grants.push({ connector, ops: [], unreadable: true });
         continue;
       }
       const entry = rawEntry as Record<string, unknown>;
-      if (!Array.isArray(entry.ops)) continue;
+      if (!Array.isArray(entry.ops)) {
+        view.grants.push({ connector, ops: [], unreadable: true });
+        continue;
+      }
       const resources =
         typeof entry.resources === "object" &&
         entry.resources !== null &&
         !Array.isArray(entry.resources)
           ? (entry.resources as Record<string, unknown>)
           : {};
+      let unreadable = false;
       const ops: GrantedOp[] = [];
       for (const op of entry.ops) {
-        if (typeof op !== "string") continue;
+        if (typeof op !== "string") {
+          unreadable = true;
+          continue;
+        }
         const fields: Record<string, string[]> = {};
         const rawFields = resources[op];
         if (
@@ -120,7 +134,9 @@ export function parsePermit(doc: unknown): PermitView {
         }
         ops.push({ name: op, resources: fields });
       }
-      if (ops.length > 0) view.grants.push({ connector, ops });
+      if (ops.length > 0 || unreadable) {
+        view.grants.push({ connector, ops, ...(unreadable && { unreadable: true }) });
+      }
     }
   }
 

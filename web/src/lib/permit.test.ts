@@ -72,6 +72,26 @@ describe("parsePermit", () => {
     expect(parsePermit({ v: 1 }).grants).toEqual([]);
     expect(parsePermit({ v: 1, connections: {} }).grants).toEqual([]);
   });
+
+  it("keeps unparseable connections entries visible as unreadable", () => {
+    const view = parsePermit({
+      v: 1,
+      connections: {
+        "not-an-object": 7,
+        "bad-ops": { kind: "http", ops: "everything" },
+        "mixed-ops": { kind: "http", ops: ["list_events", 42] },
+      },
+    });
+    expect(view.grants).toEqual([
+      { connector: "not-an-object", ops: [], unreadable: true },
+      { connector: "bad-ops", ops: [], unreadable: true },
+      {
+        connector: "mixed-ops",
+        ops: [{ name: "list_events", resources: {} }],
+        unreadable: true,
+      },
+    ]);
+  });
 });
 
 describe("labels", () => {

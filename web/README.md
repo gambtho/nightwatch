@@ -13,8 +13,9 @@ Built against today's merged API:
   claimed as the first-login landing (`httpapi.firstLoginPath`) but is an
   honest placeholder.
 - **Approve (surface 3)** — the blast-radius diagram, driven only by the
-  permit v1 document. Permit v1 governs LLM egress + spend, so the read/write
-  columns truthfully show "nothing yet"; they fill in when connectors land.
+  permit v1 document: LLM egress, spend, and (since connectors phase 1) the
+  permit's connector op grants, rendered in the read/write columns by catalog
+  effect. A permit with no grants still shows "nothing yet", truthfully.
 - **The quiet home (surface 4)** — workflow list with last run, cost,
   schedule-in-words, client-computed next fire, run history, and run events.
 - **Developer setup (`/setup`)** — a hand-written form for the version-1

@@ -94,8 +94,23 @@ describe("PermitDiagram", () => {
       />,
     );
     expect(screen.getByText(/slack · post message/)).toBeInTheDocument();
-    expect(screen.getByText(/not in today's catalog/)).toBeInTheDocument();
+    // With no catalog to consult, the honest note is "couldn't check",
+    // not a claim about what today's catalog lists.
+    expect(screen.getByText(/couldn't check the catalog/)).toBeInTheDocument();
     // Unconfirmed ops sit in the write column — the conservative reading.
     expect(screen.getByText(/no systems are connected/)).toBeInTheDocument();
+  });
+
+  it("marks an op a loaded catalog does not list", () => {
+    render(
+      <PermitDiagram
+        permit={{
+          v: 1,
+          connections: { slack: { kind: "http", ops: ["post_message"] } },
+        }}
+        catalog={[]}
+      />,
+    );
+    expect(screen.getByText(/not in today's catalog/)).toBeInTheDocument();
   });
 });
