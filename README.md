@@ -4,7 +4,8 @@ Tomte is a click-install desktop app that lets a non-technical person safely
 delegate recurring work to an AI agent. You describe a job in plain language,
 approve exactly what the agent may touch and spend, and Tomte runs it on a
 schedule — against any LLM endpoint you bring (Anthropic, OpenAI, OpenRouter,
-any OpenAI-compatible base URL, including local models), with your own pasted
+GitHub Models (included with GitHub Copilot plans), Azure AI Foundry, any
+OpenAI-compatible base URL, including local models), with your own pasted
 key.
 
 ## How enforcement works
