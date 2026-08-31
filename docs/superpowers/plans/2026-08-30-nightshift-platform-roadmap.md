@@ -1,3 +1,7 @@
+> Superseded (2026-08-31): the roadmap was re-derived by
+> [the pivot spec](../specs/2026-08-31-tomte-pivot-design.md) and is tracked on
+> [the board](./2026-08-31-parallel-sessions.md) as queue P1–P7.
+
 # Nightshift Platform — Plan Roadmap
 
 **Date:** 2026-08-30

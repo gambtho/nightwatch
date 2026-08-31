@@ -1,4 +1,7 @@
 > Product renamed to Tomte, 2026-08-31; this document predates the rename.
+> Superseded (2026-08-31): the hosted, multi-tenant direction designed here
+> was deliberately reversed — see
+> [the pivot spec](./2026-08-31-tomte-pivot-design.md).
 
 # Nightshift Platform — Design
 

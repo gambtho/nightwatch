@@ -1,4 +1,7 @@
 > Product renamed to Tomte, 2026-08-31; this document predates the rename.
+> Partly superseded (2026-08-31): the hosted platform and OAuth-based capture
+> are gone — see [the pivot spec](./2026-08-31-tomte-pivot-design.md). The
+> target user and the four surfaces stand.
 
 # Nightshift — Design
 

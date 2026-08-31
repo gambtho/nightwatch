@@ -1,3 +1,8 @@
+> Paused (2026-08-31, direction change 2): the desktop shell is not the
+> near-term path. The plan and the Wails v3 spike stay as the record;
+> [the board](./2026-08-31-parallel-sessions.md) is the authority on the
+> lane's state.
+
 # Tomte packaging shell — plan and spike findings
 
 **Status:** Plan proposed; framework decision recommended, two product calls

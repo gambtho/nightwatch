@@ -1,3 +1,7 @@
+> Historical (2026-08-31): the prototype this plan built is removed from
+> `main` (git history and the demo branches keep it). The real frontend is
+> [`web/`](../../../web/README.md).
+
 # Nightshift UX Prototype Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

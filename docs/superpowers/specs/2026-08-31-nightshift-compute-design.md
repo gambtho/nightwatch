@@ -1,3 +1,8 @@
+> Shelved (2026-08-31): the pivot to customer-deployed Tomte closed the
+> Substrate thread; this spec stays as a record, with no implementation. It is
+> unrelated to the current CLI-local K8s agent track — see
+> [the board](../plans/2026-08-31-parallel-sessions.md).
+
 # Nightshift Cluster Compute — Design (Plan 5)
 
 **Status:** Spec awaiting review
