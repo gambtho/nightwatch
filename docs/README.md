@@ -26,6 +26,9 @@ Read this page top to bottom and you know what is current.
   [`tomtectl/README.md`](../tomtectl/README.md) — the current focus:
   agent-as-code YAML plus the `tomtectl` CLI, hello world on a real
   cluster. K2 (LLM) and K3 (connectors + governance transition) follow.
+- [The P2 plan](superpowers/plans/2026-08-31-tomte-p2-connectors-main-road.md)
+  — connectors main road, the next `server/` occupant: Slack token
+  capture + verify, then the remote-MCP road (old phases 5→6).
 - [The P1 plan](superpowers/plans/2026-08-31-tomte-p1-subtraction-floor.md)
   — subtraction and floor, implemented and merged (PR #48). The best
   reference for what the server tree looks like after the pivot's
