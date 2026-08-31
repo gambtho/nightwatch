@@ -40,7 +40,7 @@ finishes, or a cross-cutting decision is taken.
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
 | K8s agent track (THE FOCUS)      | **K1 MERGED** (#49); **K2 GO** (user, 2026-08-31) — K1 session exited, fresh-session prompt below           |
 | Lean-in cleanup                  | **COMPLETE AND FULLY MERGED** (#51, #52, #54, #55, #56) — the repo is onboarding-ready                     |
-| P2 — Connectors main road        | **OWNS `server/`. PR A MERGED (#57)**; phase B (key-verify + spend_entry ledger, migration 00013) is GO    |
+| P2 — Connectors main road        | **OWNS `server/`. A MERGED (#57); B delivered: #59** (key-verify + ledger 00013; decisions below). C after #59 merges |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
 ## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
@@ -300,6 +300,20 @@ accepted as additive; the frontend wires them when it wakes.
   TLS-proxy HTML interstitial would have "verified" a token. Now fails
   closed, tested. Pattern worth repeating: every verify path fails
   closed on anything but a well-formed positive.
+
+**Phase B decisions (PR #59), coordinator-accepted:**
+
+- **The verify ledger rounds UP with a 1-cent floor on priced endpoints**
+  (runs keep floor semantics — divergence deliberate): a 1-token verify
+  is sub-cent, and flooring would let repeated verifies spend real
+  provider money without ever advancing the budget.
+- **Every billed 2xx attempt is recorded even when verification fails**,
+  on a disconnect-immune context — client disconnects and pricing-path
+  DB errors can no longer produce unrecorded provider spend.
+- **200-with-error-envelope rejects** (OpenRouter-class gateways 200 on
+  bad keys) — the fail-closed pattern extended to body semantics.
+- Response carries `unpriced:true` when a zero was recorded at a missing
+  price; budget-exhausted refuses the call before it is made.
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
