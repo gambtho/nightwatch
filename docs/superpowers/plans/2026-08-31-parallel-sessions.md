@@ -39,8 +39,8 @@ finishes, or a cross-cutting decision is taken.
 | Frontend pivot surfaces          | **Merged** (#43, #46, #47) — lane idle; login retirement now URGENT (P1 deleted its endpoints), in cleanup |
 | Root README + MIT license        | **Merged** (#44)                                                                                           |
 | K8s agent track (THE FOCUS)      | **K1 delivered: PR #49** (`tomtectl/`, checks green) — decisions recorded below; K2 next after merge       |
-| Lean-in cleanup                  | **Three lanes opened** (estate removal, server hygiene, docs onboarding) — prompts below                   |
-| P2 — Connectors main road        | **Next `server/` occupant** — plans now in parallel, takes the lock when the hygiene PR merges; prompt below |
+| Lean-in cleanup                  | **Delivered: #51 (estate), #52 (login retirement), #54 (server hygiene)** — all awaiting merge             |
+| P2 — Connectors main road        | **Plan delivered: PR #53** (4 PRs: A Slack, B key-verify+ledger, C MCP+SSRF, D MCP enforce); decisions ruled below. Takes `server/` when #54 merges |
 | Pivot demo (`demo/tomte-pivot`)  | **Delivered** (2052be6, verified from fresh checkout; five presets in). Permanent demo branch, never merged |
 
 ## Direction change 2 (2026-08-31, evening): K8s-first agent track, CLI before UI
@@ -257,6 +257,37 @@ lock-free; hygiene holds `server/`.
 > registry) — implement to those contracts or flag the divergence to the
 > board before diverging. Each phase PRs to `main`, waits for its
 > predecessor; no pre-stacked bases. Suite + e2e green per PR.
+
+## P2 plan decisions, coordinator-ruled (PR #53, 2026-08-31)
+
+Four calls led in the P2 plan, ruled by the coordinating session:
+
+1. **Verify-then-store inside `PUT /v1/connections` — accepted.** One call,
+   matching the merged #47 frontend seam; a separate verify endpoint would
+   add a round trip and a partially-verified state for no gain. Re-paste of
+   the same connection must stay idempotent and re-verify.
+2. **Slack verify requires body-level `ok:true` — accepted, load-bearing.**
+   Slack returns HTTP 200 with `{ok:false, error:"invalid_auth"}` for bad
+   tokens; a status-only check would store garbage. This is the kind of
+   vendor quirk the capture-guide design exists for.
+3. **"Through the proxy path" read as shared machinery, not a literal
+   proxy hop — accepted as spec interpretation.** The literal hop cannot
+   work pre-storage (run-token-only; the connector route strips
+   `x-oauth-scopes`). The spec's own capture-guide section already blesses
+   control-plane verify for connectors ("session-authed options path —
+   never a run token"), so the same posture for the LLM key is consistent.
+   Two conditions attach: the shared code must be the proxy's actual
+   validation + injection machinery (base-URL validation, header
+   injection), not a reimplementation; and the call stays disclosed +
+   metered (PR B's `spend_entry` ledger records it — the plan's finding
+   that no non-run spend path exists today is verified correct, and the
+   ledger is the right fix, migration 00013).
+4. **MCP registry ships schema-only, no vendor list — accepted.** Vendor
+   entries are content; they follow when real vendors are chosen.
+
+Frontend divergences flagged in the plan (additive `missing_scopes` on
+VerifyResult; `registerMcpServer` response gains the created row) are
+accepted as additive; the frontend wires them when it wakes.
 
 ## Direction change (2026-08-31): customer-deployed, UX-first, endpoint-agnostic
 
