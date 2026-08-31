@@ -201,6 +201,9 @@ Design work, not bookkeeping — none applied. Relayed to the Plan 5 session
   narrows the roadmap's long-standing "does the proxy have an expiry date"
   question: it does not, it has a shrinking lower half. Any convergence note
   in the platform spec should say so rather than implying full convergence.
+  **Unassigned.** The docs lane correctly declined to fold a substantive
+  design amendment into a bookkeeping PR, so this needs an owner — either the
+  Plan 5 session in PR #12 or the platform spec's next design pass.
 - **State retention across permit narrowing** — what happens to actor state
   accumulated under a wider permit when the permit narrows. Plan 5 scope.
 - **Retry and idempotency for cold-boot request loss** — what the control
