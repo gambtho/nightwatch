@@ -171,8 +171,8 @@ stays merged as a record.
 
 ## Ready-to-paste prompts (2026-08-31, post-pivot-merge)
 
-Five sessions can launch in parallel. P1 holds the `server/` lock; the other
-four never take it. Each prompt is self-contained.
+Six sessions can launch in parallel. P1 holds the `server/` lock; the other
+five never take it. Each prompt is self-contained.
 
 ### Prompt — P1: subtraction and floor (owns `server/`)
 
@@ -361,6 +361,41 @@ four never take it. Each prompt is self-contained.
 > (enforcement posture, budget wording), use the spec's words verbatim.
 > Verify `npm run dev` boots clean from a fresh checkout of the branch and
 > the walkthrough needs no narration to follow.
+
+### Prompt — README + MIT license (docs lane, parallel)
+
+> Add a root `README.md` and an MIT `LICENSE` to the Tomte repo
+> (`gambtho/tomte`). Neither exists today — verify (only `server/README.md`
+> and `web/README.md` exist). Read the merged pivot spec
+> `docs/superpowers/specs/2026-08-31-tomte-pivot-design.md` and the board
+> `docs/superpowers/plans/2026-08-31-parallel-sessions.md` first; the README
+> must describe the product as the pivot defines it. Work in a linked
+> worktree; one PR to `main`; no `server/` or `web/` code changes.
+>
+> LICENSE: the standard MIT text, `Copyright (c) 2026 Tom Gamble`. Also set
+> `"license": "MIT"` in the root and `web/` package.json and add the
+> license comment/field Go tooling expects if the repo convention has one
+> (check; if none, skip — do not invent one).
+>
+> README contents, in order: what Tomte is (one short paragraph — a
+> click-install desktop app that lets a non-technical person safely delegate
+> recurring work to an AI agent, on any LLM endpoint they bring); how the
+> enforcement works, using the spec's exact posture wording — every
+> credential and call passes through Tomte's checkpoint; a software
+> boundary, not a sandbox — never overclaim; project status (early
+> development, pre-release, direction set by the pivot spec — link it);
+> repo layout (`server/` the Go control plane + proxy + scheduler, `web/`
+> the SPA, `src/` + root vite files the retired early prototype kept for
+> reference, `docs/` specs and coordination); a minimal dev quickstart
+> (verify each command actually works before writing it: Go/Postgres
+> versions, `tomte serve`, `tomte dev-session`, `web/` npm run dev); and
+> the license line.
+>
+> Constraints: the name Tomte is final but trademark counsel is pending —
+> no ™ marks or trademark claims. Do not describe hosted/multi-tenant
+> behavior (that direction is reversed) or features that don't exist yet as
+> if they exist; write in terms of what is built vs designed. Keep it under
+> ~120 lines — a README, not a spec.
 
 ## Pivot spec MERGED (PR #37); name FINAL
 
