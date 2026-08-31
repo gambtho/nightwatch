@@ -22,7 +22,7 @@ import (
 )
 
 type Client struct {
-	cs *kubernetes.Clientset
+	cs kubernetes.Interface
 	// Namespace is the flag override, else the kubeconfig context's
 	// namespace, else "default".
 	Namespace string
@@ -108,7 +108,9 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 		if existing.Spec.Template.Annotations == nil {
 			existing.Spec.Template.Annotations = map[string]string{}
 		}
-		existing.Spec.Template.Annotations["tomte.dev/restarted-at"] = time.Now().UTC().Format(time.RFC3339)
+		// Nano resolution: two `up`s inside the same second (scripted
+		// set-key && up rotation) must still each roll the pods.
+		existing.Spec.Template.Annotations["tomte.dev/restarted-at"] = time.Now().UTC().Format(time.RFC3339Nano)
 		_, err = deps.Update(ctx, existing, metav1.UpdateOptions{})
 		return err
 	})
@@ -116,6 +118,63 @@ func (c *Client) Apply(ctx context.Context, cm *corev1.ConfigMap, dep *appsv1.De
 		return fmt.Errorf("applying Deployment: %w", err)
 	}
 	return nil
+}
+
+// ApplySecret creates or updates the Secret holding an agent's API
+// key, under the same ownership rule as every other object: a
+// same-name Secret that tomtectl does not manage for this agent is
+// refused, never overwritten.
+func (c *Client) ApplySecret(ctx context.Context, s *corev1.Secret) error {
+	agent := s.Labels[manifest.AgentLabel]
+	secrets := c.cs.CoreV1().Secrets(c.Namespace)
+	err := retry.OnError(retry.DefaultRetry, retryable, func() error {
+		existing, err := secrets.Get(ctx, s.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			// A concurrent first write can land between Get and
+			// Create; AlreadyExists is retried so the loop refetches
+			// and takes the update path instead of failing the race.
+			_, err = secrets.Create(ctx, s, metav1.CreateOptions{})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		if err := owned(existing.Labels, agent, "Secret", s.Name); err != nil {
+			return err
+		}
+		existing.Labels = s.Labels
+		existing.Data = s.Data
+		_, err = secrets.Update(ctx, existing, metav1.UpdateOptions{})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("applying Secret: %w", err)
+	}
+	return nil
+}
+
+// retryable widens RetryOnConflict's predicate with AlreadyExists —
+// both mean "another writer got there first; refetch and reconcile".
+func retryable(err error) bool {
+	return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err)
+}
+
+// SecretExists reports whether the named Secret exists and carries a
+// non-empty api_key — `up`'s pre-flight, so a skipped `set-key` (or a
+// hand-made Secret with the wrong key name) is a clear error now
+// rather than a CreateContainerConfigError or an empty env later.
+func (c *Client) SecretExists(ctx context.Context, name string) (bool, error) {
+	s, err := c.cs.CoreV1().Secrets(c.Namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if len(s.Data[manifest.SecretKey]) == 0 {
+		return false, fmt.Errorf("secret %q exists but has no %q entry — re-run `tomtectl set-key` to store the key", name, manifest.SecretKey)
+	}
+	return true, nil
 }
 
 // Status prints deployment readiness and the agent's pods.

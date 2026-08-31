@@ -16,15 +16,18 @@ spec:
   # a whole number with one unit: 30s, 5m, 2h.
   schedule:
     every: 30s
-  # K2 — the model this agent thinks with. Empty means no LLM: the
-  # agent is deterministic. Shape, aligned with Tomte's endpoint record:
+  # The model this agent thinks with. Empty means no LLM: the agent is
+  # deterministic and prints its steps. To think, fill it in and store
+  # the key with `tomtectl set-key`:
   #   llm:
-  #     endpoint:
-  #       kind: anthropic | openai_compatible
-  #       base_url: https://…        # fixed by preset, or user-supplied
-  #       local: false               # explicit "on this computer" marker
-  #     api_key_secret: my-key       # K8s Secret holding the API key
+  #     kind: anthropic              # anthropic | openai_compatible
+  #     base_url: https://api.anthropic.com
+  #     model: claude-haiku-4-5
+  #     secretRef: hello-key         # K8s Secret holding the API key
+  # A keyless local endpoint instead carries `local: true` and no
+  # secretRef — a loopback URL alone never implies local.
   llm: {}
   # K3 — what the agent may reach. Tomte connectors and their permits
-  # mount here; until then the agent has no reach beyond its own logs.
+  # mount here; until then the agent reaches nothing beyond its logs
+  # and the one llm endpoint named above.
   connectors: []

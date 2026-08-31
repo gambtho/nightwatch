@@ -23,60 +23,20 @@ const (
 	ManagedByLabel = "app.kubernetes.io/managed-by"
 	ManagedByValue = "tomtectl"
 
-	// Image is the K1 placeholder runtime: a stock shell image running
-	// RunScript. K2 replaces it with the real Tomte agent runtime; the
-	// mounted agent.yaml contract stays.
-	Image = "busybox:1.37.0"
+	// DefaultImage is the Tomte agent runtime (cmd/agent-runtime),
+	// which reads the mounted agent.yaml each wake and either prints
+	// the steps (no llm) or hands them to the configured model. No
+	// registry publishes it yet: build it locally and, for kind,
+	// `kind load docker-image` it — `up --image` overrides.
+	DefaultImage = "tomte-agent:0.2.0"
+
+	// SecretKey is the one key inside the Secret named by
+	// spec.llm.secretRef; APIKeyEnv is where the runtime finds it.
+	SecretKey = "api_key"
+	APIKeyEnv = "TOMTE_API_KEY"
 
 	mountPath = "/tomte"
 )
-
-// RunScript is the K1 placeholder runtime, shipped in the ConfigMap
-// next to agent.yaml — never baked into an image. It reads the steps
-// and schedule from the mounted file at runtime, so editing the
-// ConfigMap changes the agent with no CLI involved. Its field
-// extraction is deliberately scoped to K1's flat scalars; the CLI's
-// strict parser is the real validation gate.
-const RunScript = `#!/bin/sh
-# Tomte K1 placeholder runtime: prints each step's text on the
-# schedule. Replaced by the real agent runtime image in K2. Behavior
-# comes from the mounted agent.yaml, never from this image; steps and
-# schedule are re-read each wake, so a ConfigMap edit takes effect on
-# the next iteration once the volume syncs. A missing file or missing
-# schedule is a loud crash, never a silent default.
-set -eu
-FILE=` + mountPath + `/agent.yaml
-# Trim a YAML scalar the way the CLI's parser reads it: quoted values
-# keep everything inside the quotes; unquoted values lose a trailing
-# " # comment".
-clean() {
-  v=$1
-  case "$v" in
-    \"*) v=${v#\"}; v=${v%%\"*} ;;
-    \'*) v=${v#\'}; v=${v%%\'*} ;;
-    *) v=${v%% #*} ;;
-  esac
-  printf '%s' "$v"
-}
-read_every() {
-  every=$(sed -n 's/^[[:space:]]*every:[[:space:]]*//p' "$FILE" | head -n1)
-  every=$(clean "$every")
-  if [ -z "$every" ]; then
-    echo "tomte agent: no schedule.every found in $FILE" >&2
-    exit 1
-  fi
-}
-[ -f "$FILE" ] || { echo "tomte agent: $FILE is not mounted" >&2; exit 1; }
-read_every
-echo "tomte agent starting: waking every $every"
-while true; do
-  sed -n 's/^[[:space:]]*text:[[:space:]]*//p' "$FILE" | while IFS= read -r line; do
-    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $(clean "$line")"
-  done
-  read_every
-  sleep "$every"
-done
-`
 
 // Labels returns the label set shared by every object of an agent.
 func Labels(name string) map[string]string {
@@ -89,7 +49,7 @@ func Labels(name string) map[string]string {
 // Objects derives the ConfigMap and Deployment for an agent. raw is
 // the agent.yaml exactly as the user wrote it — comments included —
 // so the in-cluster copy stays the readable artifact.
-func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deployment) {
+func Objects(a *agentfile.Agent, raw []byte, image string) (*corev1.ConfigMap, *appsv1.Deployment) {
 	name := a.Metadata.Name
 	// User labels from the file propagate; tomtectl's own labels win on
 	// collision. The Deployment selector stays AgentLabel alone — it is
@@ -102,8 +62,22 @@ func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deploym
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
 		Data: map[string]string{
 			"agent.yaml": string(raw),
-			"run.sh":     RunScript,
 		},
+	}
+
+	// The API key reaches the runtime as env drawn from the Secret the
+	// file names — it never touches the ConfigMap or the file itself.
+	var env []corev1.EnvVar
+	if ref := a.Spec.LLM.SecretRef; ref != "" {
+		env = append(env, corev1.EnvVar{
+			Name: APIKeyEnv,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: ref},
+					Key:                  SecretKey,
+				},
+			},
+		})
 	}
 
 	one := int32(1)
@@ -116,9 +90,10 @@ func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deploym
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Name:    "agent",
-						Image:   Image,
-						Command: []string{"/bin/sh", mountPath + "/run.sh"},
+						Name:            "agent",
+						Image:           image,
+						ImagePullPolicy: corev1.PullIfNotPresent,
+						Env:             env,
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "agent-file",
 							MountPath: mountPath,
@@ -127,7 +102,7 @@ func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deploym
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("10m"),
-								corev1.ResourceMemory: resource.MustParse("16Mi"),
+								corev1.ResourceMemory: resource.MustParse("32Mi"),
 							},
 						},
 					}},
@@ -144,4 +119,14 @@ func Objects(a *agentfile.Agent, raw []byte) (*corev1.ConfigMap, *appsv1.Deploym
 		},
 	}
 	return cm, dep
+}
+
+// SecretForKey builds the Secret `tomtectl set-key` writes: the one
+// place the API key lives in the cluster.
+func SecretForKey(name, agent string, key []byte) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: Labels(agent)},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{SecretKey: key},
+	}
 }
