@@ -1,4 +1,12 @@
-import type { Me, Run, RunEvent, Version, Workflow } from "./types";
+import type {
+  CatalogConnector,
+  CreateWorkflowBody,
+  Me,
+  Run,
+  RunEvent,
+  Version,
+  Workflow,
+} from "./types";
 
 // Same-origin fetch client. The server authenticates with the
 // __Host-ns_session cookie and 403s any present-but-foreign Origin on
@@ -84,4 +92,14 @@ export function approveVersion(
 
 export function fireRun(workflowId: string): Promise<{ run: Run }> {
   return request(`/v1/workflows/${workflowId}/runs`, { method: "POST" });
+}
+
+export function createWorkflow(
+  body: CreateWorkflowBody,
+): Promise<{ workflow: Workflow; version: Version }> {
+  return request("/v1/workflows", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function getCatalog(): Promise<{ connectors: CatalogConnector[] }> {
+  return request("/v1/catalog");
 }

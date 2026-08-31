@@ -44,6 +44,34 @@ describe("parsePermit", () => {
     expect(view.providers).toEqual(["anthropic"]);
     expect(view.spendPerRunCents).toBeUndefined();
   });
+
+  it("reads connector op grants and their resource lists", () => {
+    const view = parsePermit({
+      v: 1,
+      llm: { providers: ["anthropic"] },
+      connections: {
+        "google-calendar": {
+          kind: "http",
+          ops: ["list_events", "create_event"],
+          resources: { create_event: { calendar_id: ["primary"] } },
+        },
+      },
+    });
+    expect(view.grants).toEqual([
+      {
+        connector: "google-calendar",
+        ops: [
+          { name: "list_events", resources: {} },
+          { name: "create_event", resources: { calendar_id: ["primary"] } },
+        ],
+      },
+    ]);
+  });
+
+  it("leaves grants empty for a permit without connections", () => {
+    expect(parsePermit({ v: 1 }).grants).toEqual([]);
+    expect(parsePermit({ v: 1, connections: {} }).grants).toEqual([]);
+  });
 });
 
 describe("labels", () => {
@@ -58,11 +86,12 @@ describe("labels", () => {
         providers: [],
         connection: "default",
         spendPerRunCents: 150,
+        grants: [],
         recognized: true,
       }),
     ).toBe("max $1.50 / run");
-    expect(spendLabel({ providers: [], connection: "default", recognized: true })).toBe(
-      "monthly cap only",
-    );
+    expect(
+      spendLabel({ providers: [], connection: "default", grants: [], recognized: true }),
+    ).toBe("monthly cap only");
   });
 });

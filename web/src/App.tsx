@@ -5,6 +5,7 @@ import Home from "./screens/Home";
 import WorkflowDetail from "./screens/WorkflowDetail";
 import Approve from "./screens/Approve";
 import Build from "./screens/Build";
+import Setup from "./screens/Setup";
 import "./App.css";
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,14 @@ export default function App() {
           element={
             <RequireSession>
               <Build />
+            </RequireSession>
+          }
+        />
+        <Route
+          path="/setup"
+          element={
+            <RequireSession>
+              <Setup />
             </RequireSession>
           }
         />

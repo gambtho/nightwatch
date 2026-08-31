@@ -1,13 +1,43 @@
+import type { CatalogConnector } from "../api/types";
 import { DENIED_BY_DEFAULT, parsePermit, providerLabel, spendLabel } from "../lib/permit";
+import { reachColumns } from "../lib/reach";
+import type { ReachItem } from "../lib/reach";
 import "./PermitDiagram.css";
 
 // The blast radius: judged in about three seconds, driven only by the
-// permit document itself. Permit v1 grants LLM egress and spend — no
-// connected systems yet — so the read/write columns state that honestly
-// instead of inventing capability the server would not enforce.
+// permit document itself. The read/write columns show the permit's
+// connector op grants, described by the catalog when the caller passes
+// one; with no grants they say "nothing", honestly, because that is what
+// the server enforces.
 
-export default function PermitDiagram({ permit }: { permit: unknown }) {
+function ReachEntry({ item }: { item: ReachItem }) {
+  return (
+    <div className="permit-item" title={item.description}>
+      <span className="permit-item-name">
+        {item.connector} · {item.op}
+      </span>
+      {item.unrecognized && (
+        <span className="permit-item-warn"> — not in today's catalog</span>
+      )}
+      {item.resources.map((r) => (
+        <div key={r} className="permit-item-only">
+          only {r}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function PermitDiagram({
+  permit,
+  catalog,
+}: {
+  permit: unknown;
+  /** GET /v1/catalog connectors; null/undefined when unavailable. */
+  catalog?: CatalogConnector[] | null;
+}) {
   const view = parsePermit(permit);
+  const { read, write } = reachColumns(view.grants, catalog ?? null);
 
   return (
     <figure className="permit" aria-label="What this workflow is allowed to reach">
@@ -16,9 +46,13 @@ export default function PermitDiagram({ permit }: { permit: unknown }) {
         <div className="permit-row">
           <div className="permit-col">
             <div className="label permit-read-label">Can read</div>
-            <div className="permit-empty">
-              Nothing yet — no systems are connected in this version.
-            </div>
+            {read.length === 0 ? (
+              <div className="permit-empty">
+                Nothing yet — no systems are connected in this version.
+              </div>
+            ) : (
+              read.map((item) => <ReachEntry key={item.key} item={item} />)
+            )}
           </div>
 
           <div className="permit-arrow" aria-hidden="true">
@@ -57,9 +91,13 @@ export default function PermitDiagram({ permit }: { permit: unknown }) {
 
           <div className="permit-col">
             <div className="label permit-write-label">Can write</div>
-            <div className="permit-empty">
-              Nothing. It cannot change anything of yours.
-            </div>
+            {write.length === 0 ? (
+              <div className="permit-empty">
+                Nothing. It cannot change anything of yours.
+              </div>
+            ) : (
+              write.map((item) => <ReachEntry key={item.key} item={item} />)
+            )}
           </div>
         </div>
       </div>

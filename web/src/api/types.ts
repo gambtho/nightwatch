@@ -56,3 +56,55 @@ export interface RunEvent {
   payload: unknown;
   created_at: string;
 }
+
+// The connector catalog (GET /v1/catalog): what the platform can reach,
+// with plain-language copy written once, for this surface. `connected` is
+// a plain boolean today; a richer status field joins it in connectors
+// phase 2 — read it through lib/catalog.ts, not directly.
+
+export interface CatalogOp {
+  name: string;
+  description: string;
+  effect: "read" | "write";
+  scopes: string[];
+  args_schema: unknown;
+  /** Arg fields whose values the permit must pin to an approved list. */
+  constraints?: string[];
+}
+
+export interface CatalogConnector {
+  id: string;
+  name: string;
+  description: string;
+  auth_provider: string;
+  connected: boolean;
+  ops: CatalogOp[];
+}
+
+// Documents the create form writes (docs/api/v1.md).
+
+export interface StepsDoc {
+  v: 1;
+  steps: { id: string; text: string }[];
+}
+
+export interface PermitConnectionDoc {
+  kind: "http";
+  connection?: string;
+  ops: string[];
+  resources?: Record<string, Record<string, string[]>>;
+}
+
+export interface PermitDoc {
+  v: 1;
+  llm?: { providers?: string[]; connection?: string };
+  spend?: { per_run_cents: number };
+  connections?: Record<string, PermitConnectionDoc>;
+}
+
+export interface CreateWorkflowBody {
+  name: string;
+  steps: StepsDoc;
+  permit?: PermitDoc;
+  schedule?: ScheduleDoc;
+}

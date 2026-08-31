@@ -7,6 +7,7 @@ import PermitDiagram from "../components/PermitDiagram";
 import { parseSteps } from "../lib/steps";
 import { summarizeVersions } from "../lib/versions";
 import { describeSchedule } from "../lib/schedule";
+import { useCatalog } from "../lib/useCatalog";
 import "./screens.css";
 
 // Surface 3 — the only gate. Everything the user needs to judge must be
@@ -25,6 +26,7 @@ export default function Approve() {
 function ApproveInner({ id }: { id: string }) {
   const navigate = useNavigate();
   const { expire } = useSession();
+  const catalog = useCatalog();
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [draft, setDraft] = useState<Version | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -122,7 +124,7 @@ function ApproveInner({ id }: { id: string }) {
 
       <section className="approve-diagram">
         <div className="label">What it can reach</div>
-        <PermitDiagram permit={draft.permit} />
+        <PermitDiagram permit={draft.permit} catalog={catalog} />
       </section>
 
       <p className="dim approve-note">

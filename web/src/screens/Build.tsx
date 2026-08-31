@@ -20,6 +20,10 @@ export default function Build() {
         <Link to="/">your home page</Link>, where each one waits for your approval before
         it can run.
       </p>
+      <p className="dim">
+        Building or demoing? There's a <Link to="/setup">developer setup</Link> form that
+        writes the version-1 document by hand — it's the scaffolding, not the product.
+      </p>
     </div>
   );
 }
