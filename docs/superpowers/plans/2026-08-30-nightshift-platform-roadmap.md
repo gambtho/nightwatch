@@ -31,6 +31,29 @@ exists today.
   defenses, TLS handling, and how "no direct egress" is proven rather than assumed.
   The platform spec asserts the guarantee; Plan 2's spec work must design it.
 
+## Delegation specs (written 2026-08-31, no plans yet)
+
+Three specs written together after validating the product direction against the
+"agent-first" scenario document. They address the three structural gaps that review
+found: no way to ask a human mid-run, no way for trust to grow with evidence, and no
+way for a workflow to have a goal and finish. Each depends on the connector catalog for
+its operation vocabulary, so none can be planned before that spec lands.
+
+- **[Escalation](../specs/2026-08-31-nightshift-escalation-design.md)** — async
+  runtime escalation. Amends the UX spec's "no runtime approval gate" decision by making
+  the wait asynchronous: a suspended run holds no thread, no credential, and no worker.
+  Adds run status `awaiting_input` and an `escalation` table. An approved amendment _is_
+  a workflow version approval, so the proxy needs no changes. Prerequisite for the other
+  two.
+- **[Graduated permits](../specs/2026-08-31-nightshift-graduated-permits-design.md)** —
+  a permit that widens through rungs a human approved in advance. A rung is a workflow
+  version, so this adds one nullable column and no enforcement path. `require_clean_rubric`
+  depends on the Plan 4 grader and must not ship before it.
+- **[Objectives](../specs/2026-08-31-nightshift-objectives-design.md)** — a fourth
+  artifact beside steps/permit/rubric, plus `workflow.mode` and `workflow.status`.
+  **Plan 3 must fire only `active` workflows**, and its orphaned-run reaper (decision 10
+  below) **must not treat `awaiting_input` as orphaned**.
+
 ## Scoping decisions made during decomposition
 
 Recorded here so later plans don't rediscover them. Evidence: the 2026-08-30 survey of
