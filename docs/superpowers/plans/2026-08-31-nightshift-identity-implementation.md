@@ -99,10 +99,14 @@ mutating route enforces the Origin policy; `dev-session` mints session rows.
   `ClaimsFrom` keep their shapes (Exp drops).
 - **New `internal/mail`**: `type Sender interface { Send(ctx, to, subject,
 body string) error }` plus `LogSender` (slog-based dev sender — the log
-  line _is_ the dev login flow). Provider integration is the open question
-  the spec defers; nothing else in this plan depends on it.
+  line _is_ the dev login flow). The spec left the provider open; mid-plan
+  the grading + alerting spec (PR #13) chose **Postmark** for the whole
+  platform, so `internal/mail` also ships a Postmark sender, selected when
+  `NIGHTSHIFT_POSTMARK_TOKEN` + `NIGHTSHIFT_MAIL_FROM` are set, with the
+  log sender as the dev fallback.
 - **Atomic signup lives in the store** as one operation (below); the handler
-  pre-generates the wrapped KEK and tenant name and passes them in, so the
+  pre-generates the wrapped KEK (the tenant name derives from the claimed
+  email's local part inside the store) and passes it in, so the
   store does not grow a vault dependency. The KEK is wasted bytes when the
   user already exists — no side effect.
 - **Origin policy is httpapi middleware** applied to every mutating `/v1`
