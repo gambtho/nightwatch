@@ -22,7 +22,7 @@ func setupApproved(t *testing.T, s *store.Store) (store.Tenant, store.Workflow) 
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "weekly digest", testDoc())
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 	return tn, wf
 }

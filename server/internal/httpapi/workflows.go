@@ -12,6 +12,7 @@ import (
 	"github.com/gambtho/nightwatch/server/internal/llm"
 	"github.com/gambtho/nightwatch/server/internal/permit"
 	"github.com/gambtho/nightwatch/server/internal/schedule"
+	"github.com/gambtho/nightwatch/server/internal/steps"
 	"github.com/gambtho/nightwatch/server/internal/store"
 )
 
@@ -25,10 +26,12 @@ type workflowJSON struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// versionJSON returns the user-facing steps artifact only; the compiled
+// execution form is internal and never serialized here (decision 9).
 type versionJSON struct {
 	Number     int             `json:"number"`
 	Status     string          `json:"status"`
-	Steps      store.StepsDoc  `json:"steps"`
+	Steps      json.RawMessage `json:"steps"`
 	Permit     json.RawMessage `json:"permit"`
 	Rubric     json.RawMessage `json:"rubric"`
 	Schedule   json.RawMessage `json:"schedule,omitempty"`
@@ -38,7 +41,7 @@ type versionJSON struct {
 
 type versionDocJSON struct {
 	Name     string          `json:"name"`
-	Steps    store.StepsDoc  `json:"steps"`
+	Steps    json.RawMessage `json:"steps"`
 	Permit   json.RawMessage `json:"permit"`
 	Rubric   json.RawMessage `json:"rubric"`
 	Schedule json.RawMessage `json:"schedule,omitempty"`
@@ -75,10 +78,12 @@ func decodeDoc(w http.ResponseWriter, r *http.Request) (versionDocJSON, bool) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid permit: " + err.Error()})
 		return body, false
 	}
-	if !llm.Priced(body.Steps.Provider, body.Steps.Model) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "no pricing for " + body.Steps.Provider + "/" + body.Steps.Model + " — spend caps require a priced model",
-		})
+	if body.Steps == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "steps required"})
+		return body, false
+	}
+	if _, err := steps.Parse(body.Steps); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return body, false
 	}
 	if body.Rubric == nil {
@@ -183,21 +188,41 @@ func (d Deps) approveVersion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
 		return
 	}
-	// Re-check pricing at approval, not just at write time: a draft persisted
-	// before a price-table change could otherwise become approved with a
-	// model CostCents no longer knows, silently under-recording spend.
+	// Approval is where the execution form is fixed: the platform-selected
+	// model must be priced here (the unpriced-model 400 moved from
+	// create/add when the model left the user's hands), and the compiled
+	// document is written in the same transaction as the status change.
 	cur, err := d.Store.GetVersion(r.Context(), claims.TenantID, id, number)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if !llm.Priced(cur.Doc.Steps.Provider, cur.Doc.Steps.Model) {
+	doc, err := steps.Parse(cur.Doc.Steps)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	provider, model := d.runModel()
+	if !llm.Priced(provider, model) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "no pricing for " + cur.Doc.Steps.Provider + "/" + cur.Doc.Steps.Model + " — spend caps require a priced model",
+			"error": "no pricing for platform run model " + provider + "/" + model + " — spend caps require a priced model",
 		})
 		return
 	}
-	v, err := d.Store.ApproveVersion(r.Context(), claims.TenantID, id, number, claims.UserID)
+	perRunCents := 0
+	if p, err := permit.Parse(cur.Doc.Permit); err == nil && p.Spend != nil {
+		perRunCents = p.Spend.PerRunCents
+	}
+	compiled, err := json.Marshal(steps.Compile(doc, cur.Doc.Rubric, steps.Platform{
+		Provider:  provider,
+		Model:     model,
+		MaxTokens: llm.MaxTokensForBudget(provider, model, perRunCents),
+	}))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	v, err := d.Store.ApproveVersion(r.Context(), claims.TenantID, id, number, claims.UserID, compiled)
 	if err != nil {
 		writeErr(w, err)
 		return

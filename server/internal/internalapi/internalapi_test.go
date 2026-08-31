@@ -29,17 +29,11 @@ func setup(t *testing.T) (*store.Store, *token.Signer, *httptest.Server, store.T
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "weekly digest", store.VersionDoc{
-		Steps: store.StepsDoc{
-			SystemPrompt: "You prepare the weekly support digest.",
-			Kickoff:      "Summarize last week's tickets.",
-			Provider:     "anthropic",
-			Model:        "claude-sonnet-5",
-			MaxTokens:    2048,
-		},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`), Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 
 	signer := token.New([]byte("0123456789abcdef0123456789abcdef"))
@@ -71,7 +65,12 @@ func TestHarnessClientAgainstInternalAPI(t *testing.T) {
 
 	steps, err := client.Context(ctx)
 	require.NoError(t, err)
+	// The context serves the compiled execution form (decision 9), with the
+	// fire occasion appended to the compiled kickoff.
 	require.Equal(t, "anthropic", steps.Provider)
+	require.Equal(t, "You prepare the weekly support digest.", steps.SystemPrompt)
+	require.Contains(t, steps.Kickoff, "Summarize last week's tickets.")
+	require.Contains(t, steps.Kickoff, "fired manually")
 
 	// Context fetch marked the run running.
 	run, err := s.GetRun(ctx, tn.ID, runID)
@@ -105,18 +104,12 @@ func TestInternalAPIAuth(t *testing.T) {
 	user2, err := s.UpsertUser(ctx2, tn.ID, "second@acme.test")
 	require.NoError(t, err)
 	wf2, _, err := s.CreateWorkflow(ctx2, tn.ID, "second workflow", store.VersionDoc{
-		Steps: store.StepsDoc{
-			SystemPrompt: "You prepare the weekly support digest.",
-			Kickoff:      "Summarize last week's tickets.",
-			Provider:     "anthropic",
-			Model:        "claude-sonnet-5",
-			MaxTokens:    2048,
-		},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx2, tn.ID, wf2.ID, 1, user2.ID)
+	_, err = s.ApproveVersion(ctx2, tn.ID, wf2.ID, 1, user2.ID, testCompiledDoc)
 	require.NoError(t, err)
 	otherRunID, otherBearer := mintRun(t, s, signer, tn, wf2)
 	_ = otherRunID
@@ -167,12 +160,12 @@ func TestFinalizeResolvesPerRunCap(t *testing.T) {
 	user, err := s.UpsertUser(ctx, tn.ID, "cap@acme.test")
 	require.NoError(t, err)
 	capped, _, err := s.CreateWorkflow(ctx, tn.ID, "capped", store.VersionDoc{
-		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 100},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"spend":{"per_run_cents":5},"connections":{}}`),
 		Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, capped.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, capped.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 	runID, bearer := mintRun(t, s, signer, tn, capped)
 
@@ -191,4 +184,42 @@ func TestFinalizeResolvesPerRunCap(t *testing.T) {
 		types = append(types, e.Type)
 	}
 	require.Contains(t, types, "spend.exceeded")
+}
+
+// TestContextServesScheduledOccasion: a scheduled run's kickoff names the
+// occurrence it is firing for.
+func TestContextServesScheduledOccasion(t *testing.T) {
+	s, signer, ts, tn, wf := setup(t)
+	ctx := context.Background()
+	runID := uuid.New()
+	bearer, hash, err := signer.Sign(token.RunClaims{
+		RunID: runID, TenantID: tn.ID, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	fireTime := time.Date(2026, 9, 7, 9, 0, 0, 0, time.UTC)
+	_, err = s.CreateRun(ctx, tn.ID, wf.ID, runID, 1, hash, "schedule", &fireTime)
+	require.NoError(t, err)
+
+	client := harness.NewClient(ts.URL, runID, bearer)
+	steps, err := client.Context(ctx)
+	require.NoError(t, err)
+	require.Contains(t, steps.Kickoff, "2026-09-07T09:00:00Z")
+	require.Contains(t, steps.Kickoff, "scheduled occurrence")
+}
+
+// TestContextFailsWithoutCompiled: a run pointing at a version with no
+// compiled document (a draft — approval is what writes compiled) must not
+// serve a context; there is no execution form to run from.
+func TestContextFailsWithoutCompiled(t *testing.T) {
+	s, signer, ts, tn, _ := setup(t)
+	ctx := context.Background()
+	draft, _, err := s.CreateWorkflow(ctx, tn.ID, "still a draft", store.VersionDoc{
+		Steps:  testStepsDoc,
+		Permit: []byte(`{"v":1,"connections":{}}`), Rubric: []byte(`{}`),
+	})
+	require.NoError(t, err)
+	runID, bearer := mintRun(t, s, signer, tn, draft)
+	client := harness.NewClient(ts.URL, runID, bearer)
+	_, err = client.Context(ctx)
+	require.Error(t, err)
 }

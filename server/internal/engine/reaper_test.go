@@ -22,12 +22,12 @@ func TestReaperSweepsStuckRuns(t *testing.T) {
 	user, err := s.UpsertUser(ctx, tn.ID, "pat@acme.test")
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "wf", store.VersionDoc{
-		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 10},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric: []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 
 	stuck := uuid.New()

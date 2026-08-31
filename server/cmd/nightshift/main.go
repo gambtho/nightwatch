@@ -28,6 +28,11 @@
 //	NIGHTSHIFT_PLATFORM_OPENROUTER_KEY
 //	                        platform model credentials, per provider — injected
 //	                        by the egress proxy, never visible to the harness
+//	NIGHTSHIFT_RUN_PROVIDER, NIGHTSHIFT_RUN_MODEL
+//	                        platform-selected execution model compiled into
+//	                        every approved version (decision 9); defaults
+//	                        anthropic / claude-haiku-4-5. Must be a priced
+//	                        pair or approvals 400.
 //	NIGHTSHIFT_RUN_TOKEN_TTL  Go duration, default 1h
 //	NIGHTSHIFT_RUN_DEADLINE   Go duration, default 2h; must exceed
 //	                          NIGHTSHIFT_RUN_TOKEN_TTL — a run whose token
@@ -225,7 +230,11 @@ func serve(ctx context.Context) error {
 	m := &meter.Meter{Store: s, DefaultCap: defaultCap}
 
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer})
+	httpapi.RegisterRoutes(mux, httpapi.Deps{
+		Store: s, Engine: eng, Vault: master, PublicBaseURL: publicBase, Mailer: mailer,
+		RunProvider: os.Getenv("NIGHTSHIFT_RUN_PROVIDER"),
+		RunModel:    os.Getenv("NIGHTSHIFT_RUN_MODEL"),
+	})
 	internalapi.RegisterRoutes(mux, internalapi.Deps{Store: s, Signer: signer})
 
 	adapters := proxyadapter.New(s, signer, master, platform)

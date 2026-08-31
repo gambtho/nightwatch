@@ -9,16 +9,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type StepsDoc struct {
-	SystemPrompt string `json:"system_prompt"`
-	Kickoff      string `json:"kickoff"`
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	MaxTokens    int    `json:"max_tokens"`
-}
-
+// VersionDoc is the user-authored artifacts of a version. Steps is the
+// user-facing v1 document (steps.Parse validates it at the API boundary);
+// the server-derived execution form lives on Version.Compiled, never here.
 type VersionDoc struct {
-	Steps    StepsDoc        `json:"steps"`
+	Steps    json.RawMessage `json:"steps"`
 	Permit   json.RawMessage `json:"permit"`
 	Rubric   json.RawMessage `json:"rubric"`
 	Schedule json.RawMessage `json:"schedule,omitempty"`
@@ -36,26 +31,25 @@ type Version struct {
 	TenantID   uuid.UUID
 	Number     int
 	Doc        VersionDoc
+	// Compiled is the server-derived execution form, written inside the
+	// approval transaction; nil for drafts. The public API never returns it.
+	Compiled   json.RawMessage
 	Status     string
 	ApprovedBy *uuid.UUID
 	ApprovedAt *time.Time
 	CreatedAt  time.Time
 }
 
-const versionCols = `workflow_id, tenant_id, version, steps, permit, rubric,
-	schedule, status, approved_by, approved_at, created_at`
+const versionCols = `workflow_id, tenant_id, version, steps, compiled, permit,
+	rubric, schedule, status, approved_by, approved_at, created_at`
 
 func scanVersion(row pgx.Row) (Version, error) {
 	var v Version
-	var steps []byte
-	err := row.Scan(&v.WorkflowID, &v.TenantID, &v.Number, &steps,
-		&v.Doc.Permit, &v.Doc.Rubric, &v.Doc.Schedule, &v.Status, &v.ApprovedBy,
-		&v.ApprovedAt, &v.CreatedAt)
+	err := row.Scan(&v.WorkflowID, &v.TenantID, &v.Number, &v.Doc.Steps,
+		&v.Compiled, &v.Doc.Permit, &v.Doc.Rubric, &v.Doc.Schedule, &v.Status,
+		&v.ApprovedBy, &v.ApprovedAt, &v.CreatedAt)
 	if err != nil {
 		return v, notFound(err)
-	}
-	if err := json.Unmarshal(steps, &v.Doc.Steps); err != nil {
-		return v, err
 	}
 	return v, nil
 }
@@ -78,16 +72,12 @@ func (s *Store) CreateWorkflow(ctx context.Context, tenantID uuid.UUID, name str
 		return wf, v, err
 	}
 
-	steps, err := json.Marshal(doc.Steps)
-	if err != nil {
-		return wf, v, err
-	}
 	v, err = scanVersion(tx.QueryRow(ctx,
 		`INSERT INTO workflow_version
 		   (workflow_id, tenant_id, version, steps, permit, rubric, schedule)
 		 VALUES ($1, $2, 1, $3, $4, $5, $6)
 		 RETURNING `+versionCols,
-		wf.ID, tenantID, steps, doc.Permit, doc.Rubric, doc.Schedule))
+		wf.ID, tenantID, doc.Steps, doc.Permit, doc.Rubric, doc.Schedule))
 	if err != nil {
 		return wf, v, err
 	}
@@ -95,10 +85,6 @@ func (s *Store) CreateWorkflow(ctx context.Context, tenantID uuid.UUID, name str
 }
 
 func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, doc VersionDoc) (Version, error) {
-	steps, err := json.Marshal(doc.Steps)
-	if err != nil {
-		return Version{}, err
-	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Version{}, err
@@ -123,14 +109,17 @@ func (s *Store) AddVersion(ctx context.Context, tenantID, workflowID uuid.UUID, 
 		        (SELECT COALESCE(MAX(version), 0) + 1 FROM workflow_version WHERE workflow_id = $1),
 		        $3, $4, $5, $6)
 		 RETURNING `+versionCols,
-		workflowID, tenantID, steps, doc.Permit, doc.Rubric, doc.Schedule))
+		workflowID, tenantID, doc.Steps, doc.Permit, doc.Rubric, doc.Schedule))
 	if err != nil {
 		return Version{}, err
 	}
 	return v, tx.Commit(ctx)
 }
 
-func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UUID, number int, approvedBy uuid.UUID) (Version, error) {
+// ApproveVersion marks a draft approved and stores its compiled execution
+// form in the same transaction — an approved row always carries the
+// compiled document its runs will serve.
+func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UUID, number int, approvedBy uuid.UUID, compiled json.RawMessage) (Version, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Version{}, err
@@ -146,11 +135,12 @@ func (s *Store) ApproveVersion(ctx context.Context, tenantID, workflowID uuid.UU
 	}
 	v, err := scanVersion(tx.QueryRow(ctx,
 		`UPDATE workflow_version
-		 SET status = 'approved', approved_by = $3, approved_at = now()
+		 SET status = 'approved', approved_by = $3, approved_at = now(),
+		     compiled = $5
 		 WHERE workflow_id = $1 AND tenant_id = $2 AND version = $4
 		   AND status = 'draft'
 		 RETURNING `+versionCols,
-		workflowID, tenantID, approvedBy, number))
+		workflowID, tenantID, approvedBy, number, compiled))
 	if err != nil {
 		return Version{}, err
 	}

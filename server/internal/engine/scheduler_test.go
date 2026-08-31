@@ -20,13 +20,13 @@ func scheduledSetup(t *testing.T) (*store.Store, *engine.Engine, *fakeCompute, s
 	user, err := s.UpsertUser(ctx, tn.ID, "sched@acme.test")
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "scheduled", store.VersionDoc{
-		Steps:    store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 10},
+		Steps:    testStepsDoc,
 		Permit:   []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric:   []byte(`{}`),
 		Schedule: json.RawMessage(`{"cron":"0 9 * * *","tz":"UTC"}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 	return s, eng, fc, tn, wf
 }
@@ -99,7 +99,7 @@ func TestTickDoesNotWedgeOnImpossibleCron(t *testing.T) {
 	user, err := s.UpsertUser(ctx, tn.ID, "wedge@acme.test")
 	require.NoError(t, err)
 	wf, _, err := s.CreateWorkflow(ctx, tn.ID, "wedge", store.VersionDoc{
-		Steps:  store.StepsDoc{SystemPrompt: "x", Kickoff: "y", Provider: "anthropic", Model: "claude-sonnet-5", MaxTokens: 10},
+		Steps:  testStepsDoc,
 		Permit: []byte(`{"v":1,"llm":{"providers":["anthropic"]},"connections":{}}`),
 		Rubric: []byte(`{}`),
 		// Bypasses schedule.Parse's validation (only enforced at the HTTP
@@ -108,7 +108,7 @@ func TestTickDoesNotWedgeOnImpossibleCron(t *testing.T) {
 		Schedule: json.RawMessage(`{"cron":"0 0 30 2 *","tz":"UTC"}`),
 	})
 	require.NoError(t, err)
-	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID)
+	_, err = s.ApproveVersion(ctx, tn.ID, wf.ID, 1, user.ID, testCompiledDoc)
 	require.NoError(t, err)
 
 	now := time.Date(2026, 9, 7, 9, 0, 30, 0, time.UTC)

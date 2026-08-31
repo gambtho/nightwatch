@@ -6,13 +6,16 @@ package internalapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/gambtho/nightwatch/server/internal/permit"
+	"github.com/gambtho/nightwatch/server/internal/steps"
 	"github.com/gambtho/nightwatch/server/internal/store"
 	"github.com/gambtho/nightwatch/server/internal/token"
 )
@@ -94,6 +97,20 @@ func (d Deps) runContext(w http.ResponseWriter, r *http.Request, claims token.Ru
 		d.fail(w, err)
 		return
 	}
+	// The context serves the compiled execution form, never the user-facing
+	// steps artifact (decision 9). Runs fire only approved versions and
+	// approval writes compiled transactionally, so a missing document is
+	// corrupt data, not a state to run from.
+	if len(version.Compiled) == 0 {
+		d.fail(w, fmt.Errorf("run %s: version %d has no compiled document", run.ID, run.Version))
+		return
+	}
+	var compiled steps.Compiled
+	if err := json.Unmarshal(version.Compiled, &compiled); err != nil {
+		d.fail(w, err)
+		return
+	}
+	compiled.Kickoff += "\n\n" + occasion(run)
 	if err := d.Store.MarkRunRunning(ctx, claims.TenantID, claims.RunID); err != nil {
 		d.fail(w, err)
 		return
@@ -101,10 +118,20 @@ func (d Deps) runContext(w http.ResponseWriter, r *http.Request, claims token.Ru
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"run_id": run.ID,
-		"steps":  version.Doc.Steps,
+		"steps":  compiled,
 	}); err != nil {
 		slog.Error("internalapi: encode context", "err", err)
 	}
+}
+
+// occasion names what fired the run — fixed text assembled from the run
+// row, so the kickoff stays deterministic template output.
+func occasion(run store.Run) string {
+	if run.FireReason == "schedule" && run.FireTime != nil {
+		return "This run is the scheduled occurrence for " +
+			run.FireTime.UTC().Format(time.RFC3339) + "."
+	}
+	return "This run was fired manually."
 }
 
 func (d Deps) appendEvent(w http.ResponseWriter, r *http.Request, claims token.RunClaims) {

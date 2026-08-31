@@ -48,7 +48,7 @@ func mintSessionCookie(t *testing.T, s *store.Store, tenantID, userID uuid.UUID)
 	return httpapi.SessionCookie(value)
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, mods ...func(*httpapi.Deps)) *env {
 	t.Helper()
 	pool := testpg.New(t)
 	s := store.New(pool)
@@ -76,7 +76,11 @@ func newEnv(t *testing.T) *env {
 	base := &url.URL{Scheme: "https", Host: "app.nightshift.test"}
 	mailer := &mailtest.Recorder{}
 	mux := http.NewServeMux()
-	httpapi.RegisterRoutes(mux, httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer})
+	deps := httpapi.Deps{Store: s, Engine: eng, Vault: master, PublicBaseURL: base, Mailer: mailer}
+	for _, mod := range mods {
+		mod(&deps)
+	}
+	httpapi.RegisterRoutes(mux, deps)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return &env{ts: ts, store: s, pool: pool, cookie: cookie, tenant: tn, user: user, compute: fc, vault: master, mailer: mailer, baseURL: base}
@@ -103,31 +107,28 @@ func workflowBody() map[string]any {
 	return map[string]any{
 		"name": "weekly digest",
 		"steps": map[string]any{
-			"system_prompt": "You prepare the weekly support digest.",
-			"kickoff":       "Summarize last week's tickets.",
-			"provider":      "anthropic",
-			"model":         "claude-sonnet-5",
-			"max_tokens":    2048,
+			"v": 1,
+			"steps": []map[string]any{
+				{"id": "gather", "text": "Look at last week's support tickets."},
+				{"id": "post-digest", "text": "Post a short digest in #team-digest."},
+			},
 		},
 		"permit": map[string]any{"v": 1, "llm": map[string]any{"providers": []string{"anthropic"}}, "connections": map[string]any{}},
 		"rubric": map[string]any{"rules": []string{"under a page"}},
 	}
 }
 
-// TestApproveRejectsUnpricedDraft: a draft persisted before a price-table
-// change must not become approved. decodeDoc blocks writing an unpriced
-// model through the API, so simulate the stale draft with direct SQL.
-func TestApproveRejectsUnpricedDraft(t *testing.T) {
-	e := newEnv(t)
+// TestApproveRejectsUnpricedPlatformModel: since decision 9 the model is
+// platform policy, so the unpriced-model 400 fires at approval against the
+// configured run model, and a misconfigured platform cannot promote drafts.
+func TestApproveRejectsUnpricedPlatformModel(t *testing.T) {
+	e := newEnv(t, func(d *httpapi.Deps) {
+		d.RunProvider, d.RunModel = "anthropic", "claude-imaginary-9"
+	})
 
 	resp, out := e.do(t, "POST", "/v1/workflows", workflowBody())
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	id := out["workflow"].(map[string]any)["id"].(string)
-
-	_, err := e.pool.Exec(context.Background(),
-		`UPDATE workflow_version SET steps = jsonb_set(steps, '{model}', '"claude-legacy-1"')
-		 WHERE workflow_id = $1`, id)
-	require.NoError(t, err)
 
 	resp, out = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/versions/1/approve", id), nil)
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -137,6 +138,38 @@ func TestApproveRejectsUnpricedDraft(t *testing.T) {
 	v, err := e.store.GetVersion(context.Background(), e.tenant.ID, uuid.MustParse(id), 1)
 	require.NoError(t, err)
 	require.Equal(t, "draft", v.Status)
+}
+
+// TestApproveCompilesExecutionForm: approval writes the server-derived
+// compiled document (the approved step text verbatim, platform model,
+// compiler_v stamp) while the public API keeps returning the user-facing
+// artifact and never the compiled form.
+func TestApproveCompilesExecutionForm(t *testing.T) {
+	e := newEnv(t)
+
+	resp, out := e.do(t, "POST", "/v1/workflows", workflowBody())
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	id := out["workflow"].(map[string]any)["id"].(string)
+
+	resp, out = e.do(t, "POST", fmt.Sprintf("/v1/workflows/%s/versions/1/approve", id), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	version := out["version"].(map[string]any)
+	require.NotContains(t, version, "compiled")
+	stepsDoc := version["steps"].(map[string]any)
+	require.Equal(t, float64(1), stepsDoc["v"])
+	require.Len(t, stepsDoc["steps"], 2)
+
+	v, err := e.store.GetVersion(context.Background(), e.tenant.ID, uuid.MustParse(id), 1)
+	require.NoError(t, err)
+	var compiled map[string]any
+	require.NoError(t, json.Unmarshal(v.Compiled, &compiled))
+	require.Equal(t, float64(1), compiled["compiler_v"])
+	require.Equal(t, httpapi.DefaultRunProvider, compiled["provider"])
+	require.Equal(t, httpapi.DefaultRunModel, compiled["model"])
+	require.Contains(t, compiled["system_prompt"], "1. Look at last week's support tickets.")
+	require.Contains(t, compiled["system_prompt"], "2. Post a short digest in #team-digest.")
+	require.Contains(t, compiled["system_prompt"], "under a page")
+	require.Greater(t, compiled["max_tokens"], float64(0))
 }
 
 func TestWorkflowEndpoints(t *testing.T) {
@@ -191,13 +224,40 @@ func TestCreateWorkflowRejectsInvalidPermit(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
-func TestCreateWorkflowRejectsUnpricedModel(t *testing.T) {
+// Execution fields in a steps document are the reserved v1 break, spent:
+// rejected, not ignored (decision 9).
+func TestCreateWorkflowRejectsExecutionFields(t *testing.T) {
 	e := newEnv(t)
-	body := workflowBody()
-	body["steps"].(map[string]any)["model"] = "claude-imaginary-9"
-	resp, out := e.do(t, "POST", "/v1/workflows", body)
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.Contains(t, out["error"], "pricing")
+	for name, doc := range map[string]map[string]any{
+		"system_prompt": {"v": 1, "system_prompt": "x", "steps": []map[string]any{{"id": "a", "text": "b"}}},
+		"provider":      {"v": 1, "provider": "anthropic", "steps": []map[string]any{{"id": "a", "text": "b"}}},
+		"model":         {"v": 1, "model": "claude-sonnet-5", "steps": []map[string]any{{"id": "a", "text": "b"}}},
+		"max_tokens":    {"v": 1, "max_tokens": 2048, "steps": []map[string]any{{"id": "a", "text": "b"}}},
+	} {
+		body := workflowBody()
+		body["steps"] = doc
+		resp, _ := e.do(t, "POST", "/v1/workflows", body)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, name)
+	}
+}
+
+func TestCreateWorkflowRejectsInvalidSteps(t *testing.T) {
+	e := newEnv(t)
+	for name, stepsVal := range map[string]any{
+		"missing":      nil,
+		"empty list":   map[string]any{"v": 1, "steps": []map[string]any{}},
+		"bad id":       map[string]any{"v": 1, "steps": []map[string]any{{"id": "Not A Slug", "text": "b"}}},
+		"duplicate id": map[string]any{"v": 1, "steps": []map[string]any{{"id": "a", "text": "b"}, {"id": "a", "text": "c"}}},
+	} {
+		body := workflowBody()
+		if stepsVal == nil {
+			delete(body, "steps")
+		} else {
+			body["steps"] = stepsVal
+		}
+		resp, _ := e.do(t, "POST", "/v1/workflows", body)
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode, name)
+	}
 }
 
 func TestWorkflowScheduleValidation(t *testing.T) {
